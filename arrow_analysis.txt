@@ -1,0 +1,46 @@
+♟️  CHESS ANALYSIS FOR ARROW
+======================================================================
+
+Games analyzed: 5
+Total moves: 160
+Timestamp: 2025-12-22 17:53:30
+
+📊 METRICS (Lower CPL = Stronger Play)
+----------------------------------------------------------------------
+Avg Centipawn Loss (CPL):    245.3 cp/move
+Recent CPL Trend:          N/A (insufficient game history)
+Blunders:                        5 (3.1 per 100 moves)
+Avg blunder severity:         2423 cp
+Worst blunder:                9356 cp
+Mistakes:                       10 (6.2 per 100 moves)
+
+🎯 BY PHASE (Opening: moves 1-10, Middlegame: 11-30, Endgame: 31+)
+----------------------------------------------------------------------
+Phase                CPL  Blunders  Games Reached +1.0
+----------------------------------------------------------------------
+Opening             29.8         0      5        60.0%
+Middlegame         233.8         5      5        40.0%
+Endgame             54.4         0      4        75.0%
+
+  * Reached +1.0 Eval: Represents games where the player reached a winning position
+    during that phase, not necessarily converted it.
+
+💡 PHASE INTERPRETATION
+----------------------------------------------------------------------
+• Your opening play is relatively stable (CPL: 29.8 cp/move).
+• The middlegame shows the most room for improvement (CPL: 233.8 cp/move).
+• Pattern: severe accuracy drops in the middlegame, accounting for 100% of all blunders.
+
+
+🧠 COACH SUMMARY
+======================================================================
+• Primary weakness: Middlegame accuracy
+  (CPL: 233.8 cp/move, 100% of blunders)
+• Cause: Large centipawn swings in Middlegame phase
+  (Average blunder: −2423 cp, Worst: −9356 cp)
+• Pattern: High blunder concentration in middlegame (100%)
+• Strength: Stable openings with low CPL (29.8 cp/move)
+• Training focus:
+  - Tactical puzzle solving and pattern recognition
+  - Position evaluation and planning
+  - Double-check calculations before moves

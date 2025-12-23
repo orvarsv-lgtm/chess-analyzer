@@ -1,0 +1,42 @@
+♟️  CHESS ANALYSIS FOR ATLI
+======================================================================
+
+Games analyzed: 2
+Total moves: 124
+Timestamp: 2025-12-22 17:36:20
+
+📊 METRICS (Lower CPL = Stronger Play)
+----------------------------------------------------------------------
+Avg Centipawn Loss (CPL):    229.9 cp/move
+Recent CPL Trend:          N/A (insufficient history)
+Blunders:                       11 (8.9 per 100 moves)
+Mistakes:                       31 (25.0 per 100 moves)
+
+🎯 BY PHASE (Opening: moves 1-10, Middlegame: 11-30, Endgame: 31+)
+----------------------------------------------------------------------
+Phase                CPL  Blunders  Games Positions ≥+1.0
+----------------------------------------------------------------------
+Opening             92.3         2      2           50.0%
+Middlegame         162.1         4      2           50.0%
+Endgame            248.1         5      2           50.0%
+
+  * Positions ≥+1.0 Eval: Represents games where you held a winning advantage
+    (evaluation +100 cp or better) at the end of that phase.
+
+💡 PHASE INTERPRETATION
+----------------------------------------------------------------------
+• Your opening play is relatively stable (CPL: 92.3 cp/move).
+• The endgame shows the most room for improvement (CPL: 248.1 cp/move).
+• Pattern: most blunders (45%) occur in the endgame.
+
+🧠 COACH SUMMARY
+======================================================================
+• Performance Level: Fair – room for improvement in calculation
+• Primary Weakness: Endgame accuracy
+  (CPL: 248.1 cp/move, 45% of blunders)
+• Key Issue: Moderate blunder frequency (8.9 per 100 moves)
+  → Recommendation: Focus on double-checking tactics before moving
+• Strength: Opening consistency (CPL: 92.3 cp/move)
+• Training Focus: Endgame technique and simplification
+• Trend: N/A
+  → (insufficient history)

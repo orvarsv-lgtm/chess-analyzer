@@ -1,0 +1,46 @@
+♟️  CHESS ANALYSIS FOR ARI
+======================================================================
+
+Games analyzed: 25
+Total moves: 541
+Timestamp: 2025-12-22 17:56:23
+
+📊 METRICS (Lower CPL = Stronger Play)
+----------------------------------------------------------------------
+Avg Centipawn Loss (CPL):    145.3 cp/move
+Recent CPL Trend:          ↑ improving (recent 3 games avg 71.0 vs prior 3 games avg 81.5)
+Blunders:                       32 (5.9 per 100 moves)
+Avg blunder severity:         1299 cp
+Worst blunder:               10000 cp
+Mistakes:                       58 (10.7 per 100 moves)
+
+🎯 BY PHASE (Opening: moves 1-10, Middlegame: 11-30, Endgame: 31+)
+----------------------------------------------------------------------
+Phase                CPL  Blunders  Games Reached +1.0
+----------------------------------------------------------------------
+Opening             53.8         3     25        48.0%
+Middlegame         179.6        23     23        39.1%
+Endgame            237.4         6      7        57.1%
+
+  * Reached +1.0 Eval: Represents games where the player reached a winning position
+    during that phase, not necessarily converted it.
+
+💡 PHASE INTERPRETATION
+----------------------------------------------------------------------
+• Your opening play is relatively stable (CPL: 53.8 cp/move).
+• The endgame shows the most room for improvement (CPL: 237.4 cp/move).
+• Pattern: severe accuracy drops in the middlegame, accounting for 72% of all blunders.
+
+
+🧠 COACH SUMMARY
+======================================================================
+• Primary weakness: Endgame accuracy
+  (CPL: 237.4 cp/move, 72% of blunders)
+• Cause: Large centipawn swings in Endgame phase
+  (Average blunder: −1299 cp, Worst: −10000 cp)
+• Pattern: High blunder concentration in middlegame (72%)
+• Strength: Stable openings with low CPL (53.8 cp/move)
+• Training focus:
+  - Endgame technique and simplification
+  - Converting +1.0 positions into wins
+  - Calculation accuracy in final phase
