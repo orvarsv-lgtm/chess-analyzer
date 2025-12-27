@@ -1,47 +1,74 @@
 Phase 2 Analysis Summary
 ============================================================
-Player: ari
-  Games analyzed: 10
-  CPL: 208.0 cp | Recent: 208.0 cp | Trend: ↑ improving
-  Blunders: 15 | Mistakes: 13
+Player: john
+  Games analyzed: 5
+  CPL: 42.4 cp | Recent: 43.7 cp | Trend: N/A
+  Blunders: 0 | Mistakes: 7
   By Phase:
-    opening: CPL=63.0 cp, Blunders=2
-    middlegame: CPL=423.3 cp, Blunders=13
-    endgame: CPL=0 cp, Blunders=0
+    opening: CPL=26.1 cp, Blunders=0
+    middlegame: CPL=49.9 cp, Blunders=0
+    endgame: CPL=87.2 cp, Blunders=0
+  Coach Summary:
+    Weakest Phase: Accuracy (no major blunders detected)
+    Focus: Improve overall accuracy and reduce centipawn loss.
 
-Player: atli
-  Games analyzed: 2
-  CPL: 229.9 cp | Recent: 229.9 cp | Trend: N/A
-  Blunders: 11 | Mistakes: 31
+Player: smmerset
+  Games analyzed: 4
+  CPL: 42.8 cp | Recent: 46.0 cp | Trend: N/A
+  Blunders: 0 | Mistakes: 4
   By Phase:
-    opening: CPL=123.6 cp, Blunders=3
-    middlegame: CPL=144.2 cp, Blunders=4
-    endgame: CPL=289.8 cp, Blunders=4
+    opening: CPL=42.6 cp, Blunders=0
+    middlegame: CPL=42.8 cp, Blunders=0
+    endgame: CPL=38.2 cp, Blunders=0
+  Coach Summary:
+    Weakest Phase: Accuracy (no major blunders detected)
+    Focus: Improve overall accuracy and reduce centipawn loss.
 
 Player: arrow
-  Games analyzed: 10
-  CPL: 281.6 cp | Recent: 281.6 cp | Trend: ↓ declining
-  Blunders: 31 | Mistakes: 36
+  Games analyzed: 5
+  CPL: 49.8 cp | Recent: 51.2 cp | Trend: N/A
+  Blunders: 0 | Mistakes: 8
   By Phase:
-    opening: CPL=128.2 cp, Blunders=3
-    middlegame: CPL=87.2 cp, Blunders=11
-    endgame: CPL=467.4 cp, Blunders=17
+    opening: CPL=29.8 cp, Blunders=0
+    middlegame: CPL=57.1 cp, Blunders=0
+    endgame: CPL=52.2 cp, Blunders=0
+  Coach Summary:
+    Weakest Phase: Accuracy (no major blunders detected)
+    Focus: Improve overall accuracy and reduce centipawn loss.
 
-Player: john
+Player: ari
   Games analyzed: 10
-  CPL: 377.4 cp | Recent: 377.4 cp | Trend: ↓ declining
-  Blunders: 41 | Mistakes: 49
+  CPL: 59.6 cp | Recent: 51.0 cp | Trend: → stable
+  Blunders: 0 | Mistakes: 10
   By Phase:
-    opening: CPL=42.5 cp, Blunders=1
-    middlegame: CPL=302.9 cp, Blunders=8
-    endgame: CPL=493.6 cp, Blunders=32
+    opening: CPL=48.0 cp, Blunders=0
+    middlegame: CPL=80.1 cp, Blunders=0
+    endgame: CPL=0.0 cp, Blunders=0
+  Coach Summary:
+    Weakest Phase: Accuracy (no major blunders detected)
+    Focus: Improve overall accuracy and reduce centipawn loss.
 
 Player: rocket
   Games analyzed: 7
-  CPL: 684.1 cp | Recent: 684.1 cp | Trend: N/A
-  Blunders: 21 | Mistakes: 24
+  CPL: 75.5 cp | Recent: 100.8 cp | Trend: ↓ declining
+  Blunders: 0 | Mistakes: 16
   By Phase:
-    opening: CPL=321.6 cp, Blunders=7
-    middlegame: CPL=562.4 cp, Blunders=10
-    endgame: CPL=1050.4 cp, Blunders=4
+    opening: CPL=79.6 cp, Blunders=0
+    middlegame: CPL=82.1 cp, Blunders=0
+    endgame: CPL=0.0 cp, Blunders=0
+  Coach Summary:
+    Weakest Phase: Accuracy (no major blunders detected)
+    Focus: Improve overall accuracy and reduce centipawn loss.
+
+Player: atli
+  Games analyzed: 2
+  CPL: 78.7 cp | Recent: 78.7 cp | Trend: N/A
+  Blunders: 0 | Mistakes: 8
+  By Phase:
+    opening: CPL=53.6 cp, Blunders=0
+    middlegame: CPL=187.4 cp, Blunders=0
+    endgame: CPL=0.0 cp, Blunders=0
+  Coach Summary:
+    Weakest Phase: Accuracy (no major blunders detected)
+    Focus: Improve overall accuracy and reduce centipawn loss.
 

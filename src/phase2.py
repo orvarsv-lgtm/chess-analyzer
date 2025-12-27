@@ -75,6 +75,9 @@ def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', out
             'total_blunders': overall['total_blunders'],
             'total_mistakes': overall['total_mistakes'],
             'phase_stats': phase_stats,
+            'weakest_phase': overall.get('weakest_phase', 'N/A'),
+            'max_blunder_severity': overall.get('max_blunder_severity', 0),
+            'avg_blunder_severity': overall.get('avg_blunder_severity', 0),
         }
 
         results.append(summary)
@@ -114,6 +117,7 @@ def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', out
                     fh.write(f"    Weakest Phase: {weakest_phase}\n")
                     fh.write(f"    Blunder Severity: max {max_blunder_severity} cp, avg {avg_blunder_severity} cp\n")
                 fh.write('\n')
+        fh.flush()
 
     # If we have combined rows, compute opening & time-control stats
     if combined_df_rows:

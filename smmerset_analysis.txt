@@ -1,18 +1,18 @@
 ♟️  CHESS ANALYSIS FOR SMMERSET
 ======================================================================
 
-Games analyzed: 3
-Total moves: 68
-Timestamp: 2025-12-23 16:26:29
+Games analyzed: 4
+Total moves: 75
+Timestamp: 2025-12-23 18:00:19
 
 📊 METRICS (Lower CPL = Stronger Play)
 ----------------------------------------------------------------------
-Avg Centipawn Loss (CPL):     46.0 cp/move
-Recent CPL Trend:          N/A (insufficient history)
+Avg Centipawn Loss (CPL):     42.8 cp/move
+Recent CPL Trend:          N/A (insufficient game history)
 Blunders:                        0 (0.0 per 100 moves)
 Avg blunder severity:            0 cp
 Worst blunder:                   0 cp
-Mistakes:                        4 (5.9 per 100 moves)
+Mistakes:                        4 (5.3 per 100 moves)
 Best piece:                   King
 Worst piece:                 Queen
 
@@ -20,7 +20,7 @@ Worst piece:                 Queen
 ----------------------------------------------------------------------
 Phase                CPL  Blunders  Games Reached +1.0
 ----------------------------------------------------------------------
-Opening             45.6         0      3         0.0%
+Opening             42.6         0      4         0.0%
 Middlegame          42.8         0      3        33.3%
 Endgame             38.2         0      1          N/A
 
@@ -30,13 +30,13 @@ Endgame             38.2         0      1          N/A
 💡 PHASE INTERPRETATION
 ----------------------------------------------------------------------
 • Your endgame play is relatively stable (CPL: 38.2 cp/move).
-• The opening shows the most room for improvement (CPL: 45.6 cp/move).
+• The middlegame shows the most room for improvement (CPL: 42.8 cp/move).
 • Pattern: no significant blunders recorded.
 
 
 🧠 COACH SUMMARY
 ======================================================================
-• Primary weakness: Opening play
-  (CPL: 45.6 cp/move)
-• Cause: Large centipawn swings in Opening phase
+• Primary weakness: Middlegame play
+  (CPL: 42.8 cp/move)
+• Cause: Large centipawn swings in Middlegame phase
   (Average blunder: −0 cp, Worst: −0 cp)

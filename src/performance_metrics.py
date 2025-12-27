@@ -253,10 +253,9 @@ def compute_overall_cpl(games_data: list) -> dict:
     
     # Determine weakest phase
     phase_stats = aggregate_cpl_by_phase(games_data)
+    weakest_phase = max(phase_stats.keys(), key=lambda p: phase_stats[p]["cpl"])
     if total_blunders == 0:
         weakest_phase = "Accuracy (no major blunders detected)"
-    else:
-        weakest_phase = max(phase_stats.keys(), key=lambda p: phase_stats[p]["cpl"])
 
     # Compute best and worst piece usage by average cp_loss (lower = better)
     best_piece = "N/A"

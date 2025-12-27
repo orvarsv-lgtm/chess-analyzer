@@ -1,3 +1,9 @@
 opening_name,wins,games,avg_elo,win_rate
-Unknown,4,9,1212.8,44.4
+Unknown,6,14,1424.4,42.9
+French Defence,2,4,1781.0,50.0
 Reti Opening,0,3,1141.0,0.0
+French Defence: Standard,1,1,1861.0,100.0
+Sicilian Defence,1,1,1728.0,100.0
+Caro-Kann Defence,0,1,1513.0,0.0
+Ruy Lopez: Morphy Defence,0,1,1888.0,0.0
+Sicilian: Closed Variation,0,1,1724.0,0.0
