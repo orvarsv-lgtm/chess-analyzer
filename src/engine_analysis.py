@@ -18,7 +18,9 @@ def classify_move(cp_loss):
         return "Mistake"
     else:
         return "Blunder"
-def classify_blunder(board, move, eval_before, eval_after):
+
+
+def classify_blunder(board_before, board_after, move, eval_before, eval_after, phase: str | None = None):
     """
     Classify a blunder into one of:
     - "Hanging piece"
@@ -27,62 +29,80 @@ def classify_blunder(board, move, eval_before, eval_after):
     - "Endgame technique"
     - "Unknown"
     Args:
-        board: chess.Board before the move
+        board_before: chess.Board before the move
+        board_after: chess.Board after the move
         move: chess.Move played
         eval_before: evaluation before move (centipawns)
         eval_after: evaluation after move (centipawns)
+        phase: optional phase label ("opening"|"middlegame"|"endgame")
     Returns:
         blunder_type (str)
     """
     import chess
-    # Heuristic: Hanging piece
-    # If a piece is captured and not recaptured next move, and material drops
-    piece_lost = False
-    if board.is_capture(move):
-        # What piece is being captured?
-        captured_piece = board.piece_at(move.to_square)
-        if captured_piece and captured_piece.piece_type != chess.PAWN:
-            # Check if material drops after the move
-            board_copy = board.copy()
-            board_copy.push(move)
-            material_before = sum([piece.piece_type for piece in board.piece_map().values()])
-            material_after = sum([piece.piece_type for piece in board_copy.piece_map().values()])
-            if material_after < material_before:
-                piece_lost = True
-    if piece_lost:
-        return "Hanging piece"
 
-    # Heuristic: Endgame technique
-    # If few pieces remain and eval swing > 200 cp
-    board_copy = board.copy()
-    board_copy.push(move)
-    non_pawn_pieces = sum(1 for p in board_copy.piece_map().values() if p.piece_type != chess.PAWN)
-    if non_pawn_pieces <= 6 and abs(eval_before - eval_after) > 200:
+    def _total_material_value(b) -> int:
+        values = {
+            chess.PAWN: 1,
+            chess.KNIGHT: 3,
+            chess.BISHOP: 3,
+            chess.ROOK: 5,
+            chess.QUEEN: 9,
+        }
+        total = 0
+        for pt, val in values.items():
+            total += val * (len(b.pieces(pt, chess.WHITE)) + len(b.pieces(pt, chess.BLACK)))
+        return total
+
+    swing = abs(eval_before - eval_after)
+
+    # Heuristic: Endgame technique (low material / endgame phase + large swing)
+    if (phase == "endgame" or _total_material_value(board_after) <= 13) and swing > 200:
         return "Endgame technique"
 
-    # Heuristic: Missed tactic
-    # If eval swing > 300 and best move is tactical (capture, check, threat)
-    if abs(eval_before - eval_after) > 300:
-        # Try to find if best move is tactical
-        # We'll assume best move is a capture or check if available
-        for candidate in board.legal_moves:
-            if board.is_capture(candidate) or board.gives_check(candidate):
-                return "Missed tactic"
+    # Heuristic: Hanging piece (moved non-pawn piece ends up under-defended)
+    try:
+        moved_piece = board_after.piece_at(move.to_square)
+        if moved_piece and moved_piece.piece_type not in (chess.PAWN, chess.KING):
+            opponent = board_after.turn
+            attackers = board_after.attackers(opponent, move.to_square)
+            defenders = board_after.attackers(not opponent, move.to_square)
+            if len(attackers) > 0 and len(attackers) > len(defenders):
+                return "Hanging piece"
+    except Exception:
+        pass
 
-    # Heuristic: King safety
-    # If king is exposed after move, or new checks/mating threats appear
-    board_copy = board.copy()
-    board_copy.push(move)
-    king_square = board_copy.king(board.turn)
-    if king_square is not None:
-        attackers = board_copy.attackers(not board.turn, king_square)
-        if len(attackers) > 0:
-            return "King safety"
+    # Heuristic: King safety (king becomes more attacked after the move)
+    try:
+        mover = not board_after.turn
+        k_after = board_after.king(mover)
+        k_before = board_before.king(mover)
+        if k_after is not None and k_before is not None:
+            attackers_after = len(board_after.attackers(board_after.turn, k_after))
+            attackers_before = len(board_before.attackers(not mover, k_before))
+            if attackers_after > 0 and attackers_after > attackers_before:
+                return "King safety"
+    except Exception:
+        pass
+
+    # Heuristic: Missed tactic (large swing and there existed a forcing move)
+    if swing > 300:
+        try:
+            for cand in board_before.legal_moves:
+                if board_before.gives_check(cand):
+                    return "Missed tactic"
+                if board_before.is_capture(cand):
+                    captured = board_before.piece_at(cand.to_square)
+                    if captured and captured.piece_type != chess.PAWN:
+                        return "Missed tactic"
+        except Exception:
+            pass
 
     return "Unknown"
 import chess
 import chess.engine
-from .performance_metrics import classify_move_phase
+from .performance_metrics import classify_phase_stable
+
+DEBUG_ENGINE = False
 
 # Stockfish configuration
 STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
@@ -91,6 +111,11 @@ ANALYSIS_DEPTH = 15
 # Centipawn thresholds
 BLUNDER_THRESHOLD = 300
 MISTAKE_THRESHOLD = 150
+PHASE_THRESHOLDS = {
+    "opening": {"blunder": 260, "mistake": 120},
+    "middlegame": {"blunder": BLUNDER_THRESHOLD, "mistake": MISTAKE_THRESHOLD},
+    "endgame": {"blunder": 220, "mistake": 110},
+}
 
 
 def analyze_game_detailed(moves_pgn_str):
@@ -125,34 +150,40 @@ def analyze_game_detailed(moves_pgn_str):
     try:
         move_evals = []
         board = chess.Board()
+        phase_cache: dict[int, str] = {}
+        prev_phase: str | None = None
 
         def _score_to_cp(info):
-            """Return evaluation in centipawns from White's POV, capped at 10000."""
+            """Return (centipawns, is_mate) from White's POV, capped at 10000."""
             score = info.get("score")
             if score is None:
-                return None
+                return None, False
             try:
                 if score.is_mate():
                     mate_val = score.pov(chess.WHITE).mate()
                     if mate_val is None:
-                        return None
-                    return 10000 if mate_val > 0 else -10000
+                        return None, False
+                    cp_val = 10000 if mate_val > 0 else -10000
+                    return cp_val, True
                 cp = score.pov(chess.WHITE).cp
                 if cp is None:
-                    return None
+                    return None, False
                 if cp > 10000:
-                    return 10000
+                    cp = 10000
                 if cp < -10000:
-                    return -10000
-                return cp
+                    cp = -10000
+                return cp, False
             except Exception:
-                return None
+                return None, False
 
         for move_index, move_san in enumerate(moves):
             try:
                 # eval before the move
                 info_before = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH))
-                eval_before = _score_to_cp(info_before)
+                eval_before, is_mate_before = _score_to_cp(info_before)
+
+                # Keep board snapshot for heuristics (no extra engine calls)
+                board_before = board.copy()
 
                 # parse SAN and push move
                 try:
@@ -176,6 +207,7 @@ def analyze_game_detailed(moves_pgn_str):
                     piece_name = 'Unknown'
 
                 board.push(move_obj)
+                board_after = board.copy()
 
                 # eval after the move
                 try:
@@ -183,7 +215,7 @@ def analyze_game_detailed(moves_pgn_str):
                 except Exception:
                     break
 
-                eval_after = _score_to_cp(info_after)
+                eval_after, is_mate_after = _score_to_cp(info_after)
 
                 # If we couldn't obtain evals, skip
                 if eval_before is None or eval_after is None:
@@ -198,45 +230,89 @@ def analyze_game_detailed(moves_pgn_str):
                 else:
                     cp_loss = eval_after - eval_before
 
-                # Classify move quality
+                move_number = (move_index // 2) + 1
+                move_color = "White" if is_white_move else "Black"
+
+                # Board-state phase classification (stable, cached)
+                ply = move_index + 1
+                phase = phase_cache.get(ply)
+                if phase is None:
+                    phase = classify_phase_stable(board_after, move_number, prev_phase)
+                    phase_cache[ply] = phase
+                prev_phase = phase
+
+                # Mate handling: separate from CPL aggregation
+                missed_mate = False
+                forced_loss = False
+                is_mate_eval = is_mate_before or is_mate_after or abs(eval_before) >= 9000 or abs(eval_after) >= 9000
+                if is_mate_eval:
+                    if (is_white_move and eval_before is not None and eval_before >= 9000) or (not is_white_move and eval_before is not None and eval_before <= -9000):
+                        if not (is_mate_after or (is_white_move and eval_after is not None and eval_after >= 5000) or ((not is_white_move) and eval_after is not None and eval_after <= -5000)):
+                            missed_mate = True
+                    if (is_white_move and eval_before is not None and eval_before <= -9000) or (not is_white_move and eval_before is not None and eval_before >= 9000):
+                        forced_loss = True
+                    if DEBUG_ENGINE:
+                        print(f"[mate-excluded] move {move_number} {move_color} {move_san} eval_before={eval_before} eval_after={eval_after}")
+
+                cp_loss_capped = 0
+                cp_loss_weighted = 0.0
+                if not is_mate_eval and cp_loss > 0:
+                    cp_loss_capped = min(int(abs(cp_loss)), 10000)
+                    eval_before_player = eval_before if is_white_move else -eval_before
+
+                    # Context-aware weighting: losing states count less; winning endgames count more.
+                    cpl_weight = 1.0
+                    if forced_loss:
+                        cpl_weight = 0.25
+                    elif eval_before_player <= -600:
+                        cpl_weight = 0.5
+                    elif eval_before_player < -300:
+                        cpl_weight = 0.7
+                    elif eval_before_player > 100:
+                        cpl_weight = 1.3
+
+                    if phase == "endgame":
+                        if eval_before_player >= 150:
+                            cpl_weight *= 1.3
+                        elif eval_before_player <= -150:
+                            cpl_weight *= 0.6
+
+                    cp_loss_weighted = cp_loss_capped * cpl_weight
 
                 blunder_type = None
                 blunder_subtype = None
-                if cp_loss >= BLUNDER_THRESHOLD:
+                thresholds = PHASE_THRESHOLDS.get(phase, {"blunder": BLUNDER_THRESHOLD, "mistake": MISTAKE_THRESHOLD})
+                loss_for_threshold = cp_loss_capped
+
+                if loss_for_threshold >= thresholds.get("blunder", BLUNDER_THRESHOLD):
                     blunder_type = "blunder"
-                    # Classify blunder subtype
-                    blunder_subtype = classify_blunder(board, move_obj, eval_before, eval_after)
-                elif cp_loss >= MISTAKE_THRESHOLD:
+                    blunder_subtype = classify_blunder(board_before, board_after, move_obj, eval_before, eval_after, phase)
+                elif loss_for_threshold >= thresholds.get("mistake", MISTAKE_THRESHOLD):
                     blunder_type = "mistake"
-                elif cp_loss > 0:
+                else:
                     blunder_type = "inaccuracy"
 
-                # normalize to positive loss when player made worse move
-                if cp_loss > 0:
-                    # cap cp_loss to avoid skew
-                    cp_loss_capped = min(int(abs(cp_loss)), 10000)
+                move_quality = classify_move(cp_loss_capped) if cp_loss_capped > 0 else "Best"
+                move_data = {
+                    "move_num": move_number,
+                    "color": move_color,
+                    "san": move_san,
+                    "cp_loss": cp_loss_capped,
+                    "cp_loss_weighted": cp_loss_weighted,
+                    "piece": piece_name,
+                    "phase": phase,
+                    "blunder_type": blunder_type,
+                    "blunder_subtype": blunder_subtype,
+                    "move_quality": move_quality,
+                    "eval_before": eval_before,
+                    "eval_after": eval_after,
+                    "is_mate_before": is_mate_before,
+                    "is_mate_after": is_mate_after,
+                    "missed_mate": missed_mate,
+                    "forced_loss": forced_loss,
+                }
 
-                    move_number = (move_index // 2) + 1
-                    move_color = "White" if is_white_move else "Black"
-                    phase = classify_move_phase(move_index)
-
-
-                    move_quality = classify_move(cp_loss_capped)
-                    move_data = {
-                        "move_num": move_number,
-                        "color": move_color,
-                        "san": move_san,
-                        "cp_loss": cp_loss_capped,
-                        "piece": piece_name,
-                        "phase": phase,
-                        "blunder_type": blunder_type,
-                        "blunder_subtype": blunder_subtype,
-                        "move_quality": move_quality,
-                        "eval_before": eval_before,
-                        "eval_after": eval_after,
-                    }
-
-                    move_evals.append(move_data)
+                move_evals.append(move_data)
 
             except Exception:
                 break
@@ -248,13 +324,79 @@ def analyze_game_detailed(moves_pgn_str):
 
 
 def analyze_game(moves_pgn_str):
-    # (Optional) Move quality by phase
+    """
+    Analyze a game using Stockfish and print results (backward compatibility).
+    
+    Args:
+        moves_pgn_str: Space-separated SAN moves
+            
+    Returns:
+        None (prints analysis to stdout)
+    """
+    from collections import Counter
+    
+    move_evals = analyze_game_detailed(moves_pgn_str)
+    
+    if not move_evals:
+        print("\n⚠️  No moves available for analysis.")
+        return
+
+    # Extract blunders and mistakes for printing
+    blunders = [m for m in move_evals if m["blunder_type"] == "blunder"]
+    mistakes = [m for m in move_evals if m["blunder_type"] == "mistake"]
+    cp_losses = [m["cp_loss"] for m in move_evals]
+
+    # Aggregate move quality counts and percentages
+    move_qualities = [m.get("move_quality") for m in move_evals if m.get("move_quality")]
+    total_moves = len(move_qualities)
+    quality_order = ["Best", "Excellent", "Good", "Inaccuracy", "Mistake", "Blunder"]
+    quality_counts = Counter(move_qualities)
+    quality_stats = []
+    if total_moves > 0:
+        for q in quality_order:
+            count = quality_counts.get(q, 0)
+            percent = int(round(100 * count / total_moves))
+            quality_stats.append((q, count, percent))
+
+    # Move quality by phase
     phase_quality = {"opening": Counter(), "middlegame": Counter(), "endgame": Counter()}
     for m in move_evals:
         q = m.get("move_quality")
         p = m.get("phase")
         if q and p in phase_quality:
             phase_quality[p][q] += 1
+
+    # Aggregate blunder subtypes
+    blunder_subtypes = [m["blunder_subtype"] for m in blunders if m["blunder_subtype"]]
+    subtype_counts = Counter(blunder_subtypes)
+    total_blunders = len(blunders)
+    blunder_type_stats = []
+    if total_blunders > 0:
+        for subtype, count in subtype_counts.items():
+            percent = int(round(100 * count / total_blunders))
+            blunder_type_stats.append((subtype, count, percent))
+        unknown_count = sum(1 for m in blunders if not m["blunder_subtype"] or m["blunder_subtype"] == "Unknown")
+        if unknown_count > 0:
+            percent = int(round(100 * unknown_count / total_blunders))
+            blunder_type_stats.append(("Unknown", unknown_count, percent))
+        blunder_type_stats.sort(key=lambda x: -x[1])
+
+    # Print results
+    print("\n" + "=" * 70)
+    print("ENGINE ANALYSIS - Most Recent Game")
+    print("=" * 70)
+    print(f"Moves:   {len(moves_pgn_str.strip().split())}")
+    print()
+
+    print("ANALYSIS RESULTS:")
+    print("-" * 70)
+
+    # Print move quality breakdown
+    if quality_stats:
+        print("\nMOVE QUALITY BREAKDOWN:")
+        for q, count, percent in quality_stats:
+            print(f"{q:<11s} {count:4d} ({percent:2d}%)")
+
     # Print move quality by phase
     if total_moves > 0:
         print("\nMOVE QUALITY BY PHASE:")
@@ -267,72 +409,6 @@ def analyze_game(moves_pgn_str):
                 count = phase_quality[phase].get(q, 0)
                 percent = int(round(100 * count / phase_total)) if phase_total else 0
                 print(f"    {q:<11s} {count:4d} ({percent:2d}%)")
-    # Print move quality breakdown
-    if quality_stats:
-        print("\nMOVE QUALITY BREAKDOWN:")
-        for q, count, percent in quality_stats:
-            print(f"{q:<11s} {count:4d} ({percent:2d}%)")
-        # Aggregate move quality counts and percentages
-        from collections import Counter
-        move_qualities = [m.get("move_quality") for m in move_evals if m.get("move_quality")]
-        total_moves = len(move_qualities)
-        quality_order = ["Best", "Excellent", "Good", "Inaccuracy", "Mistake", "Blunder"]
-        quality_counts = Counter(move_qualities)
-        quality_stats = []
-        if total_moves > 0:
-            for q in quality_order:
-                count = quality_counts.get(q, 0)
-                percent = int(round(100 * count / total_moves))
-                quality_stats.append((q, count, percent))
-    """
-    Analyze a game using Stockfish and print results (backward compatibility).
-    
-    Args:
-        moves_pgn_str: Space-separated SAN moves
-            
-    Returns:
-        None (prints analysis to stdout)
-    """
-    move_evals = analyze_game_detailed(moves_pgn_str)
-    
-    if not move_evals:
-        print("\n⚠️  No moves available for analysis.")
-        return
-    
-
-    # Extract blunders and mistakes for printing
-    blunders = [m for m in move_evals if m["blunder_type"] == "blunder"]
-    mistakes = [m for m in move_evals if m["blunder_type"] == "mistake"]
-    cp_losses = [m["cp_loss"] for m in move_evals]
-
-    # Aggregate blunder subtypes
-    from collections import Counter
-    blunder_subtypes = [m["blunder_subtype"] for m in blunders if m["blunder_subtype"]]
-    subtype_counts = Counter(blunder_subtypes)
-    total_blunders = len(blunders)
-    blunder_type_stats = []
-    if total_blunders > 0:
-        for subtype, count in subtype_counts.items():
-            percent = int(round(100 * count / total_blunders))
-            blunder_type_stats.append((subtype, count, percent))
-        # Add 'Unknown' if any blunders unclassified
-        unknown_count = sum(1 for m in blunders if not m["blunder_subtype"] or m["blunder_subtype"] == "Unknown")
-        if unknown_count > 0:
-            percent = int(round(100 * unknown_count / total_blunders))
-            blunder_type_stats.append(("Unknown", unknown_count, percent))
-        # Sort by count descending
-        blunder_type_stats.sort(key=lambda x: -x[1])
-    
-
-    # Print results
-    print("\n" + "=" * 70)
-    print("ENGINE ANALYSIS - Most Recent Game")
-    print("=" * 70)
-    print(f"Moves:   {len(moves_pgn_str.strip().split())}")
-    print()
-
-    print("ANALYSIS RESULTS:")
-    print("-" * 70)
 
     # Blunder type summary
     if blunder_type_stats:

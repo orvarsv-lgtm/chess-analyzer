@@ -8,6 +8,8 @@ from .performance_metrics import (
     compute_game_cpl,
     compute_overall_cpl,
     aggregate_cpl_by_phase,
+    compute_strengths_weaknesses,
+    compute_opening_intelligence,
     compute_opening_stats,
     compute_time_control_stats,
 )
@@ -54,6 +56,7 @@ def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', out
                     'opening_name': row.get('opening_name'),
                     'time_control': row.get('time_control'),
                     'elo': row.get('elo'),
+                    'color': row.get('color'),
                 },
                 'move_evals': move_evals,
             })
@@ -65,6 +68,15 @@ def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', out
 
         overall = compute_overall_cpl(games_data)
         phase_stats = aggregate_cpl_by_phase(games_data)
+        sw = compute_strengths_weaknesses(games_data)
+        oi = compute_opening_intelligence(games_data)
+
+        # Blunder subtype aggregation (V3 Step 2)
+        blunder_subtypes = []
+        for g in games_data:
+            for m in g.get('move_evals', []):
+                if m.get('blunder_type') == 'blunder':
+                    blunder_subtypes.append(m.get('blunder_subtype') or 'Unknown')
 
         summary = {
             'player': player,
@@ -78,6 +90,10 @@ def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', out
             'weakest_phase': overall.get('weakest_phase', 'N/A'),
             'max_blunder_severity': overall.get('max_blunder_severity', 0),
             'avg_blunder_severity': overall.get('avg_blunder_severity', 0),
+            'blunder_type_counts': dict(pd.Series(blunder_subtypes).value_counts()) if blunder_subtypes else {},
+            'strengths': sw.get('strengths', []) or [],
+            'weaknesses': sw.get('weaknesses', []) or [],
+            'opening_intel': oi or {},
         }
 
         results.append(summary)
@@ -99,10 +115,49 @@ def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', out
                 fh.write(f"  Games analyzed: {s['games_analyzed']}\n")
                 fh.write(f"  CPL: {s['overall_cpl']} cp | Recent: {s['recent_cpl']} cp | Trend: {s['trend']}\n")
                 fh.write(f"  Blunders: {s['total_blunders']} | Mistakes: {s['total_mistakes']}\n")
+
+                strengths = s.get('strengths', []) or []
+                weaknesses = s.get('weaknesses', []) or []
+                if strengths:
+                    fh.write("  Strengths: " + "; ".join(strengths) + "\n")
+                if weaknesses:
+                    fh.write("  Weaknesses: " + "; ".join(weaknesses) + "\n")
+
+                # Opening intelligence (compact)
+                oi = s.get('opening_intel', {}) or {}
+                best = oi.get('best_opening')
+                worst = oi.get('worst_opening')
+                rates = oi.get('pattern_rates', {}) or {}
+                if best:
+                    fh.write(f"  Best opening: {best.get('name')} ({best.get('win_rate')}% win, {best.get('avg_player_cpl')} CPL)\n")
+                if worst:
+                    fh.write(f"  Worst opening: {worst.get('name')} ({worst.get('win_rate')}% win, {worst.get('avg_player_cpl')} CPL)\n")
+                if rates:
+                    fh.write(
+                        "  Patterns: "
+                        f"early queen {rates.get('early_queen', 0.0)}%, "
+                        f"pawn pushes {rates.get('pawn_pushes', 0.0)}%, "
+                        f"late/no castling {rates.get('king_safety_neglect', 0.0)}%\n"
+                    )
+
+                # Blunder types (percentages)
+                btc = s.get('blunder_type_counts', {}) or {}
+                if not btc:
+                    fh.write("  Blunder Types: none\n")
+                else:
+                    total_bt = sum(int(v) for v in btc.values())
+                    parts = []
+                    for k, v in sorted(btc.items(), key=lambda kv: kv[1], reverse=True):
+                        pct = (v / total_bt * 100) if total_bt > 0 else 0
+                        parts.append(f"{k}: {pct:.0f}%")
+                    fh.write("  Blunder Types: " + ", ".join(parts) + "\n")
                 fh.write('  By Phase:\n')
                 for p in ['opening', 'middlegame', 'endgame']:
                     ps = s['phase_stats'].get(p, {})
-                    fh.write(f"    {p}: CPL={ps.get('cpl')} cp, Blunders={ps.get('blunders')}\n")
+                    total_moves = ps.get('total_moves', 0)
+                    cpl_val = ps.get('cpl')
+                    cpl_str = f"{cpl_val}" if (cpl_val is not None and total_moves > 0) else "N/A"
+                    fh.write(f"    {p}: CPL={cpl_str} cp, Blunders={ps.get('blunders')}\n")
                 # Coach summary logic
                 fh.write('  Coach Summary:\n')
                 # Safety guard: ensure all keys exist and are safe to access

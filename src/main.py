@@ -1,3 +1,14 @@
+def save_results(name, analyzed_games):
+    """Save analysis results to CSV and TXT files."""
+    df = pd.DataFrame(analyzed_games)
+    df.to_csv(f"games_{name}.csv", index=False)
+    with open(f"{name}_analysis.txt", "w", encoding="utf-8") as f:
+        for game in analyzed_games:
+            f.write(game.get("summary", "") + "\n\n")
+def load_pgn_file(path):
+    """Load PGN file from disk and return as string."""
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 from .lichess_api import fetch_lichess_pgn, parse_pgn
 import pandas as pd
 import os
@@ -11,62 +22,45 @@ from .performance_metrics import (
 
 
 def main():
-    print("Chess Analyzer - Lichess Games")
-    print("=" * 40)
-    
-    username = input("Enter Lichess username: ").strip()
-    
-    # Use per-username CSV file
-    csv_file = f"games_{username}.csv"
-    
-    # Check if data already exists for this username
-    if os.path.exists(csv_file):
-        print(f"\nLoading cached games from {csv_file}...")
-        df = pd.read_csv(csv_file)
-        print(f"Loaded {len(df)} games from cache\n")
-        from_cache = True
-    else:
-        print(f"\nFetching games for {username}...")
-        try:
-            pgn_text = fetch_lichess_pgn(username=username, max_games=100)
-            print(f"Downloaded {len(pgn_text)} characters of PGN data")
-        except ValueError as e:
-            print(f"\n{e}")
-            return
-        except Exception as e:
-            print(f"\n❌ {e}")
-            return
+    print("Welcome to Chess Analyzer!")
+    print("Choose input source:")
+    print("1. Lichess username")
+    print("2. Chess.com PGN file")
+    choice = input("Enter 1 or 2: ").strip()
 
-        print("Parsing games...")
-        games = parse_pgn(pgn_text, username)
-        print(f"Successfully parsed {len(games)} games\n")
+    def main():
+        print("Welcome to Chess Analyzer!")
+        print("Choose input source:")
+        print("1. Lichess username")
+        print("2. Chess.com PGN file")
+        choice = input("Enter 1 or 2: ").strip()
 
-        if len(games) == 0:
-            print("No games found!")
+        if choice == "1":
+            username = input("Enter Lichess username: ").strip()
+            print(f"Fetching games for {username}...")
+            games = fetch_and_parse_lichess_games(username)
+            platform = "lichess"
+            name = username
+        elif choice == "2":
+            pgn_path = input("Enter path to Chess.com PGN file: ").strip()
+            print(f"Loading PGN from {pgn_path}...")
+            pgn_str = load_pgn_file(pgn_path)
+            games = parse_pgn(pgn_str)
+            platform = "chess.com"
+            import os
+            name = os.path.splitext(os.path.basename(pgn_path))[0]
+        else:
+            print("Invalid choice. Exiting.")
             return
 
-        df = pd.DataFrame(games)
-        
-        # Save to per-username CSV
-        df.to_csv(csv_file, index=False)
-        print(f"Saved {len(df)} games to {csv_file}\n")
-        from_cache = False
-    
-    # ===== PHASE 1: PERFORMANCE METRICS =====
-    
-    # Analyze all games with engine (build structured data for metrics)
-    print("Computing performance metrics...")
-    games_data = []
-    for idx, row in df.iterrows():
-        moves_pgn = row.get("moves_pgn", "")
-        if moves_pgn:
-            move_evals = analyze_game_detailed(moves_pgn)
-            games_data.append({
-                "game_info": {
-                    "score": row.get("score"),
-                    "opening_name": row.get("opening_name"),
-                    "time_control": row.get("time_control"),
-                    "elo": row.get("elo"),
+        # Add platform field to each game object
+        for game in games:
+            game["platform"] = platform
+
+        print(f"Fetched {len(games)} games. Running analysis...")
+        analyzed_games = analyze_games(games)
+        save_results(name, analyzed_games)
+        print(f"Analysis complete. Results saved to games_{name}.csv and {name}_analysis.txt.")
                 },
                 "move_evals": move_evals,
             })
