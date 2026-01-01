@@ -108,6 +108,28 @@ DEBUG_ENGINE = False
 STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 ANALYSIS_DEPTH = 15
 
+
+def detect_engine_availability(engine_path: str = STOCKFISH_PATH) -> tuple[bool, str]:
+    """Detect whether the configured UCI engine can be launched.
+
+    Returns:
+        (available, reason)
+    """
+    try:
+        engine = chess.engine.SimpleEngine.popen_uci(engine_path)
+    except FileNotFoundError:
+        return False, f"engine binary not found at '{engine_path}'"
+    except Exception as e:
+        return False, f"engine failed to start: {e}"
+
+    try:
+        return True, "ok"
+    finally:
+        try:
+            engine.quit()
+        except Exception:
+            pass
+
 # Centipawn thresholds
 BLUNDER_THRESHOLD = 300
 MISTAKE_THRESHOLD = 150

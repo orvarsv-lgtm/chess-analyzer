@@ -528,7 +528,11 @@ def aggregate_cpl_by_phase(games_data: list) -> dict:
 
     # Ensure move coverage across phases
     if total_moves_accounted == 0:
-        raise AssertionError("No moves were aggregated into phases")
+        return {
+            "opening": {"cpl": 0.0, "blunders": 0, "mistakes": 0, "games": 0, "advantage": "N/A", "total_moves": 0},
+            "middlegame": {"cpl": 0.0, "blunders": 0, "mistakes": 0, "games": 0, "advantage": "N/A", "total_moves": 0},
+            "endgame": {"cpl": 0.0, "blunders": 0, "mistakes": 0, "games": 0, "advantage": "N/A", "total_moves": 0},
+        }
     
     return result
 
@@ -671,6 +675,33 @@ def compute_overall_cpl(games_data: list) -> dict:
                 bucket_data["cp_losses"].extend(endgame_cp_losses)
                 if bucket == "winning":
                     bucket_data["conversions"] += 1 if game_info.get("score") == "win" else 0
+
+    # If we have games but no evaluated moves (e.g., engine unavailable),
+    # return a safe empty analysis result instead of asserting/crashing.
+    if total_moves == 0:
+        return {
+            "overall_cpl": 0.0,
+            "recent_cpl": 0.0,
+            "trend": "N/A",
+            "trend_reason": "no evaluated moves",
+            "total_blunders": 0,
+            "total_mistakes": 0,
+            "total_moves": 0,
+            "blunders_per_100": 0.0,
+            "mistakes_per_100": 0.0,
+            "weakest_phase": "N/A",
+            "blunder_distribution": {},
+            "avg_blunder_severity": 0.0,
+            "max_blunder_severity": 0,
+            "best_piece": "N/A",
+            "worst_piece": "N/A",
+            "phase_relative_cpl": {},
+            "endgame_advantage": {},
+            "conversion_difficulty": {},
+            "mate_missed_count": 0,
+            "forced_loss_count": 0,
+            "equal_blunders": 0,
+        }
     
     overall = sum(all_game_cpls) / len(all_game_cpls) if all_game_cpls else 0.0
     recent = sum(recent_game_cpls) / len(recent_game_cpls) if recent_game_cpls else overall

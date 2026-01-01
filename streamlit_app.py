@@ -19,6 +19,8 @@ def main() -> None:
         username = st.text_input("Lichess username")
         if st.button("Run analysis"):
             results = run_analysis_streamlit(source=source, pgn_path=username, max_games=max_games)
+            if results.get("limited_mode") and not results.get("engine_available"):
+                st.warning(results.get("warning") or "Engine analysis is unavailable in this environment.")
             st.json(results)
 
     else:
@@ -43,6 +45,8 @@ def main() -> None:
                 except OSError:
                     pass
 
+            if results.get("limited_mode") and not results.get("engine_available"):
+                st.warning(results.get("warning") or "Engine analysis is unavailable in this environment.")
             st.json(results)
 
 

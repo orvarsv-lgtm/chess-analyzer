@@ -4,6 +4,8 @@ import io
 import os
 from contextlib import redirect_stderr, redirect_stdout
 
+from src.engine_analysis import detect_engine_availability
+
 
 def run_existing_analysis(*, source: str, pgn_path: str, max_games: int) -> dict:
     """Run the existing analyzer pipeline without any interactive I/O.
@@ -37,6 +39,25 @@ def run_existing_analysis(*, source: str, pgn_path: str, max_games: int) -> dict
             csv_file, game_count = cli_main.fetch_user_games(username, max_games=max_games_i)
         else:
             csv_file, game_count = cli_main.import_pgn_games(pgn_path, output_name)
+
+        # Detect engine availability *before* Phase 1.
+        engine_ok, engine_reason = detect_engine_availability()
+        if not engine_ok:
+            return {
+                "ok": True,
+                "exit_code": 0,
+                "limited_mode": True,
+                "engine_available": False,
+                "engine_reason": engine_reason,
+                "source": src,
+                "name": output_name,
+                "max_games": max_games_i,
+                "game_count": int(game_count or 0),
+                "output_text": stdout_buf.getvalue(),
+                "csv_file": csv_file,
+                "analysis_file": None,
+                "warning": "Engine analysis is unavailable in this environment. PGN import works, but CPL metrics are disabled.",
+            }
 
         if not csv_file or int(game_count or 0) == 0:
             return {
@@ -72,6 +93,9 @@ def run_existing_analysis(*, source: str, pgn_path: str, max_games: int) -> dict
     return {
         "ok": True,
         "exit_code": 0,
+        "limited_mode": False,
+        "engine_available": True,
+        "engine_reason": "ok",
         "source": src,
         "name": output_name,
         "max_games": max_games_i,
