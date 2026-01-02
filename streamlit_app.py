@@ -146,6 +146,7 @@ class GameInput:
     pgn: str
     headers: dict[str, str]
     move_sans: list[str]
+    fens_after_ply: list[str]
     num_plies: int
 
 
@@ -159,10 +160,12 @@ def _split_pgn_into_games(pgn_text: str, max_games: int) -> list[GameInput]:
 
         headers = {k: str(v) for k, v in dict(game.headers).items() if v is not None}
         move_sans: list[str] = []
+        fens_after_ply: list[str] = []
         board = game.board()
         for mv in game.mainline_moves():
             move_sans.append(board.san(mv))
             board.push(mv)
+            fens_after_ply.append(board.fen())
 
         games.append(
             GameInput(
@@ -170,6 +173,7 @@ def _split_pgn_into_games(pgn_text: str, max_games: int) -> list[GameInput]:
                 pgn=str(game),
                 headers=headers,
                 move_sans=move_sans,
+                fens_after_ply=fens_after_ply,
                 num_plies=len(move_sans),
             )
         )
@@ -216,10 +220,75 @@ def _phase_for_ply(ply_index: int, total_plies: int) -> str:
     return "middlegame"
 
 
+def _material_phase_ratio(board: chess.Board) -> float:
+    """Return a [0,1] phase ratio based on remaining non-pawn material.
+
+    This is a deterministic Stockfish-style idea: as queens/rooks/minors come off,
+    the phase moves toward endgame.
+    """
+    weights = {
+        chess.QUEEN: 4,
+        chess.ROOK: 2,
+        chess.BISHOP: 1,
+        chess.KNIGHT: 1,
+    }
+    max_phase = 24.0  # 2 sides * (Q4 + R2*2 + B1*2 + N1*2) = 24
+
+    phase = 0.0
+    for piece_type, w in weights.items():
+        phase += w * (
+            len(board.pieces(piece_type, chess.WHITE))
+            + len(board.pieces(piece_type, chess.BLACK))
+        )
+    return max(0.0, min(1.0, phase / max_phase))
+
+
+def _classify_phase(ply_index: int, total_plies: int, board: chess.Board) -> str:
+    """Classify phase using early-game guard + material/major-piece heuristics.
+
+    Goals:
+    - Opening is always early, regardless of trades.
+    - Endgame starts earlier in games with heavy-piece exchanges (especially queen trades).
+    - Otherwise, most of the game is middlegame.
+    """
+    # Guard: first ~8 full moves are opening for essentially all games.
+    if ply_index < 16:
+        return "opening"
+
+    # If we're at the tail, bias to endgame.
+    if total_plies > 0 and ply_index >= max(total_plies - 12, 16):
+        return "endgame"
+
+    phase_ratio = _material_phase_ratio(board)
+    total_queens = len(board.pieces(chess.QUEEN, chess.WHITE)) + len(board.pieces(chess.QUEEN, chess.BLACK))
+    total_rooks = len(board.pieces(chess.ROOK, chess.WHITE)) + len(board.pieces(chess.ROOK, chess.BLACK))
+    total_minors = (
+        len(board.pieces(chess.BISHOP, chess.WHITE))
+        + len(board.pieces(chess.BISHOP, chess.BLACK))
+        + len(board.pieces(chess.KNIGHT, chess.WHITE))
+        + len(board.pieces(chess.KNIGHT, chess.BLACK))
+    )
+
+    # Endgame triggers: no queens, or very reduced heavy pieces, or low material phase.
+    if total_queens == 0:
+        return "endgame"
+    if total_queens <= 1 and total_rooks <= 2:
+        return "endgame"
+    if phase_ratio <= 0.35:
+        return "endgame"
+
+    # Opening can extend slightly if basically no material has come off.
+    if ply_index < 24 and phase_ratio >= 0.95 and total_minors >= 6:
+        return "opening"
+
+    return "middlegame"
+
+
 def _compute_cp_loss_rows(
     analysis_rows: list[dict[str, Any]],
     focus_color: str | None,
     total_plies: int,
+    fens_after_ply: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Compute per-ply cp_loss from successive score_cp values.
 
@@ -250,7 +319,14 @@ def _compute_cp_loss_rows(
         if focus_color and mover != focus_color:
             cp_loss = 0
 
-        phase = _phase_for_ply(i, total_plies)
+        if fens_after_ply and i < len(fens_after_ply):
+            try:
+                board = chess.Board(fens_after_ply[i])
+                phase = _classify_phase(i, total_plies, board)
+            except Exception:
+                phase = _phase_for_ply(i, total_plies)
+        else:
+            phase = _phase_for_ply(i, total_plies)
         out.append(
             {
                 "ply": i + 1,
@@ -628,7 +704,12 @@ def main() -> None:
                 rows = valid.get("analysis", []) or []
                 # Build per-game rows table + phase stats
                 focus_color = _infer_focus_color(gi.headers, focus_player)
-                cp_rows = _compute_cp_loss_rows(rows, focus_color=focus_color, total_plies=gi.num_plies)
+                cp_rows = _compute_cp_loss_rows(
+                    rows,
+                    focus_color=focus_color,
+                    total_plies=gi.num_plies,
+                    fens_after_ply=gi.fens_after_ply,
+                )
                 moves_table = pd.DataFrame(cp_rows)[["ply", "mover", "move_san", "score_cp", "cp_loss", "phase"]].to_dict(
                     orient="records"
                 )
@@ -703,7 +784,12 @@ def main() -> None:
 
                 rows = valid.get("analysis", []) or []
                 focus_color = _infer_focus_color(gi.headers, focus_player)
-                cp_rows = _compute_cp_loss_rows(rows, focus_color=focus_color, total_plies=gi.num_plies)
+                cp_rows = _compute_cp_loss_rows(
+                    rows,
+                    focus_color=focus_color,
+                    total_plies=gi.num_plies,
+                    fens_after_ply=gi.fens_after_ply,
+                )
                 moves_table = pd.DataFrame(cp_rows)[["ply", "mover", "move_san", "score_cp", "cp_loss", "phase"]].to_dict(
                     orient="records"
                 )
