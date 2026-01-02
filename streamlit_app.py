@@ -10,7 +10,7 @@ import streamlit as st
 
 from src.lichess_api import fetch_lichess_pgn
 
-ANALYZE_ROUTE = "/analyze_game"
+ANALYZE_ROUTE = "/analyze_game"  # Base URL only; do NOT include this path in secrets/env.
 
 def _get_engine_endpoint() -> tuple[str, str]:
     """Resolve engine URL and API key (Streamlit secrets first, then env)."""
@@ -29,7 +29,14 @@ def _post_to_engine(pgn_text: str) -> dict:
     if not url:
         raise RuntimeError("Engine endpoint not configured")
 
-    endpoint = f"{url.rstrip('/')}{ANALYZE_ROUTE}"
+    # Normalize base URL: strip trailing slash and reject accidental paths.
+    base = url.rstrip("/")
+    # Prevent double /analyze_game in misconfigured secrets/env.
+    if "/analyze_game" in base:
+        base = base.split("/analyze_game")[0]
+    endpoint = f"{base}{ANALYZE_ROUTE}"
+    if endpoint.count("/analyze_game") != 1:
+        raise RuntimeError(f"Invalid engine endpoint: {endpoint}")
     headers = {"x-api-key": api_key} if api_key else {}
     payload = {"pgn": pgn_text}
 
