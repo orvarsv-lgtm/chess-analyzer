@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import os
-import re
-import tempfile
 
 import requests
 import streamlit as st
@@ -38,14 +36,13 @@ def _post_to_engine(pgn_text: str, max_games: int) -> dict:
     if endpoint.count("/analyze_game") != 1:
         raise RuntimeError(f"Invalid engine endpoint: {endpoint}")
     headers = {"x-api-key": api_key} if api_key else {}
-    files = {"file": ("game.pgn", pgn_text, "application/x-chess-pgn")}
-    data = {"max_games": str(max_games)}
+    payload = {"pgn": pgn_text, "max_games": max_games}
 
     # Temporary debug logging to confirm correct route/payload
     st.write("POSTING TO:", endpoint)
-    st.write("Payload keys:", list(data.keys()) + list(files.keys()))
+    st.write("Payload keys:", list(payload.keys()))
 
-    resp = requests.post(endpoint, data=data, files=files, timeout=300, headers=headers)
+    resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
 
     if resp.status_code == 403:
         raise RuntimeError("VPS Authentication Failed")
@@ -64,8 +61,35 @@ def _post_to_engine(pgn_text: str, max_games: int) -> dict:
     return resp.json()
 
 
+def _validate_engine_response(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise RuntimeError("Invalid engine response: expected JSON object")
+    if not data.get("success"):
+        raise RuntimeError("Engine reported failure")
+    analysis = data.get("analysis")
+    if not analysis:
+        raise RuntimeError("Engine returned no analysis")
+    for entry in analysis:
+        if "move_san" not in entry or "score_cp" not in entry:
+            raise RuntimeError("Engine response missing move_san or score_cp")
+    return data
+
+
+def _render_results(data: dict) -> None:
+    analysis = data.get("analysis", [])
+    st.subheader("Analysis Result")
+    st.metric("Total moves analyzed", len(analysis))
+    table_rows = [{"move_san": row.get("move_san"), "score_cp": row.get("score_cp")}
+                  for row in analysis]
+    st.dataframe(table_rows)
+    st.success("Analysis completed")
+
+
 def main() -> None:
     st.title("Chess Analyzer (Remote Engine)")
+
+    if "analysis_result" not in st.session_state:
+        st.session_state["analysis_result"] = None
 
     source = st.radio("Source", ["Lichess username", "Chess.com PGN file"])
     max_games = st.number_input("Max games", min_value=1, max_value=100, value=20, step=1)
@@ -78,15 +102,11 @@ def main() -> None:
                 return
             try:
                 pgn_text = fetch_lichess_pgn(username, max_games=max_games)
-            except Exception as e:
-                st.error(f"Failed to fetch PGN: {e}")
-                st.stop()
-            try:
                 results = _post_to_engine(pgn_text, max_games=max_games)
+                st.session_state["analysis_result"] = _validate_engine_response(results)
             except Exception as e:
                 st.error(str(e))
                 st.stop()
-            st.json(results)
 
     else:
         uploaded = st.file_uploader("Upload PGN", type=["pgn"])
@@ -95,27 +115,16 @@ def main() -> None:
                 st.error("Please upload a PGN file.")
                 return
 
-            original_stem = os.path.splitext(uploaded.name or "uploaded")[0]
-            safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "_", original_stem).strip("_") or "uploaded"
-
-            # Keep temporary file handling only for naming consistency; analysis uses content, not local engine.
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pgn", prefix=f"{safe_stem}_") as tmp:
-                tmp.write(uploaded.getvalue())
-                tmp_path = tmp.name
-
             try:
-                pgn_text = uploaded.getvalue().decode(errors="ignore")
+                pgn_text = uploaded.read().decode("utf-8", errors="ignore")
                 results = _post_to_engine(pgn_text, max_games=max_games)
+                st.session_state["analysis_result"] = _validate_engine_response(results)
             except Exception as e:
                 st.error(str(e))
                 st.stop()
-            finally:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
 
-            st.json(results)
+    if st.session_state.get("analysis_result"):
+        _render_results(st.session_state["analysis_result"])
 
 
 # Prevent any accidental local analysis path.
