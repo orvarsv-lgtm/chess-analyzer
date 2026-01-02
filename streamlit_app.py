@@ -36,20 +36,31 @@ def _post_to_engine(pgn_text: str, max_games: int) -> dict:
     if endpoint.count("/analyze_game") != 1:
         raise RuntimeError(f"Invalid engine endpoint: {endpoint}")
     headers = {"x-api-key": api_key} if api_key else {}
-    # Backend requires multipart with `file`; keep max_games as form data.
-    data = {"max_games": str(max_games)}
-    files = {"file": ("game.pgn", pgn_text, "application/x-chess-pgn")}
+    payload = {"pgn": pgn_text, "max_games": max_games}
+
+    # Defensive payload validation (hard stop)
+    if not isinstance(pgn_text, str) or not pgn_text.strip():
+        st.error("Invalid PGN input: expected non-empty text")
+        st.stop()
+    if set(payload.keys()) != {"pgn", "max_games"}:
+        st.error(f"Invalid payload keys: {sorted(payload.keys())}. Expected ['max_games', 'pgn']")
+        st.stop()
 
     # Temporary debug logging to confirm correct route/payload
     st.write("POSTING TO:", endpoint)
-    st.write("Payload keys:", list(data.keys()) + list(files.keys()))
+    st.write("Payload keys:", list(payload.keys()))
 
-    resp = requests.post(endpoint, data=data, files=files, timeout=300, headers=headers)
+    resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
 
     if resp.status_code == 403:
         raise RuntimeError("VPS Authentication Failed")
     if resp.status_code == 422:
         st.error("Engine rejected request (422 Validation Error)")
+        st.info(
+            "This backend is rejecting JSON payloads. "
+            "If your backend is meant to accept PGN text, it must accept a JSON body with keys 'pgn' and 'max_games'. "
+            "The current server at this URL appears to require a multipart 'file' field instead."
+        )
         try:
             st.json(resp.json())
         except Exception:
@@ -92,9 +103,13 @@ def main() -> None:
 
     if "analysis_result" not in st.session_state:
         st.session_state["analysis_result"] = None
+    if "analysis_request" not in st.session_state:
+        st.session_state["analysis_request"] = None
 
     source = st.radio("Source", ["Lichess username", "Chess.com PGN file"])
     max_games = st.number_input("Max games", min_value=1, max_value=100, value=20, step=1)
+
+    pgn_text: str = ""
 
     if source == "Lichess username":
         username = st.text_input("Lichess username")
@@ -104,6 +119,20 @@ def main() -> None:
                 return
             try:
                 pgn_text = fetch_lichess_pgn(username, max_games=max_games)
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
+
+            num_games_in_pgn = pgn_text.count("[Event ")
+            games_to_analyze = min(num_games_in_pgn, int(max_games)) if num_games_in_pgn else 0
+            st.session_state["analysis_request"] = {
+                "source": "lichess",
+                "max_games": int(max_games),
+                "num_games_in_pgn": int(num_games_in_pgn),
+                "games_to_analyze": int(games_to_analyze),
+            }
+
+            try:
                 results = _post_to_engine(pgn_text, max_games=max_games)
                 st.session_state["analysis_result"] = _validate_engine_response(results)
             except Exception as e:
@@ -119,13 +148,54 @@ def main() -> None:
 
             try:
                 pgn_text = uploaded.read().decode("utf-8", errors="ignore")
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
+
+            num_games_in_pgn = pgn_text.count("[Event ")
+            games_to_analyze = min(num_games_in_pgn, int(max_games)) if num_games_in_pgn else 0
+            st.session_state["analysis_request"] = {
+                "source": "upload",
+                "max_games": int(max_games),
+                "num_games_in_pgn": int(num_games_in_pgn),
+                "games_to_analyze": int(games_to_analyze),
+            }
+
+            try:
                 results = _post_to_engine(pgn_text, max_games=max_games)
                 st.session_state["analysis_result"] = _validate_engine_response(results)
             except Exception as e:
                 st.error(str(e))
                 st.stop()
 
+    req = st.session_state.get("analysis_request")
+    if req:
+        if req.get("num_games_in_pgn", 0) > 0:
+            st.info(
+                f"Analyzing {req.get('games_to_analyze')} of {req.get('num_games_in_pgn')} games "
+                f"(limited by max_games={req.get('max_games')})."
+            )
+        else:
+            st.warning(
+                "Could not count games in PGN (no '[Event ' headers found). "
+                "This usually means the PGN is a single game or is missing headers."
+            )
+
     if st.session_state.get("analysis_result"):
+        # If backend provides a games-analyzed count, validate it against expectation.
+        expected_games = (req or {}).get("games_to_analyze")
+        backend_games = (
+            st.session_state["analysis_result"].get("games_analyzed")
+            or st.session_state["analysis_result"].get("num_games")
+            or st.session_state["analysis_result"].get("games_processed")
+        )
+        if expected_games is not None and backend_games is not None and int(backend_games) < int(expected_games):
+            st.warning(f"Backend analyzed {backend_games} games, expected {expected_games}.")
+        elif expected_games and backend_games is None:
+            st.warning(
+                "Backend did not report how many games it analyzed; "
+                "cannot verify multi-game processing from the response."
+            )
         _render_results(st.session_state["analysis_result"])
 
 
