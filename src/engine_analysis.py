@@ -108,6 +108,38 @@ DEBUG_ENGINE = False
 STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 ANALYSIS_DEPTH = 15
 
+# Optional remote engine (for Streamlit Cloud / environments without a Stockfish binary)
+VPS_ANALYSIS_URL = "http://72.60.185.247:8000/analyze_game"
+
+_ENGINE_AVAIL_CACHE: tuple[bool, str] | None = None
+
+
+def _san_moves_to_minimal_pgn(moves_pgn_str: str) -> str:
+    """Convert a space-separated SAN sequence into a minimal PGN string."""
+    moves = (moves_pgn_str or "").strip().split()
+    if not moves:
+        return ""
+
+    parts: list[str] = [
+        "[Event \"Analysis\"]",
+        "[Site \"?\"]",
+        "[Date \"????.??.??\"]",
+        "[Round \"?\"]",
+        "[White \"?\"]",
+        "[Black \"?\"]",
+        "[Result \"*\"]",
+        "",
+    ]
+
+    # Emit move numbers.
+    for idx, san in enumerate(moves):
+        if idx % 2 == 0:
+            parts.append(f"{(idx // 2) + 1}.")
+        parts.append(san)
+
+    parts.append("*")
+    return " ".join(parts)
+
 
 def detect_engine_availability(engine_path: str = STOCKFISH_PATH) -> tuple[bool, str]:
     """Detect whether the configured UCI engine can be launched.
@@ -130,6 +162,225 @@ def detect_engine_availability(engine_path: str = STOCKFISH_PATH) -> tuple[bool,
         except Exception:
             pass
 
+
+def analyze_game_via_vps(pgn_string: str) -> list[dict]:
+    """Analyze a game via a remote FastAPI Stockfish service.
+
+    Sends PGN to VPS_ANALYSIS_URL and maps the response into the existing
+    per-move schema used by the coach-style report.
+
+    The VPS is expected to return JSON like:
+      {
+        "success": true,
+        "headers": {"White": "...", "Black": "...", "Result": "..."},
+        "analysis": [{"move_san": "...", "score_cp": 12, "fen": "..."}, ...]
+      }
+
+    Mate scores are represented as +/-10000 and are excluded from CPL math.
+    """
+    import os
+
+    import requests
+
+    # Prefer Streamlit Cloud secrets when available.
+    url = os.getenv("VPS_ANALYSIS_URL", VPS_ANALYSIS_URL)
+    api_key = os.getenv("VPS_API_KEY", "MY_SECRET_SERVER_KEY")
+    try:
+        import streamlit as st  # optional dependency at runtime
+
+        # Use bracket access as requested (will KeyError if not configured in Streamlit).
+        url = st.secrets["VPS_ANALYSIS_URL"]
+        api_key = st.secrets["VPS_API_KEY"]
+    except Exception:
+        pass
+
+    headers = {"x-api-key": api_key}
+    if not url:
+        return []
+
+    pgn_text = (pgn_string or "").strip()
+    if not pgn_text:
+        return []
+
+    try:
+        # Keep PGN upload via multipart file.
+        files = {
+            "file": ("game.pgn", pgn_text, "application/x-chess-pgn"),
+        }
+        resp = requests.post(
+            url,
+            files=files,
+            headers=headers,
+            timeout=(10, 180),
+        )
+    except Exception:
+        return []
+
+    if resp.status_code == 403:
+        raise RuntimeError("VPS Authentication Failed")
+
+    try:
+        data = resp.json()
+    except Exception:
+        return []
+
+    if not isinstance(data, dict) or not data.get("success"):
+        return []
+
+    rows = data.get("analysis")
+    if not isinstance(rows, list) or not rows:
+        return []
+
+    move_evals: list[dict] = []
+    prev_score: int | None = None  # White POV
+    prev_phase: str | None = None
+    prev_board = chess.Board()
+
+    def _san_piece_name(san: str) -> str:
+        s = (san or "").strip()
+        if s.startswith("O-O"):
+            return "King"
+        if not s:
+            return "Unknown"
+        piece_map = {"K": "King", "Q": "Queen", "R": "Rook", "B": "Bishop", "N": "Knight"}
+        return piece_map.get(s[0], "Pawn")
+
+    for move_index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        move_san = (row.get("move_san") or "").strip()
+        fen = row.get("fen")
+        score_cp = row.get("score_cp")
+
+        try:
+            eval_after = int(score_cp) if score_cp is not None else None
+        except Exception:
+            eval_after = None
+
+        eval_before = prev_score
+        is_white_move = (move_index % 2 == 0)
+        move_number = (move_index // 2) + 1
+        move_color = "White" if is_white_move else "Black"
+
+        # Mate handling
+        is_mate_before = bool(eval_before is not None and abs(int(eval_before)) >= 9000)
+        is_mate_after = bool(eval_after is not None and abs(int(eval_after)) >= 9000)
+        is_mate_eval = is_mate_before or is_mate_after
+
+        # Reconstruct board states (needed for phase + subtype heuristics)
+        board_before = prev_board
+        board_after = None
+        if isinstance(fen, str) and fen:
+            try:
+                board_after = chess.Board(fen)
+            except Exception:
+                board_after = None
+        if board_after is None:
+            # If FEN is missing/unparseable, try to advance from board_before via SAN.
+            try:
+                mv_obj = board_before.parse_san(move_san)
+                tmp = board_before.copy()
+                tmp.push(mv_obj)
+                board_after = tmp
+            except Exception:
+                board_after = board_before.copy()
+
+        # Phase classification (stable)
+        phase = classify_phase_stable(board_after, move_number, prev_phase)
+        prev_phase = phase
+
+        # Compute CPL (White POV evals)
+        cp_loss_capped = 0
+        if (not is_mate_eval) and (eval_before is not None) and (eval_after is not None):
+            if is_white_move:
+                raw = int(eval_before) - int(eval_after)
+            else:
+                raw = int(eval_after) - int(eval_before)
+            if raw > 0:
+                cp_loss_capped = min(int(abs(raw)), 10000)
+
+        # Context-aware weighting (reuse existing logic style)
+        missed_mate = False
+        forced_loss = False
+        cp_loss_weighted = 0.0
+        if eval_before is not None:
+            eval_before_player = int(eval_before) if is_white_move else -int(eval_before)
+        else:
+            eval_before_player = 0
+
+        if is_mate_eval:
+            if eval_before is not None:
+                if (is_white_move and int(eval_before) <= -9000) or ((not is_white_move) and int(eval_before) >= 9000):
+                    forced_loss = True
+        else:
+            if cp_loss_capped > 0:
+                cpl_weight = 1.0
+                if forced_loss:
+                    cpl_weight = 0.25
+                elif eval_before_player <= -600:
+                    cpl_weight = 0.5
+                elif eval_before_player < -300:
+                    cpl_weight = 0.7
+                elif eval_before_player > 100:
+                    cpl_weight = 1.3
+
+                if phase == "endgame":
+                    if eval_before_player >= 150:
+                        cpl_weight *= 1.3
+                    elif eval_before_player <= -150:
+                        cpl_weight *= 0.6
+
+                cp_loss_weighted = cp_loss_capped * cpl_weight
+
+        # CPL-based categories requested for VPS mode
+        blunder_type = None
+        move_quality = "Best"
+        if cp_loss_capped > 200:
+            blunder_type = "blunder"
+            move_quality = "Blunder"
+        elif cp_loss_capped > 100:
+            blunder_type = "mistake"
+            move_quality = "Mistake"
+        elif cp_loss_capped > 50:
+            blunder_type = "inaccuracy"
+            move_quality = "Inaccuracy"
+        elif cp_loss_capped > 0:
+            move_quality = "Good"
+
+        blunder_subtype = None
+        if blunder_type == "blunder":
+            try:
+                mv_obj = board_before.parse_san(move_san)
+                blunder_subtype = classify_blunder(board_before, board_after, mv_obj, eval_before or 0, eval_after or 0, phase)
+            except Exception:
+                blunder_subtype = None
+
+        move_evals.append(
+            {
+                "move_num": move_number,
+                "color": move_color,
+                "san": move_san,
+                "cp_loss": cp_loss_capped,
+                "cp_loss_weighted": cp_loss_weighted,
+                "piece": _san_piece_name(move_san),
+                "phase": phase,
+                "blunder_type": blunder_type,
+                "blunder_subtype": blunder_subtype,
+                "move_quality": move_quality,
+                "eval_before": eval_before,
+                "eval_after": eval_after,
+                "is_mate_before": is_mate_before,
+                "is_mate_after": is_mate_after,
+                "missed_mate": missed_mate,
+                "forced_loss": forced_loss,
+            }
+        )
+
+        prev_score = eval_after
+        prev_board = board_after
+
+    return move_evals
+
 # Centipawn thresholds
 BLUNDER_THRESHOLD = 300
 MISTAKE_THRESHOLD = 150
@@ -140,7 +391,7 @@ PHASE_THRESHOLDS = {
 }
 
 
-def analyze_game_detailed(moves_pgn_str):
+def _analyze_game_detailed_local(moves_pgn_str):
     """
     Analyze a game using Stockfish and return structured move-by-move data.
     
@@ -343,6 +594,23 @@ def analyze_game_detailed(moves_pgn_str):
     
     finally:
         engine.quit()
+
+
+def analyze_game_detailed(moves_pgn_str):
+    """Analyze a game; uses local Stockfish when available, otherwise falls back to VPS."""
+    global _ENGINE_AVAIL_CACHE
+    if _ENGINE_AVAIL_CACHE is None:
+        _ENGINE_AVAIL_CACHE = detect_engine_availability()
+
+    engine_ok, _reason = _ENGINE_AVAIL_CACHE
+    if engine_ok:
+        return _analyze_game_detailed_local(moves_pgn_str)
+
+    # VPS fallback (minimal PGN wrapper around SAN string)
+    pgn_text = _san_moves_to_minimal_pgn(str(moves_pgn_str or ""))
+    if not pgn_text:
+        return []
+    return analyze_game_via_vps(pgn_text)
 
 
 def analyze_game(moves_pgn_str):

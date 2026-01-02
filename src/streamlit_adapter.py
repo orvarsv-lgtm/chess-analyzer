@@ -41,23 +41,8 @@ def run_existing_analysis(*, source: str, pgn_path: str, max_games: int) -> dict
             csv_file, game_count = cli_main.import_pgn_games(pgn_path, output_name)
 
         # Detect engine availability *before* Phase 1.
+        # If unavailable, analysis may still proceed via VPS fallback.
         engine_ok, engine_reason = detect_engine_availability()
-        if not engine_ok:
-            return {
-                "ok": True,
-                "exit_code": 0,
-                "limited_mode": True,
-                "engine_available": False,
-                "engine_reason": engine_reason,
-                "source": src,
-                "name": output_name,
-                "max_games": max_games_i,
-                "game_count": int(game_count or 0),
-                "output_text": stdout_buf.getvalue(),
-                "csv_file": csv_file,
-                "analysis_file": None,
-                "warning": "Engine analysis is unavailable in this environment. PGN import works, but CPL metrics are disabled.",
-            }
 
         if not csv_file or int(game_count or 0) == 0:
             return {
@@ -76,12 +61,16 @@ def run_existing_analysis(*, source: str, pgn_path: str, max_games: int) -> dict
             return {
                 "ok": False,
                 "exit_code": 1,
+                "limited_mode": True,
+                "engine_available": bool(engine_ok),
+                "engine_reason": engine_reason,
                 "source": src,
                 "name": output_name,
                 "max_games": max_games_i,
                 "output_text": stdout_buf.getvalue(),
                 "csv_file": csv_file,
                 "analysis_file": None,
+                "warning": "Engine analysis could not be completed in this environment.",
             }
 
         _ = cli_main.run_phase2_for_user(
@@ -90,18 +79,23 @@ def run_existing_analysis(*, source: str, pgn_path: str, max_games: int) -> dict
             games_data=phase1_result.get("games_data"),
         )
 
+    warning = None
+    if not engine_ok:
+        warning = "Local engine is unavailable; using remote analysis if configured."
+
     return {
         "ok": True,
         "exit_code": 0,
-        "limited_mode": False,
-        "engine_available": True,
-        "engine_reason": "ok",
+        "limited_mode": False if phase1_result else True,
+        "engine_available": bool(engine_ok),
+        "engine_reason": engine_reason if not engine_ok else "ok",
         "source": src,
         "name": output_name,
         "max_games": max_games_i,
         "output_text": stdout_buf.getvalue(),
         "csv_file": f"games_{output_name}.csv",
         "analysis_file": f"{output_name}_analysis.txt",
+        "warning": warning,
     }
 
 
