@@ -204,6 +204,28 @@ def _result_for_focus(headers: dict[str, str], focus_color: str | None) -> str |
     return None
 
 
+def _infer_focus_player_from_games(games: list[GameInput]) -> str | None:
+    """Infer a likely focus player from a set of games.
+
+    Used for uploaded PGNs where we don't have a username.
+    Picks the most frequent player name across White/Black headers.
+    """
+    counts: dict[str, int] = {}
+    canonical: dict[str, str] = {}
+    for gi in games:
+        for side in ("White", "Black"):
+            name = (gi.headers.get(side) or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            canonical.setdefault(key, name)
+            counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return None
+    focus_key = max(counts.items(), key=lambda kv: kv[1])[0]
+    return canonical.get(focus_key)
+
+
 def _phase_for_ply(ply_index: int, total_plies: int) -> str:
     """Heuristic phase split by plies (half-moves).
 
@@ -770,8 +792,8 @@ def main() -> None:
             aggregated_games: list[dict[str, Any]] = []
             aggregated_rows: list[dict[str, Any]] = []
 
-            # Default focus for uploads: White (no username context)
-            focus_player = (games_inputs[0].headers.get("White") if games_inputs else None)
+            # For uploads, infer the most likely focus player across games.
+            focus_player = _infer_focus_player_from_games(games_inputs)
 
             for i, gi in enumerate(games_inputs[:games_to_analyze], start=1):
                 status.info(f"Analyzing {i} of {games_to_analyze} games...")
@@ -795,6 +817,8 @@ def main() -> None:
                 )
                 aggregated_rows.extend(rows)
 
+                # Recognize opening by moves if not in PGN headers
+                opening_name, eco_code = recognize_opening(gi.move_sans)
                 aggregated_games.append(
                     {
                         "index": gi.index,
@@ -802,8 +826,8 @@ def main() -> None:
                         "white": gi.headers.get("White") or "",
                         "black": gi.headers.get("Black") or "",
                         "result": gi.headers.get("Result") or "",
-                        "eco": gi.headers.get("ECO") or "",
-                        "opening": gi.headers.get("Opening") or "",
+                        "eco": gi.headers.get("ECO") or eco_code or "",
+                        "opening": gi.headers.get("Opening") or opening_name or "",
                         "moves": int((gi.num_plies + 1) // 2),
                         "moves_table": moves_table,
                         "focus_color": focus_color,
