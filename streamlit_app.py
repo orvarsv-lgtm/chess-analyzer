@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass
 from io import StringIO
 from typing import Any
@@ -127,6 +128,23 @@ def recognize_opening(moves: list[str]) -> tuple[str, str]:
     return ("Unknown", "")
 
 ANALYZE_ROUTE = "/analyze_game"  # Base URL only; do NOT include this path in secrets/env.
+
+# CPL / phase stats tuning
+MATE_CP_THRESHOLD = 10_000  # treat evals beyond this magnitude as mate-like / non-CPL
+CPL_CP_LOSS_CAP = 2_000     # cap a single-move cp_loss contribution to avoid outliers
+
+
+def _ceil_int(x: float | int) -> int:
+    try:
+        return int(math.ceil(float(x)))
+    except Exception:
+        return 0
+
+
+def _pct(numer: float, denom: float) -> int:
+    if denom <= 0:
+        return 0
+    return _ceil_int((numer / denom) * 100.0)
 
 def _get_engine_endpoint() -> tuple[str, str]:
     """Resolve engine URL and API key (Streamlit secrets first, then env)."""
@@ -317,29 +335,49 @@ def _compute_cp_loss_rows(
     score_cp is assumed to be White POV evaluation after the move.
     cp_loss is assigned to the side that just moved.
     """
-    scores: list[int] = []
+    # score_cp is assumed to be White POV eval after the move.
+    # Some engines encode mates as huge centipawn numbers. Exclude those from CPL.
+    scores: list[int | None] = []
     for r in analysis_rows:
         try:
-            scores.append(int(r.get("score_cp") or 0))
+            v = int(r.get("score_cp") or 0)
+            if abs(v) >= MATE_CP_THRESHOLD:
+                scores.append(None)
+            else:
+                scores.append(v)
         except Exception:
-            scores.append(0)
+            scores.append(None)
 
     out: list[dict[str, Any]] = []
     prev_score: int | None = None
     for i, r in enumerate(analysis_rows):
-        curr = scores[i] if i < len(scores) else 0
+        curr = scores[i] if i < len(scores) else None
         mover = "white" if (i % 2 == 0) else "black"
 
         cp_loss = 0
-        if prev_score is not None:
-            if mover == "white":
-                cp_loss = max(0, prev_score - curr)
+        cpl_included = True
+
+        # If either side of the delta is mate-like/unknown, exclude from CPL.
+        if curr is None:
+            cpl_included = False
+        if prev_score is None:
+            # First ply (or after excluded ply) has no delta.
+            cp_loss = 0
+        else:
+            if not cpl_included:
+                cp_loss = 0
             else:
-                cp_loss = max(0, curr - prev_score)
+                if mover == "white":
+                    cp_loss = max(0, prev_score - curr)
+                else:
+                    cp_loss = max(0, curr - prev_score)
+                # Cap extreme swings (including imminent mates) so averages stay meaningful.
+                cp_loss = min(int(cp_loss), int(CPL_CP_LOSS_CAP))
 
         prev_score = curr
         if focus_color and mover != focus_color:
             cp_loss = 0
+            cpl_included = False
 
         if fens_after_ply and i < len(fens_after_ply):
             try:
@@ -354,9 +392,10 @@ def _compute_cp_loss_rows(
                 "ply": i + 1,
                 "mover": mover,
                 "move_san": r.get("move_san"),
-                "score_cp": curr,
+                "score_cp": int(curr) if curr is not None else None,
                 "cp_loss": cp_loss,
                 "phase": phase,
+                "cpl_included": bool(cpl_included),
             }
         )
     return out
@@ -372,7 +411,11 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
     phase_stats: dict[str, dict[str, Any]] = {}
     for phase in ("opening", "middlegame", "endgame"):
         phase_rows = [r for r in all_move_rows if r.get("phase") == phase]
-        cpl_vals = [int(r.get("cp_loss") or 0) for r in phase_rows if int(r.get("cp_loss") or 0) > 0]
+        cpl_vals = [
+            int(r.get("cp_loss") or 0)
+            for r in phase_rows
+            if bool(r.get("cpl_included", True)) and int(r.get("cp_loss") or 0) > 0
+        ]
         avg_cpl = (sum(cpl_vals) / len(cpl_vals)) if cpl_vals else 0.0
         mistakes = sum(1 for v in cpl_vals if v >= 100)
         blunders = sum(1 for v in cpl_vals if v >= 300)
@@ -382,6 +425,29 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
             "mistakes": int(mistakes),
             "blunders": int(blunders),
         }
+
+    # Endgame CPL inflation vs non-endgame (opening+middlegame)
+    end_avg = float(phase_stats.get("endgame", {}).get("avg_cpl", 0.0) or 0.0)
+    non_rows = [r for r in all_move_rows if r.get("phase") in {"opening", "middlegame"}]
+    non_vals = [
+        int(r.get("cp_loss") or 0)
+        for r in non_rows
+        if bool(r.get("cpl_included", True)) and int(r.get("cp_loss") or 0) > 0
+    ]
+    non_avg = (sum(non_vals) / len(non_vals)) if non_vals else 0.0
+    endgame_inflation_pct = 0.0
+    if non_avg and end_avg:
+        endgame_inflation_pct = max(0.0, ((end_avg / non_avg) - 1.0) * 100.0)
+
+    # Optional comparison to a "normal" endgame inflation baseline (percent).
+    # If not provided, UI will show N/A.
+    try:
+        normal_inflation_pct = float(os.getenv("NORMAL_ENDGAME_INFLATION_PCT") or 0.0)
+    except Exception:
+        normal_inflation_pct = 0.0
+    endgame_vs_normal_pct = None
+    if normal_inflation_pct > 0.0:
+        endgame_vs_normal_pct = (endgame_inflation_pct / normal_inflation_pct) * 100.0
 
     # Weakest/strongest phases
     phase_by_cpl = sorted(((p, s.get("avg_cpl", 0.0)) for p, s in phase_stats.items()), key=lambda x: x[1], reverse=True)
@@ -479,6 +545,8 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
         "analysis": [],
         "games": games,
         "phase_stats": phase_stats,
+        "endgame_inflation_pct": float(endgame_inflation_pct),
+        "endgame_vs_normal_pct": (float(endgame_vs_normal_pct) if endgame_vs_normal_pct is not None else None),
         "opening_rates": opening_rates,
         "cpl_trend": cpl_trend,
         "endgame_success": endgame_success,
@@ -613,7 +681,7 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
             [
                 {
                     "Phase": p.title(),
-                    "Avg CPL": round(float(s.get("avg_cpl") or 0.0), 1),
+                    "Avg CPL": _ceil_int(float(s.get("avg_cpl") or 0.0)),
                     "Moves": int(s.get("moves") or 0),
                     "Mistakes (>=100)": int(s.get("mistakes") or 0),
                     "Blunders (>=300)": int(s.get("blunders") or 0),
@@ -626,6 +694,14 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
         # Simple charts without adding deps
         chart_df = phase_df.set_index("Phase")[["Avg CPL", "Mistakes (>=100)", "Blunders (>=300)"]]
         st.bar_chart(chart_df)
+
+        # Endgame bias metrics (percent)
+        infl = float(aggregated.get("endgame_inflation_pct") or 0.0)
+        vs_normal = aggregated.get("endgame_vs_normal_pct")
+        st.caption(
+            f"Endgame CPL inflation vs non-endgame baseline: {_ceil_int(infl)}%"
+            + (f" | vs normal: {_ceil_int(float(vs_normal))}%" if vs_normal is not None else "")
+        )
 
     # --- Win rates / opening performance ---
     opening_rates = aggregated.get("opening_rates") or []
@@ -642,6 +718,8 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
         st.subheader("CPL Trend")
         tdf = pd.DataFrame(trend)
         if not tdf.empty:
+            # Round up for display
+            tdf["avg_cpl"] = tdf["avg_cpl"].apply(_ceil_int)
             tdf = tdf.set_index("game")[["avg_cpl"]]
             st.line_chart(tdf)
 
