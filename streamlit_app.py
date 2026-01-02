@@ -19,10 +19,24 @@ OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
 # Load opening data as DataFrame (tab-separated)
 @st.cache_data(show_spinner=False)
 def load_opening_db() -> pd.DataFrame:
-    try:
-        df = pd.read_csv(OPENING_DATA_PATH, sep="\t", engine="python", dtype=str)
-    except Exception:
-        # If the file is missing/empty/unreadable, return an empty DB.
+    # The opening dataset may be TSV or CSV depending on source.
+    # Prefer auto-detection; fall back to common separators.
+    df: pd.DataFrame
+    last_err: Exception | None = None
+    for sep in (None, "\t", ","):
+        try:
+            if sep is None:
+                df = pd.read_csv(OPENING_DATA_PATH, sep=None, engine="python", dtype=str)
+            else:
+                df = pd.read_csv(OPENING_DATA_PATH, sep=sep, engine="python", dtype=str)
+            break
+        except Exception as e:
+            last_err = e
+            df = pd.DataFrame()
+
+    # If the file is missing/empty/unreadable, return an empty DB.
+    if df is None or df.empty:
+        _ = last_err  # keep for debugging if needed
         df = pd.DataFrame(columns=["Moves", "Opening", "ECO"])
 
     for col in ("Moves", "Opening", "ECO"):
@@ -35,27 +49,82 @@ def load_opening_db() -> pd.DataFrame:
 openings_db = load_opening_db()
 
 
+def _normalize_move_token(token: str) -> str:
+    """Normalize a token to align dataset 'Moves' with SAN from PGN.
+
+    Dataset examples: '1.e4', '2.e5', '3...Nf6' (sometimes)
+    PGN SAN examples: 'e4', 'Nf6', 'O-O', 'exd5'
+    """
+    t = (token or "").strip()
+    if not t:
+        return ""
+
+    # Strip leading move numbers like '1.', '1...', '1.e4'
+    # - '1.e4' -> 'e4'
+    # - '1...'  -> ''
+    t = t.lstrip()
+    # Fast path for '1.e4'
+    if "." in t and t.split(".", 1)[0].isdigit():
+        t = t.split(".", 1)[1]
+        t = t.lstrip(".")
+
+    # Remove trailing check/mate markers for looser matching
+    t = t.rstrip("+#")
+
+    # Drop PGN result tokens
+    if t in {"*", "1-0", "0-1", "1/2-1/2"}:
+        return ""
+    return t
+
+
+@st.cache_data(show_spinner=False)
+def _build_opening_index(df: pd.DataFrame) -> tuple[dict[tuple[str, ...], tuple[str, str]], int]:
+    """Build a dict mapping move-sequence tuples -> (Opening, ECO)."""
+    index: dict[tuple[str, ...], tuple[str, str]] = {}
+    max_len = 0
+    if df is None or df.empty:
+        return index, 0
+
+    for _, row in df.iterrows():
+        moves_str = str(row.get("Moves", "") or "").strip()
+        if not moves_str:
+            continue
+        tokens = [_normalize_move_token(tok) for tok in moves_str.split()]
+        tokens = [t for t in tokens if t]
+        if not tokens:
+            continue
+
+        key = tuple(tokens)
+        opening = str(row.get("Opening", "Unknown") or "Unknown")
+        eco = str(row.get("ECO", "") or "")
+
+        # If duplicates exist, keep the first; longest-prefix match will pick by length anyway.
+        index.setdefault(key, (opening, eco))
+        if len(key) > max_len:
+            max_len = len(key)
+
+    return index, max_len
+
+
+_OPENING_INDEX, _OPENING_MAXLEN = _build_opening_index(openings_db)
+
+
 def recognize_opening(moves: list[str]) -> tuple[str, str]:
     """Return (Opening name, ECO) by longest prefix match on SAN moves."""
-    if openings_db.empty or not moves:
+    if not moves or not _OPENING_INDEX:
         return ("Unknown", "")
 
-    best_len = 0
-    best_name = "Unknown"
-    best_eco = ""
+    norm = [_normalize_move_token(m) for m in moves]
+    norm = [t for t in norm if t]
+    if not norm:
+        return ("Unknown", "")
 
-    for _, row in openings_db.iterrows():
-        db_moves = str(row.get("Moves", "")).strip()
-        if not db_moves:
-            continue
-        db_moves_list = db_moves.split()
-        if len(db_moves_list) > len(moves):
-            continue
-        if moves[: len(db_moves_list)] == db_moves_list and len(db_moves_list) > best_len:
-            best_len = len(db_moves_list)
-            best_name = str(row.get("Opening", "Unknown") or "Unknown")
-            best_eco = str(row.get("ECO", "") or "")
-    return (best_name, best_eco)
+    max_k = min(len(norm), int(_OPENING_MAXLEN or 0))
+    for k in range(max_k, 0, -1):
+        hit = _OPENING_INDEX.get(tuple(norm[:k]))
+        if hit:
+            return hit
+    return ("Unknown", "")
 
 ANALYZE_ROUTE = "/analyze_game"  # Base URL only; do NOT include this path in secrets/env.
 
@@ -504,6 +573,13 @@ def main() -> None:
         st.session_state["analysis_request"] = None
 
     st.subheader("Inputs")
+    if openings_db is None or openings_db.empty or not _OPENING_INDEX:
+        st.warning(
+            "Opening database is not loaded (or empty). "
+            "Openings cannot be recognized until src/Chess_opening_data is a real non-empty TSV file in the repo."
+        )
+    else:
+        st.caption(f"Opening database loaded: {len(openings_db)} rows")
     source = st.radio("Source", ["Lichess username", "Chess.com PGN file"], horizontal=True)
     max_games = st.slider("Max games", min_value=1, max_value=200, value=10, step=1)
 
