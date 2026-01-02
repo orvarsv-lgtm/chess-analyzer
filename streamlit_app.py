@@ -4,23 +4,62 @@ import os
 import re
 import tempfile
 
+import requests
 import streamlit as st
 
-from src.streamlit_adapter import run_analysis_streamlit
+from src.lichess_api import fetch_lichess_pgn
+
+
+def _get_engine_endpoint() -> tuple[str, str]:
+    """Resolve engine URL and API key (Streamlit secrets first, then env)."""
+    try:
+        url = st.secrets["VPS_ANALYSIS_URL"]
+        api_key = st.secrets["VPS_API_KEY"]
+        return url, api_key
+    except Exception:
+        url = os.getenv("VPS_ANALYSIS_URL") or ""
+        api_key = os.getenv("VPS_API_KEY") or ""
+        return url, api_key
+
+
+def _post_to_engine(pgn_text: str) -> dict:
+    url, api_key = _get_engine_endpoint()
+    if not url:
+        raise RuntimeError("Engine endpoint not configured")
+
+    headers = {"x-api-key": api_key} if api_key else {}
+    payload = {"pgn": pgn_text, "pgn_string": pgn_text}
+    resp = requests.post(f"{url}/analyze_game", json=payload, timeout=300, headers=headers)
+
+    if resp.status_code == 403:
+        raise RuntimeError("VPS Authentication Failed")
+    if not resp.ok:
+        raise RuntimeError(f"Engine analysis failed (status {resp.status_code})")
+
+    return resp.json()
 
 
 def main() -> None:
-    st.title("Chess Analyzer")
+    st.title("Chess Analyzer (Remote Engine)")
 
     source = st.radio("Source", ["Lichess username", "Chess.com PGN file"])
-    max_games = st.number_input("Max games", min_value=1, max_value=50, value=10, step=1)
 
     if source == "Lichess username":
         username = st.text_input("Lichess username")
         if st.button("Run analysis"):
-            results = run_analysis_streamlit(source=source, pgn_path=username, max_games=max_games)
-            if results.get("limited_mode") and not results.get("engine_available"):
-                st.warning(results.get("warning") or "Engine analysis is unavailable in this environment.")
+            if not username:
+                st.error("Please enter a username")
+                return
+            try:
+                pgn_text = fetch_lichess_pgn(username, max_games=50)
+            except Exception as e:
+                st.error(f"Failed to fetch PGN: {e}")
+                st.stop()
+            try:
+                results = _post_to_engine(pgn_text)
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
             st.json(results)
 
     else:
@@ -33,21 +72,29 @@ def main() -> None:
             original_stem = os.path.splitext(uploaded.name or "uploaded")[0]
             safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "_", original_stem).strip("_") or "uploaded"
 
+            # Keep temporary file handling only for naming consistency; analysis uses content, not local engine.
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pgn", prefix=f"{safe_stem}_") as tmp:
                 tmp.write(uploaded.getvalue())
                 tmp_path = tmp.name
 
             try:
-                results = run_analysis_streamlit(source=source, pgn_path=tmp_path, max_games=max_games)
+                pgn_text = uploaded.getvalue().decode(errors="ignore")
+                results = _post_to_engine(pgn_text)
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
             finally:
                 try:
                     os.remove(tmp_path)
                 except OSError:
                     pass
 
-            if results.get("limited_mode") and not results.get("engine_available"):
-                st.warning(results.get("warning") or "Engine analysis is unavailable in this environment.")
             st.json(results)
+
+
+# Prevent any accidental local analysis path.
+def _legacy_local_analyzer_guard(*_args, **_kwargs):
+    raise RuntimeError("Local analyzer must never run in Streamlit")
 
 
 if __name__ == "__main__":
