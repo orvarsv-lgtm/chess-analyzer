@@ -57,9 +57,11 @@ def _post_to_engine(pgn_text: str, max_games: int) -> dict:
     if resp.status_code == 422:
         st.error("Engine rejected request (422 Validation Error)")
         st.info(
-            "This backend is rejecting JSON payloads. "
-            "If your backend is meant to accept PGN text, it must accept a JSON body with keys 'pgn' and 'max_games'. "
-            "The current server at this URL appears to require a multipart 'file' field instead."
+            "Backend contract mismatch: the server at this URL is not accepting JSON bodies. "
+            "It is requiring multipart/form-data with a required 'file' field (confirmed by /openapi.json and by a direct JSON POST).\n\n"
+            "To satisfy the project rule (PGN text only; keys ['pgn','max_games']), you must either:\n"
+            "1) Point VPS_ANALYSIS_URL at the correct JSON-accepting backend, or\n"
+            "2) Update the FastAPI backend /analyze_game endpoint to accept application/json with a body containing 'pgn' and 'max_games'."
         )
         try:
             st.json(resp.json())
