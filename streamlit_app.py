@@ -1,3 +1,43 @@
+OPENING_DATA_PATH = os.path.join("src", "Chess_opening_data")
+
+# Load opening data as DataFrame (tab-separated, skip first row if headerless)
+@st.cache_data(show_spinner=False)
+def load_opening_db():
+    try:
+        df = pd.read_csv(OPENING_DATA_PATH, sep="\t", engine="python", dtype=str)
+        # Normalize moves column for matching
+        df["Moves"] = df["Moves"].fillna("").str.strip()
+        df["Opening"] = df["Opening"].fillna("").str.strip()
+        df["ECO"] = df["ECO"].fillna("").str.strip()
+        return df
+    except Exception as e:
+        st.warning(f"Could not load opening DB: {e}")
+        return pd.DataFrame()
+
+openings_db = load_opening_db()
+
+def recognize_opening(moves: list[str]) -> tuple[str, str]:
+    """Return (Opening name, ECO) by longest prefix match on moves."""
+    if openings_db is None or openings_db.empty or not moves:
+        return ("Unknown", "")
+    best_len = 0
+    best_name = "Unknown"
+    best_eco = ""
+    moves_str = " ".join(moves)
+    for _, row in openings_db.iterrows():
+        db_moves = str(row["Moves"]).strip()
+        if not db_moves:
+            continue
+        db_moves_list = db_moves.split()
+        if len(db_moves_list) > len(moves):
+            continue
+        # Check if the prefix matches
+        if moves[:len(db_moves_list)] == db_moves_list:
+            if len(db_moves_list) > best_len:
+                best_len = len(db_moves_list)
+                best_name = row["Opening"]
+                best_eco = row["ECO"]
+    return (best_name, best_eco)
 
 from __future__ import annotations
 
@@ -514,6 +554,8 @@ def main() -> None:
                 )
                 aggregated_rows.extend(rows)
 
+                # Recognize opening by moves if not in PGN headers
+                opening_name, eco_code = recognize_opening(gi.move_sans)
                 aggregated_games.append(
                     {
                         "index": gi.index,
@@ -521,8 +563,8 @@ def main() -> None:
                         "white": gi.headers.get("White") or "",
                         "black": gi.headers.get("Black") or "",
                         "result": gi.headers.get("Result") or "",
-                        "eco": gi.headers.get("ECO") or "",
-                        "opening": gi.headers.get("Opening") or "",
+                        "eco": gi.headers.get("ECO") or eco_code or "",
+                        "opening": gi.headers.get("Opening") or opening_name or "",
                         "moves": int((gi.num_plies + 1) // 2),
                         "moves_table": moves_table,
                         "focus_color": focus_color,
