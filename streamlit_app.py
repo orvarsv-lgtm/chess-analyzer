@@ -1,45 +1,5 @@
-OPENING_DATA_PATH = os.path.join("src", "Chess_opening_data")
-
-# Load opening data as DataFrame (tab-separated, skip first row if headerless)
-@st.cache_data(show_spinner=False)
-def load_opening_db():
-    try:
-        df = pd.read_csv(OPENING_DATA_PATH, sep="\t", engine="python", dtype=str)
-        # Normalize moves column for matching
-        df["Moves"] = df["Moves"].fillna("").str.strip()
-        df["Opening"] = df["Opening"].fillna("").str.strip()
-        df["ECO"] = df["ECO"].fillna("").str.strip()
-        return df
-    except Exception as e:
-        st.warning(f"Could not load opening DB: {e}")
-        return pd.DataFrame()
-
-openings_db = load_opening_db()
-
-def recognize_opening(moves: list[str]) -> tuple[str, str]:
-    """Return (Opening name, ECO) by longest prefix match on moves."""
-    if openings_db is None or openings_db.empty or not moves:
-        return ("Unknown", "")
-    best_len = 0
-    best_name = "Unknown"
-    best_eco = ""
-    moves_str = " ".join(moves)
-    for _, row in openings_db.iterrows():
-        db_moves = str(row["Moves"]).strip()
-        if not db_moves:
-            continue
-        db_moves_list = db_moves.split()
-        if len(db_moves_list) > len(moves):
-            continue
-        # Check if the prefix matches
-        if moves[:len(db_moves_list)] == db_moves_list:
-            if len(db_moves_list) > best_len:
-                best_len = len(db_moves_list)
-                best_name = row["Opening"]
-                best_eco = row["ECO"]
-    return (best_name, best_eco)
-
 from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 from io import StringIO
@@ -51,6 +11,51 @@ import streamlit as st
 import chess.pgn
 
 from src.lichess_api import fetch_lichess_pgn
+
+BASE_DIR = os.path.dirname(__file__)
+OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
+
+
+# Load opening data as DataFrame (tab-separated)
+@st.cache_data(show_spinner=False)
+def load_opening_db() -> pd.DataFrame:
+    try:
+        df = pd.read_csv(OPENING_DATA_PATH, sep="\t", engine="python", dtype=str)
+    except Exception:
+        # If the file is missing/empty/unreadable, return an empty DB.
+        df = pd.DataFrame(columns=["Moves", "Opening", "ECO"])
+
+    for col in ("Moves", "Opening", "ECO"):
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str).str.strip()
+    return df
+
+
+openings_db = load_opening_db()
+
+
+def recognize_opening(moves: list[str]) -> tuple[str, str]:
+    """Return (Opening name, ECO) by longest prefix match on SAN moves."""
+    if openings_db.empty or not moves:
+        return ("Unknown", "")
+
+    best_len = 0
+    best_name = "Unknown"
+    best_eco = ""
+
+    for _, row in openings_db.iterrows():
+        db_moves = str(row.get("Moves", "")).strip()
+        if not db_moves:
+            continue
+        db_moves_list = db_moves.split()
+        if len(db_moves_list) > len(moves):
+            continue
+        if moves[: len(db_moves_list)] == db_moves_list and len(db_moves_list) > best_len:
+            best_len = len(db_moves_list)
+            best_name = str(row.get("Opening", "Unknown") or "Unknown")
+            best_eco = str(row.get("ECO", "") or "")
+    return (best_name, best_eco)
 
 ANALYZE_ROUTE = "/analyze_game"  # Base URL only; do NOT include this path in secrets/env.
 
