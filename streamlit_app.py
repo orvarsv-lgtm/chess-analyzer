@@ -40,7 +40,6 @@ def recognize_opening(moves: list[str]) -> tuple[str, str]:
     return (best_name, best_eco)
 
 from __future__ import annotations
-
 import os
 from dataclasses import dataclass
 from io import StringIO
