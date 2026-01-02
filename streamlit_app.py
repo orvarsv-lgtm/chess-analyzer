@@ -36,13 +36,15 @@ def _post_to_engine(pgn_text: str, max_games: int) -> dict:
     if endpoint.count("/analyze_game") != 1:
         raise RuntimeError(f"Invalid engine endpoint: {endpoint}")
     headers = {"x-api-key": api_key} if api_key else {}
-    payload = {"pgn": pgn_text, "max_games": max_games}
+    # Backend requires multipart with `file`; keep max_games as form data.
+    data = {"max_games": str(max_games)}
+    files = {"file": ("game.pgn", pgn_text, "application/x-chess-pgn")}
 
     # Temporary debug logging to confirm correct route/payload
     st.write("POSTING TO:", endpoint)
-    st.write("Payload keys:", list(payload.keys()))
+    st.write("Payload keys:", list(data.keys()) + list(files.keys()))
 
-    resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
+    resp = requests.post(endpoint, data=data, files=files, timeout=300, headers=headers)
 
     if resp.status_code == 403:
         raise RuntimeError("VPS Authentication Failed")
