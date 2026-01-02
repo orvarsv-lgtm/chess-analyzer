@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import os
@@ -9,6 +10,7 @@ import streamlit as st
 
 from src.lichess_api import fetch_lichess_pgn
 
+ANALYZE_ROUTE = "/analyze_game"
 
 def _get_engine_endpoint() -> tuple[str, str]:
     """Resolve engine URL and API key (Streamlit secrets first, then env)."""
@@ -27,12 +29,20 @@ def _post_to_engine(pgn_text: str) -> dict:
     if not url:
         raise RuntimeError("Engine endpoint not configured")
 
+    endpoint = f"{url.rstrip('/')}{ANALYZE_ROUTE}"
     headers = {"x-api-key": api_key} if api_key else {}
-    payload = {"pgn": pgn_text, "pgn_string": pgn_text}
-    resp = requests.post(f"{url}/analyze_game", json=payload, timeout=300, headers=headers)
+    payload = {"pgn": pgn_text}
+
+    # Temporary debug logging to confirm correct route/payload
+    st.write("POSTING TO:", endpoint)
+    st.write("Payload keys:", list(payload.keys()))
+
+    resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
 
     if resp.status_code == 403:
         raise RuntimeError("VPS Authentication Failed")
+    if resp.status_code == 404:
+        raise RuntimeError(f"Engine endpoint not found: {endpoint}. Check FastAPI route definition.")
     if not resp.ok:
         raise RuntimeError(f"Engine analysis failed (status {resp.status_code})")
 
