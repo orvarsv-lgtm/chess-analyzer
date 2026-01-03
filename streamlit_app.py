@@ -756,6 +756,16 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
                 moves_df = pd.DataFrame(g.get("moves_table") or [])
                 if not moves_df.empty:
                     st.dataframe(moves_df, use_container_width=True)
+                    
+                    # Add evaluation chart (line chart showing score_cp over ply)
+                    if "score_cp" in moves_df.columns and "ply" in moves_df.columns:
+                        st.write("**Evaluation over moves:**")
+                        eval_df = moves_df[["ply", "score_cp"]].dropna()
+                        if not eval_df.empty:
+                            # Streamlit line_chart needs index as x-axis
+                            eval_chart = eval_df.set_index("ply")[["score_cp"]]
+                            st.line_chart(eval_chart)
+                            st.caption("Positive = White advantage | Negative = Black advantage (centipawns)")
                 else:
                     st.warning("No move rows to display for this game.")
 
@@ -763,23 +773,42 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
     phase_stats = aggregated.get("phase_stats") or {}
     if phase_stats:
         st.subheader("Phase Analysis")
+        # Ensure consistent phase order
+        phase_order = ["opening", "middlegame", "endgame"]
         phase_df = pd.DataFrame(
             [
                 {
                     "Phase": p.title(),
-                    "Avg CPL": _ceil_int(float(s.get("avg_cpl") or 0.0)),
-                    "Moves": int(s.get("moves") or 0),
-                    "Mistakes (>=100)": int(s.get("mistakes") or 0),
-                    "Blunders (>=300)": int(s.get("blunders") or 0),
+                    "Avg CPL": _ceil_int(float(phase_stats.get(p, {}).get("avg_cpl") or 0.0)),
+                    "Moves": int(phase_stats.get(p, {}).get("moves") or 0),
+                    "Mistakes (>=100)": int(phase_stats.get(p, {}).get("mistakes") or 0),
+                    "Blunders (>=300)": int(phase_stats.get(p, {}).get("blunders") or 0),
                 }
-                for p, s in phase_stats.items()
+                for p in phase_order if p in phase_stats
             ]
         )
         st.dataframe(phase_df, use_container_width=True)
 
-        # Simple charts without adding deps
-        chart_df = phase_df.set_index("Phase")[["Avg CPL", "Mistakes (>=100)", "Blunders (>=300)"]]
-        st.bar_chart(chart_df)
+        # Create separate bar charts for each metric (3 charts side by side)
+        st.write("**Phase Performance Charts**")
+        col1, col2, col3 = st.columns(3)
+        
+        chart_data = phase_df.set_index("Phase")
+        
+        with col1:
+            st.write("📊 Avg CPL by Phase")
+            cpl_chart = chart_data[["Avg CPL"]]
+            st.bar_chart(cpl_chart)
+        
+        with col2:
+            st.write("⚠️ Mistakes by Phase")
+            mistakes_chart = chart_data[["Mistakes (>=100)"]]
+            st.bar_chart(mistakes_chart)
+        
+        with col3:
+            st.write("💥 Blunders by Phase")
+            blunders_chart = chart_data[["Blunders (>=300)"]]
+            st.bar_chart(blunders_chart)
 
         # Endgame bias metrics (percent)
         infl = float(aggregated.get("endgame_inflation_pct") or 0.0)
@@ -983,51 +1012,100 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
     plan = coaching_report.training_plan
     if plan.primary_focus:
         st.subheader("📚 Weekly Training Plan")
-        st.info(f"**Primary Focus:** {plan.primary_focus}")
         
+        # Primary/Secondary focus with rationale
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"**🎯 Primary Focus:** {plan.primary_focus}")
+        with col2:
+            if plan.secondary_focus:
+                st.info(f"**📌 Secondary Focus:** {plan.secondary_focus}")
+        
+        if plan.rationale:
+            st.caption(f"💡 *{plan.rationale}*")
+        
+        # Priority areas
+        priority_col1, priority_col2 = st.columns(2)
+        with priority_col1:
+            if plan.priority_endgame_types:
+                st.write("**♟️ Priority Endgame Types:**")
+                for eg in plan.priority_endgame_types[:3]:
+                    st.write(f"  • {eg}")
+        with priority_col2:
+            if plan.priority_tactical_themes:
+                st.write("**⚔️ Priority Tactical Themes:**")
+                for theme in plan.priority_tactical_themes[:3]:
+                    st.write(f"  • {theme}")
+        
+        # Daily schedule
         if plan.daily_exercises:
             with st.expander("📅 Daily Exercise Schedule", expanded=True):
                 for day in plan.daily_exercises:
                     day_dict = day if isinstance(day, dict) else day.to_dict()
-                    st.write(f"**{day_dict.get('day', 'Day')}:** {day_dict.get('theme', 'Practice')}")
-                    exercises = day_dict.get("exercises", [])
+                    day_name = day_dict.get('day', 'Day')
+                    theme = day_dict.get('theme', 'Practice')
+                    focus = day_dict.get('focus_area', '')
+                    duration = day_dict.get('duration_minutes', 30)
+                    
+                    st.markdown(f"**{day_name}:** {theme} ({duration} min)")
+                    exercises = day_dict.get("exercises", []) or day_dict.get("suggested_exercises", [])
                     if exercises:
-                        for ex in exercises[:3]:
-                            st.caption(f"   • {ex}")
+                        for ex in exercises[:4]:
+                            st.caption(f"   ✓ {ex}")
         
+        # Recommended resources
         if plan.recommended_resources:
             with st.expander("📖 Recommended Resources", expanded=False):
-                for resource in plan.recommended_resources[:5]:
+                for resource in plan.recommended_resources[:8]:
                     st.write(f"• {resource}")
     
     # --- Peer Benchmark ---
     peer = coaching_report.peer_comparison
     if peer.rating_bracket:
         st.subheader("📊 Peer Comparison")
-        st.caption(f"Comparing to players rated {peer.rating_bracket}")
+        
+        # Show rating bracket prominently
+        st.markdown(f"### 🏆 Rating Bracket: **{peer.rating_bracket}**")
+        if peer.sample_size > 0:
+            st.caption(f"Based on {peer.sample_size:,} players in this rating range")
         
         col1, col2, col3 = st.columns(3)
         with col1:
             pct = peer.overall_cpl_percentile
-            st.metric("Overall CPL", f"Top {100 - pct}%" if pct > 0 else "N/A")
+            rank_str = f"Top {100 - pct}%" if pct > 0 else "N/A"
+            st.metric("Overall CPL", rank_str, help="Your centipawn loss percentile vs peers")
         with col2:
             if peer.strongest_vs_peers:
-                st.metric("Strongest Phase", peer.strongest_vs_peers.title())
+                st.metric("💪 Strongest Phase", peer.strongest_vs_peers.title())
         with col3:
             if peer.weakest_vs_peers:
-                st.metric("Weakest Phase", peer.weakest_vs_peers.title())
+                st.metric("📈 Needs Work", peer.weakest_vs_peers.title())
         
-        # Phase percentiles
+        # Blunder rate comparison
+        if peer.blunder_rate_percentile > 0 or peer.blunder_rate_vs_peers_pct != 0:
+            st.write("**Blunder Rate vs Peers:**")
+            br_pct = peer.blunder_rate_vs_peers_pct
+            if br_pct > 0:
+                st.warning(f"Your blunder rate is {br_pct}% higher than average for your rating bracket")
+            elif br_pct < 0:
+                st.success(f"Your blunder rate is {abs(br_pct)}% lower than average for your rating bracket!")
+            else:
+                st.info("Your blunder rate is average for your rating bracket")
+        
+        # Phase percentiles table
         phase_percentiles = []
         for phase in ["opening", "middlegame", "endgame"]:
             pct = getattr(peer, f"{phase}_cpl_percentile", 0)
             if pct > 0:
+                rank = 100 - pct
                 phase_percentiles.append({
                     "Phase": phase.title(),
                     "Percentile": pct,
-                    "Rank": f"Top {100 - pct}%",
+                    "Rank vs Peers": f"Top {rank}%" if rank <= 50 else f"Bottom {100 - rank}%",
+                    "Status": "✅ Strong" if rank <= 25 else "⚠️ Average" if rank <= 50 else "❌ Needs work",
                 })
         if phase_percentiles:
+            st.write("**Phase-by-Phase Performance:**")
             st.dataframe(pd.DataFrame(phase_percentiles), use_container_width=True, hide_index=True)
     
     # --- LLM-Ready JSON Export ---

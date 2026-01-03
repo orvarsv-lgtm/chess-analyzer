@@ -129,6 +129,9 @@ class OpeningDeviation:
     draw_rate_pct: int
     loss_rate_pct: int
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 @dataclass
 class OpeningDeviationReport:
@@ -187,6 +190,15 @@ class TrainingDay:
     suggested_exercises: list[str] = field(default_factory=list)
     estimated_duration_minutes: int = 30
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "day": self.day,
+            "theme": self.theme,
+            "focus_area": self.focus_area,
+            "exercises": self.suggested_exercises,
+            "duration_minutes": self.estimated_duration_minutes,
+        }
+
 
 @dataclass
 class WeeklyTrainingPlan:
@@ -197,15 +209,22 @@ class WeeklyTrainingPlan:
     weekly_plan: list[TrainingDay] = field(default_factory=list)
     priority_endgame_types: list[str] = field(default_factory=list)
     priority_tactical_themes: list[str] = field(default_factory=list)
+    recommended_resources: list[str] = field(default_factory=list)  # e.g., "Lichess puzzles", "Silman's Endgame Course"
+
+    @property
+    def daily_exercises(self) -> list[TrainingDay]:
+        """Alias for weekly_plan for UI compatibility."""
+        return self.weekly_plan
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "primary_focus": self.primary_focus,
             "secondary_focus": self.secondary_focus,
             "rationale": self.rationale,
-            "weekly_plan": [asdict(d) for d in self.weekly_plan],
+            "weekly_plan": [d.to_dict() for d in self.weekly_plan],
             "priority_endgame_types": self.priority_endgame_types,
             "priority_tactical_themes": self.priority_tactical_themes,
+            "recommended_resources": self.recommended_resources,
         }
 
 

@@ -412,7 +412,8 @@ def _is_overlooked_recapture(ctx: MoveContext) -> bool:
 
 def _is_missed_tactic(ctx: MoveContext) -> bool:
     """Check if there was an obvious tactical shot available."""
-    if ctx.cp_loss < 200:
+    # Lower threshold to catch more missed tactics
+    if ctx.cp_loss < 150:
         return False
 
     mover_color = not ctx.board_after.turn
@@ -426,18 +427,32 @@ def _is_missed_tactic(ctx: MoveContext) -> bool:
         return True
 
     # Look for forcing moves that existed
+    forcing_moves_available = 0
     for legal in ctx.board_before.legal_moves:
         # Check for checks
         if ctx.board_before.gives_check(legal):
-            if ctx.move != legal:
+            forcing_moves_available += 1
+            if ctx.move != legal and ctx.cp_loss >= 200:
                 return True
 
-        # Check for high-value captures
+        # Check for high-value captures (rook or queen)
         if ctx.board_before.is_capture(legal):
             captured = ctx.board_before.piece_at(legal.to_square)
             if captured and _piece_value(captured.piece_type) >= 5:
                 if ctx.move != legal:
                     return True
+            # Also flag missed minor piece captures with large eval loss
+            if captured and _piece_value(captured.piece_type) >= 3 and ctx.cp_loss >= 300:
+                if ctx.move != legal:
+                    return True
+
+    # If there were multiple forcing moves available and large eval loss, likely missed tactic
+    if forcing_moves_available >= 2 and ctx.cp_loss >= 300:
+        return True
+
+    # Large eval swing in middlegame often indicates tactical oversight
+    if ctx.phase == "middlegame" and ctx.cp_loss >= 400:
+        return True
 
     return False
 
@@ -627,12 +642,64 @@ def _is_time_pressure_blunder(ctx: MoveContext) -> bool:
     return ctx.clock_seconds <= TIME_PRESSURE_SECONDS
 
 
+def _fallback_classification(ctx: MoveContext) -> str:
+    """Fallback classification when board heuristics don't match.
+    
+    Uses eval magnitude, phase, and move characteristics to infer likely cause.
+    """
+    cp_loss = ctx.cp_loss
+    phase = ctx.phase
+    move_num = ctx.move_number
+    san = ctx.san or ""
+    
+    # Very large swings (500+ cp) usually indicate major tactical oversights
+    if cp_loss >= 500:
+        # If in endgame, likely technique
+        if phase == "endgame":
+            return "endgame_technique"
+        # Otherwise, most likely a missed tactic
+        return "missed_tactic"
+    
+    # Medium-large swings (300-500 cp)
+    if cp_loss >= 300:
+        # Opening errors in first 15 moves
+        if phase == "opening" or move_num <= 15:
+            return "opening_error"
+        
+        # Endgame technique in endgame
+        if phase == "endgame":
+            return "endgame_technique"
+        
+        # Check move characteristics for hints
+        # Piece moves in middlegame are often hanging pieces or tactical misses
+        if san and san[0].isupper() and san[0] not in "KQRBN":
+            # Pawn moves (lowercase starting)
+            pass
+        elif san and san[0] in "QRBN":
+            # Major/minor piece moves - often hanging or missed tactic
+            return "hanging_piece"
+        
+        # Default for middlegame large swings
+        return "missed_tactic"
+    
+    # Smaller blunders (100-300 cp) - could be positional
+    if phase == "opening":
+        return "opening_error"
+    elif phase == "endgame":
+        return "endgame_technique"
+    else:
+        # Middlegame moderate errors - likely piece activity or positional
+        return "piece_activity"
+
+
 def classify_single_blunder(ctx: MoveContext) -> str:
     """Classify a single blunder into a category.
     
     Priority order matters - check most specific/reliable patterns first.
-    New enhanced heuristics include back-rank, pawn structure, piece activity,
+    Enhanced heuristics include back-rank, pawn structure, piece activity,
     promotion oversight, and discovered attack detection.
+    
+    Falls back to inference based on eval swing and phase when board analysis is limited.
     """
     # Time pressure (if clock data exists) - most definitive
     if _is_time_pressure_blunder(ctx):
@@ -682,7 +749,9 @@ def classify_single_blunder(ctx: MoveContext) -> str:
     if _is_pawn_structure_error(ctx):
         return "pawn_structure"
 
-    return "unknown"
+    # Fallback classification based on cp_loss magnitude and phase
+    # Large swings usually indicate tactical misses
+    return _fallback_classification(ctx)
 
 
 def analyze_blunders(games_data: list[dict[str, Any]]) -> BlunderClassification:
