@@ -22,109 +22,105 @@ from .schemas import PeerBenchmark
 if TYPE_CHECKING:
     from typing import Any
 
-# Placeholder peer baselines by rating bracket
+# Placeholder peer baselines grouped in 300-point brackets.
 # Format: {bracket: {metric: (mean, std_dev)}}
-# These should be populated from real population data
 PEER_BASELINES: dict[str, dict[str, tuple[float, float]]] = {
-    "0-800": {
-        "overall_cpl": (180, 50),
-        "opening_cpl": (120, 40),
-        "middlegame_cpl": (200, 60),
-        "endgame_cpl": (220, 70),
-        "blunder_rate": (8.0, 3.0),
+    "0-299": {
+        "overall_cpl": (240, 60),
+        "opening_cpl": (170, 55),
+        "middlegame_cpl": (270, 65),
+        "endgame_cpl": (285, 70),
+        "blunder_rate": (11.0, 3.5),
     },
-    "800-1000": {
-        "overall_cpl": (140, 40),
-        "opening_cpl": (100, 35),
-        "middlegame_cpl": (160, 50),
-        "endgame_cpl": (180, 60),
-        "blunder_rate": (6.0, 2.5),
+    "300-599": {
+        "overall_cpl": (210, 55),
+        "opening_cpl": (150, 45),
+        "middlegame_cpl": (230, 60),
+        "endgame_cpl": (250, 65),
+        "blunder_rate": (9.0, 3.2),
     },
-    "1000-1200": {
-        "overall_cpl": (110, 35),
-        "opening_cpl": (80, 30),
-        "middlegame_cpl": (130, 45),
-        "endgame_cpl": (140, 50),
-        "blunder_rate": (4.5, 2.0),
+    "600-899": {
+        "overall_cpl": (170, 45),
+        "opening_cpl": (120, 35),
+        "middlegame_cpl": (190, 50),
+        "endgame_cpl": (205, 55),
+        "blunder_rate": (7.5, 2.8),
     },
-    "1200-1400": {
-        "overall_cpl": (85, 30),
-        "opening_cpl": (60, 25),
-        "middlegame_cpl": (100, 35),
-        "endgame_cpl": (110, 40),
-        "blunder_rate": (3.5, 1.5),
+    "900-1199": {
+        "overall_cpl": (135, 40),
+        "opening_cpl": (95, 30),
+        "middlegame_cpl": (155, 45),
+        "endgame_cpl": (170, 50),
+        "blunder_rate": (5.8, 2.3),
     },
-    "1400-1600": {
-        "overall_cpl": (65, 25),
-        "opening_cpl": (45, 20),
-        "middlegame_cpl": (80, 30),
-        "endgame_cpl": (85, 35),
-        "blunder_rate": (2.5, 1.2),
+    "1200-1499": {
+        "overall_cpl": (105, 35),
+        "opening_cpl": (75, 28),
+        "middlegame_cpl": (125, 40),
+        "endgame_cpl": (135, 45),
+        "blunder_rate": (4.2, 1.8),
     },
-    "1600-1800": {
-        "overall_cpl": (50, 20),
-        "opening_cpl": (35, 15),
-        "middlegame_cpl": (60, 25),
-        "endgame_cpl": (65, 28),
-        "blunder_rate": (1.8, 1.0),
+    "1500-1799": {
+        "overall_cpl": (80, 28),
+        "opening_cpl": (55, 22),
+        "middlegame_cpl": (95, 32),
+        "endgame_cpl": (105, 35),
+        "blunder_rate": (3.0, 1.4),
     },
-    "1800-2000": {
-        "overall_cpl": (40, 15),
-        "opening_cpl": (28, 12),
-        "middlegame_cpl": (48, 20),
-        "endgame_cpl": (52, 22),
-        "blunder_rate": (1.2, 0.8),
+    "1800-2099": {
+        "overall_cpl": (58, 22),
+        "opening_cpl": (40, 18),
+        "middlegame_cpl": (70, 26),
+        "endgame_cpl": (78, 28),
+        "blunder_rate": (2.0, 1.0),
     },
-    "2000-2200": {
-        "overall_cpl": (32, 12),
+    "2100-2399": {
+        "overall_cpl": (42, 18),
+        "opening_cpl": (30, 14),
+        "middlegame_cpl": (50, 20),
+        "endgame_cpl": (55, 22),
+        "blunder_rate": (1.2, 0.7),
+    },
+    "2400+": {
+        "overall_cpl": (30, 14),
         "opening_cpl": (22, 10),
-        "middlegame_cpl": (38, 15),
-        "endgame_cpl": (42, 18),
-        "blunder_rate": (0.8, 0.5),
-    },
-    "2200+": {
-        "overall_cpl": (25, 10),
-        "opening_cpl": (18, 8),
-        "middlegame_cpl": (30, 12),
-        "endgame_cpl": (32, 14),
-        "blunder_rate": (0.5, 0.3),
+        "middlegame_cpl": (35, 15),
+        "endgame_cpl": (38, 18),
+        "blunder_rate": (0.8, 0.4),
     },
 }
 
 # Sample sizes (placeholder)
 SAMPLE_SIZES = {
-    "0-800": 5000,
-    "800-1000": 8000,
-    "1000-1200": 15000,
-    "1200-1400": 20000,
-    "1400-1600": 18000,
-    "1600-1800": 12000,
-    "1800-2000": 8000,
-    "2000-2200": 4000,
-    "2200+": 2000,
+    "0-299": 800,
+    "300-599": 2500,
+    "600-899": 6000,
+    "900-1199": 12000,
+    "1200-1499": 18000,
+    "1500-1799": 15000,
+    "1800-2099": 9000,
+    "2100-2399": 5000,
+    "2400+": 2000,
 }
+
+BRACKET_SIZE = 300
+BRACKET_CEILING = 2400
 
 
 def _get_rating_bracket(rating: int) -> str:
-    """Get rating bracket for a given rating."""
-    if rating < 800:
-        return "0-800"
-    elif rating < 1000:
-        return "800-1000"
-    elif rating < 1200:
-        return "1000-1200"
-    elif rating < 1400:
-        return "1200-1400"
-    elif rating < 1600:
-        return "1400-1600"
-    elif rating < 1800:
-        return "1600-1800"
-    elif rating < 2000:
-        return "1800-2000"
-    elif rating < 2200:
-        return "2000-2200"
-    else:
-        return "2200+"
+    """Map rating into a 300-point bracket label."""
+    try:
+        rating_val = int(rating)
+    except Exception:
+        rating_val = 0
+
+    rating_val = max(0, rating_val)
+    if rating_val >= BRACKET_CEILING:
+        return f"{BRACKET_CEILING}+"
+
+    lower = (rating_val // BRACKET_SIZE) * BRACKET_SIZE
+    upper = lower + BRACKET_SIZE - 1
+    return f"{lower}-{upper}"
 
 
 def _compute_percentile(value: float, mean: float, std: float, lower_is_better: bool = True) -> int:
@@ -185,7 +181,7 @@ def compute_peer_benchmark(
         PeerBenchmark with percentiles and comparisons.
     """
     bracket = _get_rating_bracket(player_rating)
-    baselines = PEER_BASELINES.get(bracket, PEER_BASELINES["1200-1400"])
+    baselines = PEER_BASELINES.get(bracket, PEER_BASELINES["1200-1499"])
 
     result = PeerBenchmark()
     result.player_rating = player_rating

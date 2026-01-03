@@ -148,6 +148,15 @@ def _pct(numer: float, denom: float) -> int:
     return _ceil_int((numer / denom) * 100.0)
 
 
+def _parse_rating(value: Any) -> int:
+    """Coerce ratings from PGN headers/UI into sanitized ints."""
+    try:
+        rating = int(float(value))
+        return rating if rating > 0 else 0
+    except Exception:
+        return 0
+
+
 def _convert_to_analytics_format(
     aggregated_games: list[dict[str, Any]],
     focus_player: str | None = None,
@@ -189,12 +198,23 @@ def _convert_to_analytics_format(
         elif focus_color == "black":
             score = "win" if result == "0-1" else "loss" if result == "1-0" else "draw"
         
+        white_rating = _parse_rating(game.get("white_rating"))
+        black_rating = _parse_rating(game.get("black_rating"))
+        focus_rating = _parse_rating(game.get("focus_player_rating"))
+        if focus_rating == 0:
+            if focus_color == "white":
+                focus_rating = white_rating
+            elif focus_color == "black":
+                focus_rating = black_rating
+
         game_info = {
             "opening_name": game.get("opening") or "Unknown",
             "eco": game.get("eco") or "",
             "color": focus_color or "white",
             "score": score,
-            "player_rating": 0,  # Will be filled from user input if available
+            "player_rating": focus_rating,
+            "white_rating": white_rating,
+            "black_rating": black_rating,
         }
         
         # Convert moves_table to move_evals
@@ -490,7 +510,11 @@ def _compute_cp_loss_rows(
 def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate per-game move tables into phase stats, opening performance, trends, and coach summary."""
     all_move_rows: list[dict[str, Any]] = []
+    focus_player_ratings: list[int] = []
     for g in games:
+        focus_rating = _parse_rating(g.get("focus_player_rating"))
+        if focus_rating > 0:
+            focus_player_ratings.append(focus_rating)
         all_move_rows.extend(g.get("moves_table") or [])
 
     # Phase stats
@@ -624,6 +648,10 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
         "recommended_focus": recommended[:4],
     }
 
+    avg_focus_rating = (
+        _ceil_int(sum(focus_player_ratings) / len(focus_player_ratings)) if focus_player_ratings else 0
+    )
+
     return {
         "success": True,
         "games_analyzed": len(games),
@@ -637,6 +665,7 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
         "cpl_trend": cpl_trend,
         "endgame_success": endgame_success,
         "coach_summary": coach_summary,
+        "focus_player_rating": avg_focus_rating,
     }
 
 
@@ -863,10 +892,11 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
             analytics_games = _convert_to_analytics_format(games, focus_player)
             
             if analytics_games:
+                focus_player_rating = _parse_rating(aggregated.get("focus_player_rating"))
                 coaching_report = generate_coaching_report(
                     analytics_games,
                     username=focus_player,
-                    player_rating=0,  # Could be extracted from games if available
+                    player_rating=focus_player_rating,
                 )
                 _render_coaching_insights(coaching_report)
         except Exception as e:
@@ -1191,6 +1221,11 @@ def main() -> None:
 
                 # Recognize opening by moves if not in PGN headers
                 opening_name, eco_code = recognize_opening(gi.move_sans)
+                white_rating = _parse_rating(gi.headers.get("WhiteElo"))
+                black_rating = _parse_rating(gi.headers.get("BlackElo"))
+                focus_player_rating = (
+                    white_rating if focus_color == "white" else black_rating if focus_color == "black" else 0
+                )
                 aggregated_games.append(
                     {
                         "index": gi.index,
@@ -1203,6 +1238,9 @@ def main() -> None:
                         "moves": int((gi.num_plies + 1) // 2),
                         "moves_table": moves_table,
                         "focus_color": focus_color,
+                        "white_rating": white_rating,
+                        "black_rating": black_rating,
+                        "focus_player_rating": focus_player_rating,
                     }
                 )
 
@@ -1272,6 +1310,11 @@ def main() -> None:
 
                 # Recognize opening by moves if not in PGN headers
                 opening_name, eco_code = recognize_opening(gi.move_sans)
+                white_rating = _parse_rating(gi.headers.get("WhiteElo"))
+                black_rating = _parse_rating(gi.headers.get("BlackElo"))
+                focus_player_rating = (
+                    white_rating if focus_color == "white" else black_rating if focus_color == "black" else 0
+                )
                 aggregated_games.append(
                     {
                         "index": gi.index,
@@ -1284,6 +1327,9 @@ def main() -> None:
                         "moves": int((gi.num_plies + 1) // 2),
                         "moves_table": moves_table,
                         "focus_color": focus_color,
+                        "white_rating": white_rating,
+                        "black_rating": black_rating,
+                        "focus_player_rating": focus_player_rating,
                     }
                 )
 
