@@ -24,6 +24,7 @@ from .schemas import (
     PeerBenchmark,
     CoachingSummary,
     PlayerProfile,
+    PlaystyleProfile,
 )
 from .aggregator import generate_coaching_report
 
@@ -36,5 +37,6 @@ __all__ = [
     "PeerBenchmark",
     "CoachingSummary",
     "PlayerProfile",
+    "PlaystyleProfile",
     "generate_coaching_report",
 ]

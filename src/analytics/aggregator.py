@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from .schemas import (
     CoachingSummary,
     PlayerProfile,
+    PlaystyleProfile,
     BlunderClassification,
     EndgameMaterialBreakdown,
     OpeningDeviationReport,
@@ -34,6 +35,7 @@ from .opening_deviation import analyze_opening_deviations
 from .recurring_patterns import detect_recurring_patterns
 from .training_planner import generate_training_plan
 from .peer_benchmark import benchmark_from_games_data
+from .playstyle_analyzer import analyze_playstyle
 
 if TYPE_CHECKING:
     from typing import Any
@@ -284,13 +286,16 @@ def generate_coaching_report(
     # 1. Extract player profile
     summary.player_profile = _extract_player_profile(games_data, username, player_rating)
 
-    # 2. Run all analytics modules
+    # 2. Analyze playstyle and piece performance
+    summary.playstyle = analyze_playstyle(games_data)
+
+    # 3. Run all analytics modules
     summary.blunder_analysis = analyze_blunders(games_data)
     summary.endgame_breakdown = analyze_endgames(games_data)
     summary.opening_deviations = analyze_opening_deviations(games_data)
     summary.recurring_patterns = detect_recurring_patterns(games_data)
 
-    # 3. Generate training plan based on analytics
+    # 4. Generate training plan based on analytics
     summary.training_plan = generate_training_plan(
         summary.blunder_analysis,
         summary.endgame_breakdown,
@@ -298,7 +303,7 @@ def generate_coaching_report(
         summary.recurring_patterns,
     )
 
-    # 4. Compute peer benchmark
+    # 5. Compute peer benchmark
     summary.peer_comparison = benchmark_from_games_data(games_data, player_rating)
 
     # 5. Derive prioritized insights

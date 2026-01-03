@@ -908,6 +908,104 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
     st.header("🎯 Advanced Coaching Insights")
     st.caption("Powered by deterministic analytics engine - no AI/LLM in analysis")
     
+    # --- Playstyle Analysis (NEW) ---
+    playstyle = coaching_report.playstyle
+    if playstyle.primary_style:
+        st.subheader("🎭 Your Playstyle")
+        
+        # Primary style with emoji
+        style_emojis = {
+            "Tactical": "⚔️",
+            "Positional": "🏰",
+            "Aggressive": "🔥",
+            "Defensive": "🛡️",
+        }
+        primary_emoji = style_emojis.get(playstyle.primary_style, "♟️")
+        secondary_emoji = style_emojis.get(playstyle.secondary_style, "♟️")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                "Primary Style",
+                f"{primary_emoji} {playstyle.primary_style}",
+                help=f"Confidence: {playstyle.style_confidence}%"
+            )
+        with col2:
+            st.metric("Secondary Style", f"{secondary_emoji} {playstyle.secondary_style}")
+        with col3:
+            st.metric("Style Confidence", f"{playstyle.style_confidence}%")
+        
+        # Style scores as progress bars
+        st.write("**Style Breakdown:**")
+        style_cols = st.columns(4)
+        with style_cols[0]:
+            st.write(f"⚔️ Tactical: **{playstyle.tactical_score}**")
+            st.progress(playstyle.tactical_score / 100)
+        with style_cols[1]:
+            st.write(f"🏰 Positional: **{playstyle.positional_score}**")
+            st.progress(playstyle.positional_score / 100)
+        with style_cols[2]:
+            st.write(f"🔥 Aggressive: **{playstyle.aggressive_score}**")
+            st.progress(playstyle.aggressive_score / 100)
+        with style_cols[3]:
+            st.write(f"🛡️ Defensive: **{playstyle.defensive_score}**")
+            st.progress(playstyle.defensive_score / 100)
+        
+        # Style indicators
+        if playstyle.style_indicators:
+            st.write("**Key Indicators:**")
+            for indicator in playstyle.style_indicators[:4]:
+                st.caption(f"  • {indicator}")
+    
+    # --- Piece Performance (NEW) ---
+    if playstyle.strongest_piece or playstyle.weakest_piece:
+        st.subheader("♟️ Piece Performance")
+        
+        piece_emojis = {
+            "Pawn": "♙",
+            "Knight": "♘",
+            "Bishop": "♗",
+            "Rook": "♖",
+            "Queen": "♕",
+            "King": "♔",
+        }
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if playstyle.strongest_piece:
+                emoji = piece_emojis.get(playstyle.strongest_piece, "♟️")
+                st.success(f"**💪 Strongest Piece: {emoji} {playstyle.strongest_piece}**")
+                if playstyle.strongest_piece_reason:
+                    st.caption(f"  {playstyle.strongest_piece_reason}")
+        with col2:
+            if playstyle.weakest_piece:
+                emoji = piece_emojis.get(playstyle.weakest_piece, "♟️")
+                st.warning(f"**📈 Needs Work: {emoji} {playstyle.weakest_piece}**")
+                if playstyle.weakest_piece_reason:
+                    st.caption(f"  {playstyle.weakest_piece_reason}")
+        
+        # Piece stats table
+        piece_stats = playstyle.piece_stats
+        if piece_stats:
+            with st.expander("📊 Detailed Piece Statistics", expanded=False):
+                piece_rows = []
+                for name, ps in piece_stats.items():
+                    if ps.moves > 0:
+                        piece_rows.append({
+                            "Piece": f"{piece_emojis.get(name, '')} {name}",
+                            "Moves": ps.moves,
+                            "Avg CPL": round(ps.avg_cpl, 1),
+                            "Blunders": ps.blunders,
+                            "Mistakes": ps.mistakes,
+                            "Excellent": ps.excellent_moves,
+                            "Captures": ps.captures,
+                            "Checks": ps.checks,
+                        })
+                if piece_rows:
+                    st.dataframe(pd.DataFrame(piece_rows), use_container_width=True, hide_index=True)
+    
+    st.divider()
+    
     # --- Critical Issues & Strengths ---
     col1, col2 = st.columns(2)
     

@@ -264,6 +264,79 @@ class PeerBenchmark:
 
 
 @dataclass
+class PiecePerformance:
+    """Performance stats for a single piece type."""
+    piece_name: str = ""
+    moves: int = 0
+    total_cp_loss: int = 0
+    avg_cpl: float = 0.0
+    blunders: int = 0
+    mistakes: int = 0
+    excellent_moves: int = 0
+    captures: int = 0
+    checks: int = 0
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "piece_name": self.piece_name,
+            "moves": self.moves,
+            "avg_cpl": round(self.avg_cpl, 1),
+            "blunders": self.blunders,
+            "mistakes": self.mistakes,
+            "excellent_moves": self.excellent_moves,
+            "captures": self.captures,
+            "checks": self.checks,
+        }
+
+
+@dataclass
+class PlaystyleProfile:
+    """Player's playstyle categorization and piece analysis."""
+    primary_style: str = ""  # tactical, positional, aggressive, defensive
+    secondary_style: str = ""
+    style_confidence: int = 0
+    tactical_score: int = 0
+    positional_score: int = 0
+    aggressive_score: int = 0
+    defensive_score: int = 0
+    style_indicators: list[str] = field(default_factory=list)
+    piece_stats: dict[str, PiecePerformance] = field(default_factory=dict)
+    strongest_piece: str = ""
+    weakest_piece: str = ""
+    strongest_piece_reason: str = ""
+    weakest_piece_reason: str = ""
+    capture_rate_pct: int = 0
+    check_rate_pct: int = 0
+    castle_rate_pct: int = 0
+    pawn_push_rate_pct: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "primary_style": self.primary_style,
+            "secondary_style": self.secondary_style,
+            "style_confidence": self.style_confidence,
+            "style_scores": {
+                "tactical": self.tactical_score,
+                "positional": self.positional_score,
+                "aggressive": self.aggressive_score,
+                "defensive": self.defensive_score,
+            },
+            "style_indicators": self.style_indicators[:6],
+            "piece_performance": {k: v.to_dict() for k, v in self.piece_stats.items() if v.moves > 0},
+            "strongest_piece": self.strongest_piece,
+            "weakest_piece": self.weakest_piece,
+            "strongest_piece_reason": self.strongest_piece_reason,
+            "weakest_piece_reason": self.weakest_piece_reason,
+            "move_distribution": {
+                "capture_rate_pct": self.capture_rate_pct,
+                "check_rate_pct": self.check_rate_pct,
+                "castle_rate_pct": self.castle_rate_pct,
+                "pawn_push_rate_pct": self.pawn_push_rate_pct,
+            },
+        }
+
+
+@dataclass
 class PlayerProfile:
     """Aggregated player profile for LLM context."""
     username: str = ""
@@ -290,6 +363,7 @@ class CoachingSummary:
     The LLM receives ONLY this structure - never raw PGN or engine lines.
     """
     player_profile: PlayerProfile = field(default_factory=PlayerProfile)
+    playstyle: PlaystyleProfile = field(default_factory=PlaystyleProfile)
     blunder_analysis: BlunderClassification = field(default_factory=BlunderClassification)
     endgame_breakdown: EndgameMaterialBreakdown = field(default_factory=EndgameMaterialBreakdown)
     opening_deviations: OpeningDeviationReport = field(default_factory=OpeningDeviationReport)
@@ -306,6 +380,7 @@ class CoachingSummary:
         """Convert to LLM-ready JSON structure."""
         return {
             "player_profile": self.player_profile.to_dict(),
+            "playstyle": self.playstyle.to_dict(),
             "blunder_analysis": self.blunder_analysis.to_dict(),
             "endgame_breakdown": self.endgame_breakdown.to_dict(),
             "opening_deviations": self.opening_deviations.to_dict(),
