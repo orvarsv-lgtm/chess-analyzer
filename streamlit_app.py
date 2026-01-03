@@ -12,6 +12,7 @@ import streamlit as st
 import chess.pgn
 
 from src.lichess_api import fetch_lichess_pgn
+from src.analytics import generate_coaching_report, CoachingSummary
 
 BASE_DIR = os.path.dirname(__file__)
 OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
@@ -145,6 +146,91 @@ def _pct(numer: float, denom: float) -> int:
     if denom <= 0:
         return 0
     return _ceil_int((numer / denom) * 100.0)
+
+
+def _convert_to_analytics_format(
+    aggregated_games: list[dict[str, Any]],
+    focus_player: str | None = None,
+) -> list[dict[str, Any]]:
+    """Convert Streamlit aggregated games to analytics pipeline format.
+    
+    Analytics pipeline expects:
+    {
+        "game_info": {
+            "opening_name": str,
+            "eco": str,
+            "color": "white"|"black",
+            "score": "win"|"draw"|"loss",
+            "player_rating": int,
+        },
+        "move_evals": [
+            {
+                "san": str,
+                "cp_loss": int,
+                "phase": str,
+                "move_num": int,
+                "eval_before": int|None,
+                "eval_after": int|None,
+                "fen_before": str|None,
+            }
+        ]
+    }
+    """
+    analytics_games: list[dict[str, Any]] = []
+    
+    for game in aggregated_games:
+        focus_color = game.get("focus_color")
+        
+        # Determine score from result and focus color
+        result = game.get("result", "")
+        score = "draw"
+        if focus_color == "white":
+            score = "win" if result == "1-0" else "loss" if result == "0-1" else "draw"
+        elif focus_color == "black":
+            score = "win" if result == "0-1" else "loss" if result == "1-0" else "draw"
+        
+        game_info = {
+            "opening_name": game.get("opening") or "Unknown",
+            "eco": game.get("eco") or "",
+            "color": focus_color or "white",
+            "score": score,
+            "player_rating": 0,  # Will be filled from user input if available
+        }
+        
+        # Convert moves_table to move_evals
+        moves_table = game.get("moves_table", []) or []
+        move_evals: list[dict[str, Any]] = []
+        
+        prev_score_cp: int | None = None
+        for row in moves_table:
+            mover = row.get("mover")
+            
+            # Only include moves from focus player
+            if focus_color and mover != focus_color:
+                prev_score_cp = row.get("score_cp")
+                continue
+            
+            ply = int(row.get("ply") or 1)
+            move_num = (ply + 1) // 2  # Convert ply to move number
+            
+            move_eval = {
+                "san": row.get("move_san") or "",
+                "cp_loss": int(row.get("cp_loss") or 0),
+                "phase": row.get("phase") or "middlegame",
+                "move_num": move_num,
+                "eval_before": prev_score_cp,
+                "eval_after": row.get("score_cp"),
+            }
+            move_evals.append(move_eval)
+            prev_score_cp = row.get("score_cp")
+        
+        analytics_games.append({
+            "game_info": game_info,
+            "move_evals": move_evals,
+        })
+    
+    return analytics_games
+
 
 def _get_engine_endpoint() -> tuple[str, str]:
     """Resolve engine URL and API key (Streamlit secrets first, then env)."""
@@ -739,6 +825,216 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
             for f in focus:
                 st.write(f"- {f}")
 
+    # --- Advanced Coaching Insights (from analytics pipeline) ---
+    if games:
+        st.divider()
+        try:
+            # Convert to analytics format and generate coaching report
+            focus_player = aggregated.get("focus_player") or ""
+            analytics_games = _convert_to_analytics_format(games, focus_player)
+            
+            if analytics_games:
+                coaching_report = generate_coaching_report(
+                    analytics_games,
+                    username=focus_player,
+                    player_rating=0,  # Could be extracted from games if available
+                )
+                _render_coaching_insights(coaching_report)
+        except Exception as e:
+            st.warning(f"Advanced coaching insights unavailable: {e}")
+
+
+def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
+    """Render the advanced coaching insights section from analytics pipeline."""
+    st.header("🎯 Advanced Coaching Insights")
+    st.caption("Powered by deterministic analytics engine - no AI/LLM in analysis")
+    
+    # --- Critical Issues & Strengths ---
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("⚠️ Critical Issues")
+        if coaching_report.critical_issues:
+            for issue in coaching_report.critical_issues:
+                st.error(f"• {issue}")
+        else:
+            st.success("No critical issues detected!")
+    
+    with col2:
+        st.subheader("💪 Strengths")
+        if coaching_report.strengths:
+            for strength in coaching_report.strengths:
+                st.success(f"• {strength}")
+        else:
+            st.info("Keep playing to identify your strengths!")
+    
+    # --- Blunder Classification ---
+    st.subheader("🔍 Blunder Classification")
+    blunder = coaching_report.blunder_analysis
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Blunders", blunder.total_blunders)
+    with col2:
+        st.metric("Total Mistakes", blunder.total_mistakes)
+    with col3:
+        st.metric("Blunders per 100 moves", f"{blunder.blunder_rate_per_100_moves:.1f}")
+    
+    # Blunder type breakdown
+    by_type = blunder.by_type.to_dict()
+    if by_type:
+        st.write("**Blunder Types:**")
+        type_df = pd.DataFrame([
+            {"Type": k.replace("_", " ").title(), "Count": v}
+            for k, v in by_type.items()
+        ]).sort_values("Count", ascending=False)
+        st.dataframe(type_df, use_container_width=True, hide_index=True)
+        
+        # Chart
+        if len(type_df) > 1:
+            chart_df = type_df.set_index("Type")
+            st.bar_chart(chart_df)
+    
+    # Blunder by phase
+    by_phase = blunder.by_phase
+    if by_phase and sum(by_phase.values()) > 0:
+        st.write("**Blunders by Phase:**")
+        phase_df = pd.DataFrame([
+            {"Phase": p.title(), "Blunders": c}
+            for p, c in by_phase.items()
+        ])
+        st.dataframe(phase_df, use_container_width=True, hide_index=True)
+    
+    # Blunder examples
+    if blunder.examples:
+        with st.expander(f"📋 Blunder Examples ({len(blunder.examples)} shown)", expanded=False):
+            for ex in blunder.examples[:5]:
+                st.write(
+                    f"**Game {ex.game_index}, Move {ex.move_number}:** `{ex.san}` "
+                    f"({ex.blunder_type.replace('_', ' ')}) - {ex.cp_loss}cp loss [{ex.phase}]"
+                )
+    
+    # --- Endgame Breakdown ---
+    endgame = coaching_report.endgame_breakdown
+    endgame_types = endgame.to_dict().get("endgame_types", {})
+    if endgame_types:
+        st.subheader("♟️ Endgame Analysis")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if endgame.weakest_endgame_type:
+                st.warning(f"Weakest: {endgame.weakest_endgame_type.replace('_', ' ').title()}")
+        with col2:
+            if endgame.strongest_endgame_type:
+                st.success(f"Strongest: {endgame.strongest_endgame_type.replace('_', ' ').title()}")
+        
+        endgame_rows = []
+        for etype, stats in endgame_types.items():
+            if isinstance(stats, dict) and stats.get("games", 0) > 0:
+                endgame_rows.append({
+                    "Type": etype.replace("_", " ").title(),
+                    "Games": stats.get("games", 0),
+                    "Avg CPL": stats.get("avg_cpl", 0),
+                    "Blunder Rate %": stats.get("blunder_rate_pct", 0),
+                    "Conversion %": stats.get("conversion_rate_pct", 0),
+                })
+        if endgame_rows:
+            st.dataframe(pd.DataFrame(endgame_rows), use_container_width=True, hide_index=True)
+    
+    # --- Opening Deviations ---
+    opening_dev = coaching_report.opening_deviations
+    if opening_dev.total_games_with_deviation > 0:
+        st.subheader("📖 Opening Theory Deviations")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Games with Deviation", opening_dev.total_games_with_deviation)
+        with col2:
+            st.metric("Avg Deviation Move", f"{opening_dev.avg_deviation_move:.1f}")
+        with col3:
+            st.metric("Avg Eval Loss", f"{opening_dev.avg_eval_loss_on_deviation}cp")
+        
+        if opening_dev.deviations_by_opening:
+            with st.expander("Opening Deviation Details", expanded=False):
+                for dev in opening_dev.deviations_by_opening[:5]:
+                    dev_dict = dev if isinstance(dev, dict) else dev.to_dict()
+                    st.write(
+                        f"**{dev_dict.get('opening', 'Unknown')}** ({dev_dict.get('eco', '')}): "
+                        f"Deviation at move {dev_dict.get('deviation_move_number', '?')} "
+                        f"({dev_dict.get('common_deviation_move', '?')}) - "
+                        f"Avg loss: {dev_dict.get('avg_eval_loss_cp', 0)}cp"
+                    )
+    
+    # --- Recurring Patterns ---
+    patterns = coaching_report.recurring_patterns
+    if patterns.patterns:
+        st.subheader("🔄 Recurring Patterns")
+        
+        for pattern in patterns.patterns[:5]:
+            severity_color = {
+                "critical": "🔴",
+                "moderate": "🟡",
+                "minor": "🟢",
+            }.get(pattern.severity, "⚪")
+            st.write(f"{severity_color} **{pattern.pattern_type.replace('_', ' ').title()}**: {pattern.description}")
+            st.caption(f"   Occurrences: {pattern.occurrences} | Games affected: {pattern.games_affected}")
+    
+    # --- Training Plan ---
+    plan = coaching_report.training_plan
+    if plan.primary_focus:
+        st.subheader("📚 Weekly Training Plan")
+        st.info(f"**Primary Focus:** {plan.primary_focus}")
+        
+        if plan.daily_exercises:
+            with st.expander("📅 Daily Exercise Schedule", expanded=True):
+                for day in plan.daily_exercises:
+                    day_dict = day if isinstance(day, dict) else day.to_dict()
+                    st.write(f"**{day_dict.get('day', 'Day')}:** {day_dict.get('theme', 'Practice')}")
+                    exercises = day_dict.get("exercises", [])
+                    if exercises:
+                        for ex in exercises[:3]:
+                            st.caption(f"   • {ex}")
+        
+        if plan.recommended_resources:
+            with st.expander("📖 Recommended Resources", expanded=False):
+                for resource in plan.recommended_resources[:5]:
+                    st.write(f"• {resource}")
+    
+    # --- Peer Benchmark ---
+    peer = coaching_report.peer_comparison
+    if peer.rating_bracket:
+        st.subheader("📊 Peer Comparison")
+        st.caption(f"Comparing to players rated {peer.rating_bracket}")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            pct = peer.overall_cpl_percentile
+            st.metric("Overall CPL", f"Top {100 - pct}%" if pct > 0 else "N/A")
+        with col2:
+            if peer.strongest_vs_peers:
+                st.metric("Strongest Phase", peer.strongest_vs_peers.title())
+        with col3:
+            if peer.weakest_vs_peers:
+                st.metric("Weakest Phase", peer.weakest_vs_peers.title())
+        
+        # Phase percentiles
+        phase_percentiles = []
+        for phase in ["opening", "middlegame", "endgame"]:
+            pct = getattr(peer, f"{phase}_cpl_percentile", 0)
+            if pct > 0:
+                phase_percentiles.append({
+                    "Phase": phase.title(),
+                    "Percentile": pct,
+                    "Rank": f"Top {100 - pct}%",
+                })
+        if phase_percentiles:
+            st.dataframe(pd.DataFrame(phase_percentiles), use_container_width=True, hide_index=True)
+    
+    # --- LLM-Ready JSON Export ---
+    with st.expander("🤖 Export for AI Coach (JSON)", expanded=False):
+        st.caption("This JSON can be fed to an LLM for personalized coaching explanations")
+        st.code(coaching_report.to_json()[:5000] + "..." if len(coaching_report.to_json()) > 5000 else coaching_report.to_json(), language="json")
+
 
 def main() -> None:
     st.title("Chess Analyzer (Remote Engine)")
@@ -838,6 +1134,7 @@ def main() -> None:
             status.success("Backend status: 200 OK")
 
             aggregated = _aggregate_postprocessed_results(aggregated_games)
+            aggregated["focus_player"] = focus_player  # Pass through for analytics
             st.session_state["analysis_result"] = aggregated
 
     else:
@@ -918,6 +1215,7 @@ def main() -> None:
             status.success("Backend status: 200 OK")
 
             aggregated = _aggregate_postprocessed_results(aggregated_games)
+            aggregated["focus_player"] = focus_player  # Pass through for analytics
             st.session_state["analysis_result"] = aggregated
 
     req = st.session_state.get("analysis_request")
