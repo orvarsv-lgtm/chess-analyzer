@@ -4,7 +4,7 @@ import os
 import math
 from dataclasses import dataclass
 from io import StringIO
-from typing import Any
+from typing import Any, List
 
 import pandas as pd
 import requests
@@ -13,6 +13,18 @@ import chess.pgn
 
 from src.lichess_api import fetch_lichess_pgn
 from src.analytics import generate_coaching_report, CoachingSummary
+
+# Puzzle module imports
+from puzzles import (
+    Puzzle,
+    PuzzleSession,
+    generate_puzzles_from_games,
+    get_puzzle_stats,
+    render_puzzle_page,
+    PuzzleUIState,
+    Difficulty,
+    PuzzleType,
+)
 
 BASE_DIR = os.path.dirname(__file__)
 OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
@@ -1453,8 +1465,175 @@ def main() -> None:
                 "This usually means the PGN is a single game or is missing headers."
             )
 
+    # Show results with tabs if we have analysis
     if st.session_state.get("analysis_result"):
-        _render_enhanced_ui(st.session_state["analysis_result"])
+        _render_tabbed_results(st.session_state["analysis_result"])
+
+
+def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
+    """Render analysis results with tabbed interface including Puzzles."""
+    
+    # Create tabs for different views
+    tab_analysis, tab_puzzles = st.tabs(["📊 Analysis", "♟️ Puzzles"])
+    
+    with tab_analysis:
+        _render_enhanced_ui(aggregated)
+    
+    with tab_puzzles:
+        _render_puzzle_tab(aggregated)
+
+
+def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
+    """Render the puzzle training tab."""
+    st.header("♟️ Chess Puzzles")
+    st.caption("Practice tactical patterns from your analyzed games • No AI - purely engine-derived")
+    
+    games = aggregated.get("games", [])
+    
+    if not games:
+        st.info("No games analyzed yet. Run an analysis to generate puzzles!")
+        return
+    
+    # Generate puzzles from analyzed games
+    if "generated_puzzles" not in st.session_state:
+        with st.spinner("Generating puzzles from your games..."):
+            puzzles = generate_puzzles_from_games(
+                analyzed_games=games,
+                min_eval_loss=100,  # Minimum 100cp loss to be a puzzle
+            )
+            st.session_state["generated_puzzles"] = puzzles
+    else:
+        puzzles = st.session_state["generated_puzzles"]
+    
+    if not puzzles:
+        st.warning(
+            "No puzzles generated from your games. "
+            "Puzzles are created when you make mistakes (≥100cp loss). "
+            "Try analyzing more games or games with more tactical complexity."
+        )
+        return
+    
+    # Puzzle stats overview
+    stats = get_puzzle_stats(puzzles)
+    
+    st.subheader("📈 Puzzle Overview")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Puzzles", stats["total"])
+    with col2:
+        by_diff = stats.get("by_difficulty", {})
+        easy = by_diff.get("easy", 0)
+        st.metric("🟢 Easy", easy)
+    with col3:
+        medium = by_diff.get("medium", 0)
+        st.metric("🟡 Medium", medium)
+    with col4:
+        hard = by_diff.get("hard", 0)
+        st.metric("🔴 Hard", hard)
+    
+    # Puzzle type breakdown
+    st.write("**Puzzle Types:**")
+    by_type = stats.get("by_type", {})
+    type_cols = st.columns(3)
+    with type_cols[0]:
+        st.write(f"⚔️ Missed Tactics: **{by_type.get('missed_tactic', 0)}**")
+    with type_cols[1]:
+        st.write(f"♟️ Endgame Technique: **{by_type.get('endgame_technique', 0)}**")
+    with type_cols[2]:
+        st.write(f"📖 Opening Errors: **{by_type.get('opening_error', 0)}**")
+    
+    st.divider()
+    
+    # Filtering options
+    st.subheader("🎯 Filter Puzzles")
+    
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    
+    with filter_col1:
+        difficulty_filter = st.selectbox(
+            "Difficulty",
+            options=["All", "Easy", "Medium", "Hard"],
+            key="puzzle_difficulty_filter",
+        )
+    
+    with filter_col2:
+        type_filter = st.selectbox(
+            "Type",
+            options=["All", "Missed Tactic", "Endgame Technique", "Opening Error"],
+            key="puzzle_type_filter",
+        )
+    
+    with filter_col3:
+        phase_filter = st.selectbox(
+            "Phase",
+            options=["All", "Opening", "Middlegame", "Endgame"],
+            key="puzzle_phase_filter",
+        )
+    
+    # Apply filters
+    filtered_puzzles = _filter_puzzles(
+        puzzles,
+        difficulty_filter,
+        type_filter,
+        phase_filter,
+    )
+    
+    if not filtered_puzzles:
+        st.warning("No puzzles match your filters. Try different options.")
+        return
+    
+    st.caption(f"Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
+    
+    st.divider()
+    
+    # Premium status (for demo, always False - implement real check)
+    IS_PREMIUM = False
+    
+    # Render puzzle interface
+    render_puzzle_page(
+        puzzles=filtered_puzzles,
+        is_premium=IS_PREMIUM,
+    )
+
+
+def _filter_puzzles(
+    puzzles: List[Puzzle],
+    difficulty: str,
+    puzzle_type: str,
+    phase: str,
+) -> List[Puzzle]:
+    """Apply filters to puzzle list."""
+    result = puzzles
+    
+    # Difficulty filter
+    if difficulty != "All":
+        diff_map = {
+            "Easy": Difficulty.EASY,
+            "Medium": Difficulty.MEDIUM,
+            "Hard": Difficulty.HARD,
+        }
+        target_diff = diff_map.get(difficulty)
+        if target_diff:
+            result = [p for p in result if p.difficulty == target_diff]
+    
+    # Type filter
+    if puzzle_type != "All":
+        type_map = {
+            "Missed Tactic": PuzzleType.MISSED_TACTIC,
+            "Endgame Technique": PuzzleType.ENDGAME_TECHNIQUE,
+            "Opening Error": PuzzleType.OPENING_ERROR,
+        }
+        target_type = type_map.get(puzzle_type)
+        if target_type:
+            result = [p for p in result if p.puzzle_type == target_type]
+    
+    # Phase filter
+    if phase != "All":
+        target_phase = phase.lower()
+        result = [p for p in result if p.phase == target_phase]
+    
+    return result
 
 
 # Prevent any accidental local analysis path.

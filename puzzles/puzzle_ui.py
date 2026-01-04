@@ -1,0 +1,750 @@
+"""
+Puzzle UI Components for Streamlit
+
+Interactive chessboard rendering and puzzle solving interface.
+Uses python-chess SVG rendering with custom Streamlit components.
+
+All UI is deterministic - no AI/LLM, move validation is rule-based.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple, Any
+import base64
+import io
+import re
+
+import chess
+import chess.svg
+import streamlit as st
+
+from .puzzle_types import Puzzle, PuzzleSession, PuzzleAttempt, Difficulty, PuzzleType
+from .difficulty import get_difficulty_emoji, get_difficulty_description
+
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Board rendering size (pixels)
+BOARD_SIZE = 400
+
+# Highlight colors for squares
+HIGHLIGHT_LAST_MOVE = "#aaa23a88"  # Yellow-ish for last move
+HIGHLIGHT_CORRECT = "#4ade8088"   # Green for correct
+HIGHLIGHT_INCORRECT = "#ef444488"  # Red for incorrect
+HIGHLIGHT_LEGAL = "#3b82f688"     # Blue for legal moves
+
+# Free tier limits
+IS_PREMIUM_DEFAULT = False
+MAX_FREE_PUZZLES = 5
+
+
+# =============================================================================
+# PUZZLE UI STATE MANAGEMENT
+# =============================================================================
+
+
+@dataclass
+class PuzzleUIState:
+    """
+    Manages UI state for puzzle solving in Streamlit.
+    
+    Uses st.session_state for persistence across reruns.
+    """
+    session_key: str = "puzzle_session"
+    
+    @classmethod
+    def initialize(cls, puzzles: List[Puzzle], is_premium: bool = False) -> PuzzleSession:
+        """
+        Initialize or retrieve puzzle session from Streamlit state.
+        
+        Args:
+            puzzles: List of puzzles to use for this session
+            is_premium: Whether user has premium access
+        
+        Returns:
+            PuzzleSession object
+        """
+        key = cls.session_key
+        
+        # Check if we need to reset (new puzzles)
+        if key in st.session_state:
+            existing = st.session_state[key]
+            if isinstance(existing, PuzzleSession):
+                # Check if puzzles changed
+                existing_ids = {p.puzzle_id for p in existing.puzzles}
+                new_ids = {p.puzzle_id for p in puzzles}
+                if existing_ids == new_ids:
+                    # Same puzzles, return existing session
+                    return existing
+        
+        # Create new session
+        session = PuzzleSession(
+            puzzles=puzzles,
+            is_premium=is_premium,
+        )
+        st.session_state[key] = session
+        return session
+    
+    @classmethod
+    def get_session(cls) -> Optional[PuzzleSession]:
+        """Get existing session if available."""
+        return st.session_state.get(cls.session_key)
+    
+    @classmethod
+    def clear_session(cls) -> None:
+        """Clear the puzzle session."""
+        if cls.session_key in st.session_state:
+            del st.session_state[cls.session_key]
+    
+    @classmethod
+    def get_selected_square(cls) -> Optional[int]:
+        """Get currently selected square."""
+        return st.session_state.get("puzzle_selected_square")
+    
+    @classmethod
+    def set_selected_square(cls, square: Optional[int]) -> None:
+        """Set selected square."""
+        st.session_state["puzzle_selected_square"] = square
+    
+    @classmethod
+    def clear_selected_square(cls) -> None:
+        """Clear selected square."""
+        if "puzzle_selected_square" in st.session_state:
+            del st.session_state["puzzle_selected_square"]
+    
+    @classmethod
+    def get_last_result(cls) -> Optional[str]:
+        """Get last move result ('correct', 'incorrect', or None)."""
+        return st.session_state.get("puzzle_last_result")
+    
+    @classmethod
+    def set_last_result(cls, result: Optional[str]) -> None:
+        """Set last move result."""
+        st.session_state["puzzle_last_result"] = result
+    
+    @classmethod
+    def clear_last_result(cls) -> None:
+        """Clear last result."""
+        if "puzzle_last_result" in st.session_state:
+            del st.session_state["puzzle_last_result"]
+
+
+# =============================================================================
+# CHESSBOARD RENDERING
+# =============================================================================
+
+
+def render_board_svg(
+    board: chess.Board,
+    size: int = BOARD_SIZE,
+    flipped: bool = False,
+    last_move: Optional[chess.Move] = None,
+    highlight_squares: Optional[dict] = None,
+    arrows: Optional[List[Tuple[int, int, str]]] = None,
+) -> str:
+    """
+    Render chess board as SVG.
+    
+    Args:
+        board: Chess board to render
+        size: Size in pixels
+        flipped: Whether to flip board (black perspective)
+        last_move: Optional last move to highlight
+        highlight_squares: Dict of square -> color for highlighting
+        arrows: List of (from_sq, to_sq, color) tuples for arrows
+    
+    Returns:
+        SVG string
+    """
+    # Build fill dict for square highlights
+    fill = {}
+    if highlight_squares:
+        for sq, color in highlight_squares.items():
+            fill[sq] = color
+    
+    # Build arrows list
+    svg_arrows = []
+    if arrows:
+        for from_sq, to_sq, color in arrows:
+            svg_arrows.append(chess.svg.Arrow(from_sq, to_sq, color=color))
+    
+    # Render SVG
+    svg = chess.svg.board(
+        board,
+        size=size,
+        flipped=flipped,
+        lastmove=last_move,
+        fill=fill,
+        arrows=svg_arrows,
+    )
+    
+    return svg
+
+
+def display_board(
+    board: chess.Board,
+    flipped: bool = False,
+    highlight_squares: Optional[dict] = None,
+    arrows: Optional[List[Tuple[int, int, str]]] = None,
+    key: str = "puzzle_board",
+) -> None:
+    """
+    Display chess board in Streamlit.
+    
+    Uses st.markdown with HTML to embed SVG.
+    """
+    svg = render_board_svg(
+        board=board,
+        size=BOARD_SIZE,
+        flipped=flipped,
+        highlight_squares=highlight_squares,
+        arrows=arrows,
+    )
+    
+    # Display SVG in centered container
+    st.markdown(
+        f"""
+        <div style="display: flex; justify-content: center; margin: 1rem 0;">
+            {svg}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _encode_svg_base64(svg: str) -> str:
+    """Encode SVG as base64 for img tag."""
+    b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+    return f"data:image/svg+xml;base64,{b64}"
+
+
+# =============================================================================
+# MOVE INPUT AND VALIDATION
+# =============================================================================
+
+
+def validate_move(board: chess.Board, move_input: str) -> Tuple[bool, Optional[chess.Move], str]:
+    """
+    Validate a move input against the current position.
+    
+    Accepts both SAN (e.g., "Nf3") and UCI (e.g., "g1f3") notation.
+    
+    Args:
+        board: Current board position
+        move_input: User's move input string
+    
+    Returns:
+        (is_valid, move_object, message)
+    """
+    move_input = move_input.strip()
+    if not move_input:
+        return False, None, "Please enter a move"
+    
+    # Try SAN first
+    try:
+        move = board.parse_san(move_input)
+        if move in board.legal_moves:
+            return True, move, ""
+        else:
+            return False, None, "Illegal move"
+    except chess.InvalidMoveError:
+        pass
+    except chess.AmbiguousMoveError:
+        return False, None, "Ambiguous move - please be more specific"
+    except Exception:
+        pass
+    
+    # Try UCI
+    try:
+        move = board.parse_uci(move_input)
+        if move in board.legal_moves:
+            return True, move, ""
+        else:
+            return False, None, "Illegal move"
+    except Exception:
+        pass
+    
+    return False, None, f"Could not parse move: {move_input}"
+
+
+def check_puzzle_answer(
+    board: chess.Board,
+    user_move: chess.Move,
+    correct_move_san: str,
+) -> Tuple[bool, str]:
+    """
+    Check if user's move matches the puzzle's correct answer.
+    
+    Args:
+        board: Current board position
+        user_move: User's move object
+        correct_move_san: Correct answer in SAN
+    
+    Returns:
+        (is_correct, message)
+    """
+    # Convert user move to SAN
+    user_san = board.san(user_move)
+    
+    # Parse correct move
+    try:
+        correct_move = board.parse_san(correct_move_san)
+    except Exception:
+        # If we can't parse correct move, compare strings
+        if user_san == correct_move_san:
+            return True, "Correct! ✅"
+        return False, f"Incorrect. The best move was {correct_move_san}"
+    
+    # Compare moves
+    if user_move == correct_move:
+        return True, "Correct! ✅"
+    
+    return False, f"Incorrect. The best move was {correct_move_san}"
+
+
+def get_legal_moves_display(board: chess.Board) -> List[str]:
+    """Get list of legal moves in SAN notation."""
+    return [board.san(move) for move in board.legal_moves]
+
+
+def get_square_from_name(name: str) -> Optional[int]:
+    """Convert square name (e.g., 'e4') to square index."""
+    try:
+        return chess.parse_square(name.lower())
+    except Exception:
+        return None
+
+
+# =============================================================================
+# PUZZLE INFO DISPLAY
+# =============================================================================
+
+
+def render_puzzle_info(puzzle: Puzzle) -> None:
+    """Display puzzle metadata."""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        emoji = get_difficulty_emoji(puzzle.difficulty)
+        st.metric("Difficulty", f"{emoji} {puzzle.difficulty.value.title()}")
+    
+    with col2:
+        type_display = puzzle.puzzle_type.value.replace("_", " ").title()
+        st.metric("Type", type_display)
+    
+    with col3:
+        st.metric("Phase", puzzle.phase.title())
+    
+    # Show eval loss
+    st.caption(f"Eval loss: {puzzle.eval_loss_cp}cp | Move {puzzle.move_number} | {puzzle.side_to_move.title()} to move")
+
+
+def render_puzzle_hint(puzzle: Puzzle) -> None:
+    """Display a hint for the puzzle."""
+    hints = {
+        PuzzleType.MISSED_TACTIC: "💡 Look for captures, checks, or forks!",
+        PuzzleType.ENDGAME_TECHNIQUE: "💡 Think about pawn promotion or piece activity",
+        PuzzleType.OPENING_ERROR: "💡 Consider development and center control",
+    }
+    
+    hint = hints.get(puzzle.puzzle_type, "💡 Find the best move!")
+    st.info(hint)
+
+
+# =============================================================================
+# MAIN PUZZLE UI COMPONENTS
+# =============================================================================
+
+
+def render_puzzle_board(
+    puzzle: Puzzle,
+    show_solution: bool = False,
+    last_result: Optional[str] = None,
+) -> None:
+    """
+    Render the puzzle board with appropriate highlighting.
+    
+    Args:
+        puzzle: The puzzle to display
+        show_solution: Whether to show the solution arrow
+        last_result: 'correct', 'incorrect', or None
+    """
+    try:
+        board = chess.Board(puzzle.fen)
+    except Exception:
+        st.error(f"Invalid FEN: {puzzle.fen}")
+        return
+    
+    # Determine if board should be flipped (black perspective)
+    flipped = puzzle.side_to_move == "black"
+    
+    # Build highlights
+    highlights = {}
+    arrows = []
+    
+    if show_solution:
+        # Show solution with arrow
+        try:
+            solution_move = board.parse_san(puzzle.best_move_san)
+            arrows.append((solution_move.from_square, solution_move.to_square, "#22c55e"))
+            highlights[solution_move.from_square] = HIGHLIGHT_CORRECT
+            highlights[solution_move.to_square] = HIGHLIGHT_CORRECT
+        except Exception:
+            pass
+    elif last_result == "correct":
+        # Show green highlight
+        try:
+            solution_move = board.parse_san(puzzle.best_move_san)
+            highlights[solution_move.from_square] = HIGHLIGHT_CORRECT
+            highlights[solution_move.to_square] = HIGHLIGHT_CORRECT
+        except Exception:
+            pass
+    elif last_result == "incorrect":
+        # Show red highlight on wrong squares (if available)
+        pass  # Could track the wrong move and highlight it
+    
+    # Display board
+    display_board(
+        board=board,
+        flipped=flipped,
+        highlight_squares=highlights,
+        arrows=arrows,
+    )
+
+
+def render_puzzle_controls(
+    session: PuzzleSession,
+) -> Optional[str]:
+    """
+    Render puzzle controls and handle user input.
+    
+    Returns the user's move input if submitted, None otherwise.
+    
+    Args:
+        session: Current puzzle session
+    
+    Returns:
+        User's move string if submitted, None otherwise
+    """
+    puzzle = session.current_puzzle
+    if puzzle is None:
+        st.warning("No puzzle available")
+        return None
+    
+    # Check free limit
+    if session.is_at_limit:
+        st.warning("🔒 Free puzzle limit reached!")
+        st.info(
+            f"You've completed {session.MAX_FREE_PUZZLES} free puzzles. "
+            "Upgrade to premium for unlimited puzzle access!"
+        )
+        _render_upgrade_placeholder()
+        return None
+    
+    # Move input
+    st.subheader("Your Move")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        move_input = st.text_input(
+            "Enter move (e.g., Nf3 or g1f3)",
+            key="puzzle_move_input",
+            placeholder="Type your move...",
+        )
+    
+    with col2:
+        submit = st.button("Submit", type="primary", key="puzzle_submit")
+    
+    if submit and move_input:
+        return move_input
+    
+    return None
+
+
+def render_puzzle_result(
+    is_correct: bool,
+    message: str,
+    puzzle: Puzzle,
+) -> None:
+    """Display the result of a puzzle attempt."""
+    if is_correct:
+        st.success(message)
+        st.balloons()
+    else:
+        st.error(message)
+        
+        # Show the played move that was a mistake
+        st.caption(f"The mistake played was: **{puzzle.played_move_san}**")
+
+
+def render_puzzle_navigation(session: PuzzleSession) -> Tuple[bool, bool]:
+    """
+    Render navigation controls between puzzles.
+    
+    Returns:
+        (next_clicked, reset_clicked)
+    """
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        prev_disabled = session.current_index <= 0
+        if st.button("⬅️ Previous", disabled=prev_disabled, key="puzzle_prev"):
+            if session.current_index > 0:
+                session.current_index -= 1
+                PuzzleUIState.clear_last_result()
+                st.rerun()
+    
+    with col2:
+        st.write(f"**{session.current_index + 1}** / {session.available_puzzle_count}")
+    
+    with col3:
+        next_disabled = (
+            session.current_index >= session.total_puzzles - 1 or
+            session.is_at_limit
+        )
+        next_clicked = st.button("Next ➡️", disabled=next_disabled, key="puzzle_next")
+    
+    return next_clicked, False
+
+
+def render_puzzle_stats(session: PuzzleSession) -> None:
+    """Display session statistics."""
+    stats = session.get_stats()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Puzzles Solved", stats["puzzles_solved"])
+    
+    with col2:
+        st.metric("Attempted", stats["puzzles_attempted"])
+    
+    with col3:
+        total = stats["total_attempts"]
+        solved = stats["puzzles_solved"]
+        rate = f"{(solved/total)*100:.0f}%" if total > 0 else "0%"
+        st.metric("Success Rate", rate)
+    
+    with col4:
+        remaining = session.available_puzzle_count - session.current_index
+        st.metric("Remaining", remaining)
+
+
+def _render_upgrade_placeholder() -> None:
+    """Render placeholder for premium upgrade."""
+    st.markdown(
+        """
+        <div style="
+            border: 2px dashed #f59e0b;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            background-color: #fef3c7;
+            margin: 1rem 0;
+        ">
+            <h3 style="color: #d97706; margin: 0;">🏆 Upgrade to Premium</h3>
+            <p style="color: #92400e;">Get unlimited puzzles and advanced analytics!</p>
+            <p style="color: #78350f; font-size: 0.9em;">(Premium features coming soon)</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =============================================================================
+# MAIN PUZZLE PAGE COMPONENT
+# =============================================================================
+
+
+def render_puzzle_page(
+    puzzles: List[Puzzle],
+    is_premium: bool = False,
+) -> None:
+    """
+    Render the complete puzzle solving page.
+    
+    Main entry point for the puzzle UI.
+    
+    Args:
+        puzzles: List of puzzles available to solve
+        is_premium: Whether user has premium access
+    """
+    st.header("♟️ Chess Puzzles")
+    st.caption("Practice tactical patterns from your analyzed games")
+    
+    if not puzzles:
+        st.info("No puzzles available. Analyze some games to generate puzzles!")
+        return
+    
+    # Initialize session
+    session = PuzzleUIState.initialize(puzzles, is_premium)
+    puzzle = session.current_puzzle
+    
+    if puzzle is None:
+        st.info("All puzzles completed!")
+        render_puzzle_stats(session)
+        if st.button("Reset Puzzles", key="puzzle_reset_all"):
+            session.reset()
+            st.rerun()
+        return
+    
+    # Check if already solved current puzzle
+    current_attempts = session.get_attempts_for_current()
+    already_solved = any(a.is_correct for a in current_attempts)
+    last_result = PuzzleUIState.get_last_result()
+    
+    # Layout
+    col_board, col_info = st.columns([2, 1])
+    
+    with col_board:
+        # Display board
+        render_puzzle_board(
+            puzzle=puzzle,
+            show_solution=already_solved or last_result == "incorrect",
+            last_result=last_result,
+        )
+    
+    with col_info:
+        # Puzzle info
+        render_puzzle_info(puzzle)
+        
+        # Hint button
+        if st.checkbox("Show hint", key="puzzle_show_hint"):
+            render_puzzle_hint(puzzle)
+    
+    st.divider()
+    
+    # Handle move input
+    if not already_solved and last_result != "incorrect":
+        user_move = render_puzzle_controls(session)
+        
+        if user_move:
+            # Validate and check answer
+            try:
+                board = chess.Board(puzzle.fen)
+                is_valid, move_obj, error_msg = validate_move(board, user_move)
+                
+                if not is_valid:
+                    st.error(error_msg)
+                else:
+                    # Check against correct answer
+                    is_correct, result_msg = check_puzzle_answer(
+                        board, move_obj, puzzle.best_move_san
+                    )
+                    
+                    # Record attempt
+                    user_san = board.san(move_obj)
+                    session.record_attempt(user_san, is_correct)
+                    
+                    # Set result for display
+                    PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
+                    
+                    st.rerun()
+                    
+            except Exception as e:
+                st.error(f"Error processing move: {e}")
+    
+    # Show result if available
+    if last_result:
+        if last_result == "correct":
+            render_puzzle_result(True, "Correct! ✅", puzzle)
+        else:
+            render_puzzle_result(
+                False,
+                f"Incorrect. The best move was **{puzzle.best_move_san}**",
+                puzzle,
+            )
+    
+    # Navigation
+    st.divider()
+    next_clicked, _ = render_puzzle_navigation(session)
+    
+    if next_clicked:
+        if session.advance_to_next():
+            PuzzleUIState.clear_last_result()
+            st.rerun()
+    
+    # Stats at bottom
+    st.divider()
+    render_puzzle_stats(session)
+
+
+# =============================================================================
+# INTERACTIVE SQUARE SELECTION (Click-to-move)
+# =============================================================================
+
+
+def render_clickable_board(
+    puzzle: Puzzle,
+    on_move_callback: callable,
+) -> None:
+    """
+    Render board with clickable squares for move input.
+    
+    This is a more advanced UI using Streamlit's custom components
+    or button grid. For simplicity, we use text input above.
+    
+    Note: True click-to-move requires JavaScript interop which is
+    complex in Streamlit. The text input approach is more reliable.
+    """
+    # For now, redirect to standard board display
+    # True interactive clicking would require streamlit-drawable-canvas
+    # or custom component
+    st.info("Use the text input to enter your move (e.g., e4, Nf3)")
+    render_puzzle_board(puzzle)
+
+
+def render_square_buttons(board: chess.Board, selected: Optional[int] = None) -> Optional[int]:
+    """
+    Render board as grid of buttons for square selection.
+    
+    This is a fallback interactive method.
+    Returns clicked square or None.
+    """
+    clicked_square = None
+    
+    # Get legal moves from selected square
+    legal_destinations = set()
+    if selected is not None:
+        for move in board.legal_moves:
+            if move.from_square == selected:
+                legal_destinations.add(move.to_square)
+    
+    # Render 8x8 grid
+    for rank in range(7, -1, -1):  # 7 to 0 (rank 8 to 1)
+        cols = st.columns(8)
+        for file in range(8):  # 0 to 7 (files a to h)
+            square = chess.square(file, rank)
+            piece = board.piece_at(square)
+            
+            # Determine button style
+            is_light = (rank + file) % 2 == 1
+            bg_color = "#f0d9b5" if is_light else "#b58863"
+            
+            if square == selected:
+                bg_color = "#3b82f6"  # Blue for selected
+            elif square in legal_destinations:
+                bg_color = "#22c55e"  # Green for legal destination
+            
+            # Piece symbol
+            piece_symbol = ""
+            if piece:
+                piece_symbols = {
+                    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔',
+                    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
+                }
+                piece_symbol = piece_symbols.get(piece.symbol(), '')
+            
+            with cols[file]:
+                if st.button(
+                    piece_symbol or "·",
+                    key=f"sq_{square}",
+                    help=chess.square_name(square),
+                ):
+                    clicked_square = square
+    
+    return clicked_square
