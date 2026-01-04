@@ -1475,7 +1475,11 @@ def main() -> None:
 
 
 def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
-    """Render analysis results with tabbed interface including Puzzles."""
+    """Render analysis results with a stable selector including Puzzles.
+
+    Streamlit tabs reset to the first tab on rerun. Since puzzle moves cause reruns,
+    we keep the user's selection stable via session_state.
+    """
     
     # CSS to make the puzzle tab larger and more prominent
     st.markdown("""
@@ -1500,14 +1504,22 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     </style>
     """, unsafe_allow_html=True)
     
-    # Create tabs for different views
-    tab_analysis, tab_puzzles = st.tabs(["📊 Analysis", "♟️ Puzzles"])
-    
-    with tab_analysis:
-        _render_enhanced_ui(aggregated)
-    
-    with tab_puzzles:
+    # Stable view selector (survives reruns)
+    if "main_view" not in st.session_state:
+        st.session_state["main_view"] = "📊 Analysis"
+
+    view = st.radio(
+        "",
+        options=["📊 Analysis", "♟️ Puzzles"],
+        horizontal=True,
+        key="main_view",
+        label_visibility="collapsed",
+    )
+
+    if view == "♟️ Puzzles":
         _render_puzzle_tab(aggregated)
+    else:
+        _render_enhanced_ui(aggregated)
 
 
 def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:

@@ -58,7 +58,7 @@
       }
 
       .sq.legal {
-        box-shadow: inset 0 0 0 4px var(--legal);
+        /* Dot indicator is rendered via ::after */
       }
 
       .sq.selected {
@@ -74,14 +74,40 @@
       }
 
       .piece {
-        font-size: 34px;
+        font-size: 38px;
         line-height: 1;
         cursor: grab;
+        font-family: "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols 2", "Arial Unicode MS", system-ui;
+        text-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.35),
+          0 2px 6px rgba(0, 0, 0, 0.25);
       }
 
       .piece.dragging {
         opacity: 0.6;
         cursor: grabbing;
+      }
+
+      /* Legal move dot */
+      .sq.legal::after {
+        content: "";
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: rgba(59, 130, 246, 0.65);
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+
+      /* If a piece is on the square, make the dot a subtle ring instead */
+      .sq.legal:has(.piece)::after {
+        width: 34px;
+        height: 34px;
+        background: transparent;
+        border: 4px solid rgba(59, 130, 246, 0.55);
       }
 
       .hint {
