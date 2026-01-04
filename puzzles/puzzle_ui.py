@@ -753,21 +753,23 @@ def render_puzzle_page(
 
 
 # =============================================================================
-# INTERACTIVE SQUARE SELECTION (Click-to-move)
+# INTERACTIVE SQUARE SELECTION (Single Board - Click-to-move)
 # =============================================================================
 
 
-def render_interactive_svg_board(
+def render_interactive_chessboard(
     board: chess.Board,
     flipped: bool = False,
     selected_square: Optional[int] = None,
     show_solution: bool = False,
     solution_move_san: Optional[str] = None,
+    board_id: str = "puzzle",
 ) -> Optional[Tuple[int, int]]:
     """
-    Render a single interactive SVG chessboard with clickable squares.
+    Render a SINGLE interactive chessboard with proper chess colors.
     
-    The SVG board is displayed with an overlay of clickable buttons.
+    This is ONE board - the colored squares ARE the clickable buttons.
+    Uses custom CSS to style Streamlit buttons to look like chess squares.
     
     Args:
         board: Current chess board position
@@ -779,115 +781,149 @@ def render_interactive_svg_board(
     Returns:
         (from_square, to_square) tuple if a complete move was made, None otherwise
     """
-    # Pre-compute legal moves for performance
+    # Pre-compute legal moves
     pieces_with_moves = get_pieces_with_moves(board)
-    
     legal_destinations = set()
     if selected_square is not None:
         legal_destinations = get_legal_destinations(board, selected_square)
     
     player_color = board.turn
     
-    # Build highlights and arrows for SVG
-    highlights = {}
-    arrows = []
-    
+    # Solution squares
+    solution_from = None
+    solution_to = None
     if show_solution and solution_move_san:
         try:
             solution_move = board.parse_san(solution_move_san)
-            arrows.append((solution_move.from_square, solution_move.to_square, "#22c55e"))
-            highlights[solution_move.from_square] = HIGHLIGHT_CORRECT
-            highlights[solution_move.to_square] = HIGHLIGHT_CORRECT
+            solution_from = solution_move.from_square
+            solution_to = solution_move.to_square
         except Exception:
             pass
-    elif selected_square is not None:
-        highlights[selected_square] = HIGHLIGHT_SELECTED
-        for dest in legal_destinations:
-            highlights[dest] = HIGHLIGHT_LEGAL
     
-    # Render the SVG board
-    svg = render_board_svg(
-        board=board,
-        size=BOARD_SIZE,
-        flipped=flipped,
-        highlight_squares=highlights,
-        arrows=arrows,
-    )
-    
-    # Display SVG board with clickable overlay
-    st.markdown(
-        f"""
-        <div style="display: flex; justify-content: center; margin: 1rem 0;">
-            {svg}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    
-    # If showing solution, no interaction needed
+    # Instructions
     if show_solution:
-        return None
+        st.caption("✅ Solution shown below:")
+    elif selected_square is not None:
+        piece = board.piece_at(selected_square)
+        piece_name = chess.piece_name(piece.piece_type).title() if piece else "Piece"
+        sq_name = chess.square_name(selected_square).upper()
+        st.success(f"**{piece_name}** on **{sq_name}** selected → Click a blue square to move")
+    else:
+        whose_turn = "White" if player_color == chess.WHITE else "Black"
+        st.info(f"**{whose_turn} to move** → Click a piece to select it")
     
-    # Render clickable grid below the board for move input
+    # CSS to style the board
+    st.markdown("""
+    <style>
+    /* Make all puzzle buttons look like chess squares */
+    [data-testid="column"] > div > div > div > button {
+        height: 50px !important;
+        min-height: 50px !important;
+        padding: 0 !important;
+        font-size: 28px !important;
+        border-radius: 0 !important;
+        border: none !important;
+        margin: 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     clicked_square = None
     move_made = None
     
-    # Calculate square size based on board
-    square_size = BOARD_SIZE // 8
-    
-    # Render the clickable square grid
     ranks = range(7, -1, -1) if not flipped else range(8)
-    files_order = range(8) if not flipped else range(7, -1, -1)
+    files_order = list(range(8) if not flipped else range(7, -1, -1))
     
+    # Add file labels (a-h)
+    file_labels = [chr(ord('a') + f) for f in files_order]
+    label_cols = st.columns(8)
+    for i, label in enumerate(file_labels):
+        with label_cols[i]:
+            st.markdown(f"<div style='text-align:center;color:#666;font-weight:bold;'>{label}</div>", unsafe_allow_html=True)
+    
+    # Render the board - each row is a rank
     for rank in ranks:
         cols = st.columns(8)
         for col_idx, file in enumerate(files_order):
             square = chess.square(file, rank)
             piece = board.piece_at(square)
             
-            # Check states
+            # Determine square appearance
+            is_light = (rank + file) % 2 == 1
             is_selected = square == selected_square
             is_legal_dest = square in legal_destinations
-            piece_can_move = square in pieces_with_moves and piece and piece.color == player_color
+            is_solution = show_solution and (square == solution_from or square == solution_to)
             
-            # Display: show piece symbol or empty
+            # Choose background color
+            if is_solution:
+                bg_color = "#86efac"  # Light green for solution
+            elif is_selected:
+                bg_color = "#7fa650"  # Green for selected
+            elif is_legal_dest:
+                bg_color = "#93c5fd"  # Light blue for legal moves
+            elif is_light:
+                bg_color = LIGHT_SQUARE
+            else:
+                bg_color = DARK_SQUARE
+            
+            # Piece symbol
             piece_symbol = PIECE_SYMBOLS.get(piece.symbol(), '') if piece else ''
+            display_text = piece_symbol if piece_symbol else " "
             
             with cols[col_idx]:
-                btn_key = f"sq_{square}_{selected_square}_{hash(board.fen()) % 1000}"
+                # Apply custom style to this specific button
+                btn_key = f"{board_id}_{square}_{selected_square}_{show_solution}"
                 
-                # Use primary button style for selected square
-                btn_type = "primary" if is_selected else "secondary"
+                # Custom CSS for this square
+                st.markdown(f"""
+                <style>
+                [data-testid="stButton"][data-key="{btn_key}"] button {{
+                    background-color: {bg_color} !important;
+                    color: #000 !important;
+                }}
+                [data-testid="stButton"][data-key="{btn_key}"] button:hover {{
+                    background-color: {bg_color} !important;
+                    opacity: 0.9;
+                }}
+                </style>
+                """, unsafe_allow_html=True)
                 
-                clicked = st.button(
-                    piece_symbol if piece_symbol else " ",
-                    key=btn_key,
-                    help=chess.square_name(square),
-                    use_container_width=True,
-                    type=btn_type,
-                )
-                
-                if clicked:
-                    clicked_square = square
+                if not show_solution:
+                    clicked = st.button(
+                        display_text,
+                        key=btn_key,
+                        help=chess.square_name(square).upper(),
+                        use_container_width=True,
+                    )
+                    if clicked:
+                        clicked_square = square
+                else:
+                    # Non-interactive when showing solution
+                    st.button(
+                        display_text,
+                        key=btn_key,
+                        help=chess.square_name(square).upper(),
+                        use_container_width=True,
+                        disabled=True,
+                    )
     
-    # Handle click logic
-    if clicked_square is not None:
-        # Case 1: Piece selected + clicked legal destination -> make move
+    # Add rank label on the right
+    st.markdown(f"<div style='text-align:right;color:#666;font-size:0.8em;'>Ranks 1-8</div>", unsafe_allow_html=True)
+    
+    # Process click
+    if clicked_square is not None and not show_solution:
         if selected_square is not None and clicked_square in legal_destinations:
             move_made = (selected_square, clicked_square)
             PuzzleUIState.clear_selected_square()
-        
-        # Case 2: Click on own piece that can move -> select it
         elif clicked_square in pieces_with_moves:
             clicked_piece = board.piece_at(clicked_square)
             if clicked_piece and clicked_piece.color == player_color:
-                if clicked_square == selected_square:
-                    PuzzleUIState.clear_selected_square()
+                new_selection = None if clicked_square == selected_square else clicked_square
+                if new_selection is not None:
+                    PuzzleUIState.set_selected_square(new_selection)
                 else:
-                    PuzzleUIState.set_selected_square(clicked_square)
+                    PuzzleUIState.clear_selected_square()
                 st.rerun()
-        
-        # Case 3: Clicked elsewhere -> clear selection
         elif selected_square is not None:
             PuzzleUIState.clear_selected_square()
             st.rerun()
@@ -895,15 +931,13 @@ def render_interactive_svg_board(
     return move_made
 
 
-def render_clickable_board(
-    puzzle: Puzzle,
-    on_move_callback: callable,
-) -> None:
-    """
-    Render board with clickable squares for move input.
-    
-    Legacy wrapper.
-    """
+# Aliases for compatibility
+render_interactive_svg_board = render_interactive_chessboard
+render_single_interactive_board = render_interactive_chessboard
+
+
+def render_clickable_board(puzzle: Puzzle, on_move_callback: callable) -> None:
+    """Legacy wrapper."""
     try:
         board = chess.Board(puzzle.fen)
     except Exception:
@@ -913,56 +947,30 @@ def render_clickable_board(
     selected = PuzzleUIState.get_selected_square()
     flipped = puzzle.side_to_move == "black"
     
-    result = render_interactive_svg_board(
+    result = render_interactive_chessboard(
         board=board,
         flipped=flipped,
         selected_square=selected,
     )
     
     if result and on_move_callback:
-        from_sq, to_sq = result
-        on_move_callback(from_sq, to_sq)
+        on_move_callback(result[0], result[1])
 
 
 def render_square_buttons(board: chess.Board, selected: Optional[int] = None) -> Optional[int]:
-    """
-    Render board as grid of buttons for square selection.
-    
-    Legacy fallback method.
-    Returns clicked square or None.
-    """
+    """Legacy fallback."""
     clicked_square = None
+    legal_destinations = get_legal_destinations(board, selected) if selected else set()
     
-    # Get legal moves from selected square (cached)
-    legal_destinations = set()
-    if selected is not None:
-        legal_destinations = get_legal_destinations(board, selected)
-    
-    # Render 8x8 grid
-    for rank in range(7, -1, -1):  # 7 to 0 (rank 8 to 1)
+    for rank in range(7, -1, -1):
         cols = st.columns(8)
-        for file in range(8):  # 0 to 7 (files a to h)
+        for file in range(8):
             square = chess.square(file, rank)
             piece = board.piece_at(square)
-            
-            # Determine button style
-            is_light = (rank + file) % 2 == 1
-            bg_color = LIGHT_SQUARE if is_light else DARK_SQUARE
-            
-            if square == selected:
-                bg_color = HIGHLIGHT_SELECTED
-            elif square in legal_destinations:
-                bg_color = "#22c55e"  # Green for legal destination
-            
-            # Piece symbol
             piece_symbol = PIECE_SYMBOLS.get(piece.symbol(), '') if piece else ''
             
             with cols[file]:
-                if st.button(
-                    piece_symbol or "·",
-                    key=f"sq_{square}",
-                    help=chess.square_name(square),
-                ):
+                if st.button(piece_symbol or "·", key=f"sq_{square}", help=chess.square_name(square)):
                     clicked_square = square
     
     return clicked_square
