@@ -632,7 +632,7 @@ def render_puzzle_page(
     is_premium: bool = False,
 ) -> None:
     """
-    Render the complete puzzle solving page with SVG board and click-to-move.
+    Render the complete puzzle solving page with a single interactive SVG board.
     
     Main entry point for the puzzle UI.
     
@@ -692,66 +692,38 @@ def render_puzzle_page(
             return
         
         flipped = puzzle.side_to_move == "black"
+        show_solution = already_solved or last_result == "incorrect"
         
-        # Build highlights for selected square
-        highlights = {}
-        arrows = []
-        
-        if already_solved or last_result == "incorrect":
-            # Show solution arrow
-            try:
-                solution_move = board.parse_san(puzzle.best_move_san)
-                arrows.append((solution_move.from_square, solution_move.to_square, "#22c55e"))
-                highlights[solution_move.from_square] = HIGHLIGHT_CORRECT
-                highlights[solution_move.to_square] = HIGHLIGHT_CORRECT
-            except Exception:
-                pass
-        elif selected_square is not None:
-            # Highlight selected piece and legal destinations
-            highlights[selected_square] = HIGHLIGHT_SELECTED
-            legal_dests = get_legal_destinations(board, selected_square)
-            for dest in legal_dests:
-                highlights[dest] = HIGHLIGHT_LEGAL
-        
-        # Display the SVG board
-        display_board(
+        # Single interactive board
+        move_made = render_interactive_svg_board(
             board=board,
             flipped=flipped,
-            highlight_squares=highlights,
-            arrows=arrows,
+            selected_square=selected_square,
+            show_solution=show_solution,
+            solution_move_san=puzzle.best_move_san,
         )
         
-        # Interactive move input (only if puzzle not solved)
-        if not already_solved and last_result != "incorrect":
-            st.caption("Click a piece to select, then click where to move:")
+        # Process move if made
+        if move_made:
+            from_sq, to_sq = move_made
             
-            move_made = render_move_input_grid(
-                board=board,
-                flipped=flipped,
-                selected_square=selected_square,
-            )
+            # Create move (check for pawn promotion)
+            move = chess.Move(from_sq, to_sq)
+            piece = board.piece_at(from_sq)
             
-            # Process move
-            if move_made:
-                from_sq, to_sq = move_made
-                
-                # Create move (check for pawn promotion)
-                move = chess.Move(from_sq, to_sq)
-                piece = board.piece_at(from_sq)
-                
-                if piece and piece.piece_type == chess.PAWN:
-                    to_rank = chess.square_rank(to_sq)
-                    if (piece.color == chess.WHITE and to_rank == 7) or \
-                       (piece.color == chess.BLACK and to_rank == 0):
-                        move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
-                
-                if move in board.legal_moves:
-                    is_correct, result_msg = check_puzzle_answer(board, move, puzzle.best_move_san)
-                    user_san = board.san(move)
-                    session.record_attempt(user_san, is_correct)
-                    PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
-                    PuzzleUIState.clear_selected_square()
-                    st.rerun()
+            if piece and piece.piece_type == chess.PAWN:
+                to_rank = chess.square_rank(to_sq)
+                if (piece.color == chess.WHITE and to_rank == 7) or \
+                   (piece.color == chess.BLACK and to_rank == 0):
+                    move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
+            
+            if move in board.legal_moves:
+                is_correct, result_msg = check_puzzle_answer(board, move, puzzle.best_move_san)
+                user_san = board.san(move)
+                session.record_attempt(user_san, is_correct)
+                PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
+                PuzzleUIState.clear_selected_square()
+                st.rerun()
     
     # Show result if available
     if last_result:
@@ -764,31 +736,6 @@ def render_puzzle_page(
                 f"Incorrect. The best move was **{puzzle.best_move_san}**",
                 puzzle,
             )
-    
-    # Text input fallback (only if not solved)
-    if not already_solved and last_result != "incorrect":
-        with st.expander("Or type your move"):
-            user_move = render_puzzle_controls(session)
-            
-            if user_move:
-                try:
-                    board = chess.Board(puzzle.fen)
-                    is_valid, move_obj, error_msg = validate_move(board, user_move)
-                    
-                    if not is_valid:
-                        st.error(error_msg)
-                    else:
-                        is_correct, result_msg = check_puzzle_answer(
-                            board, move_obj, puzzle.best_move_san
-                        )
-                        user_san = board.san(move_obj)
-                        session.record_attempt(user_san, is_correct)
-                        PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
-                        PuzzleUIState.clear_selected_square()
-                        st.rerun()
-                        
-                except Exception as e:
-                    st.error(f"Error processing move: {e}")
     
     # Navigation
     st.divider()
@@ -810,20 +757,24 @@ def render_puzzle_page(
 # =============================================================================
 
 
-def render_move_input_grid(
+def render_interactive_svg_board(
     board: chess.Board,
     flipped: bool = False,
     selected_square: Optional[int] = None,
+    show_solution: bool = False,
+    solution_move_san: Optional[str] = None,
 ) -> Optional[Tuple[int, int]]:
     """
-    Render a grid overlay for click-to-move input.
+    Render a single interactive SVG chessboard with clickable squares.
     
-    Two-click system: click piece to select, click destination to move.
+    The SVG board is displayed with an overlay of clickable buttons.
     
     Args:
         board: Current chess board position
         flipped: Whether to flip the board (black perspective)
         selected_square: Currently selected square (if any)
+        show_solution: Whether to show the solution arrow
+        solution_move_san: The solution move in SAN notation
         
     Returns:
         (from_square, to_square) tuple if a complete move was made, None otherwise
@@ -836,21 +787,55 @@ def render_move_input_grid(
         legal_destinations = get_legal_destinations(board, selected_square)
     
     player_color = board.turn
+    
+    # Build highlights and arrows for SVG
+    highlights = {}
+    arrows = []
+    
+    if show_solution and solution_move_san:
+        try:
+            solution_move = board.parse_san(solution_move_san)
+            arrows.append((solution_move.from_square, solution_move.to_square, "#22c55e"))
+            highlights[solution_move.from_square] = HIGHLIGHT_CORRECT
+            highlights[solution_move.to_square] = HIGHLIGHT_CORRECT
+        except Exception:
+            pass
+    elif selected_square is not None:
+        highlights[selected_square] = HIGHLIGHT_SELECTED
+        for dest in legal_destinations:
+            highlights[dest] = HIGHLIGHT_LEGAL
+    
+    # Render the SVG board
+    svg = render_board_svg(
+        board=board,
+        size=BOARD_SIZE,
+        flipped=flipped,
+        highlight_squares=highlights,
+        arrows=arrows,
+    )
+    
+    # Display SVG board with clickable overlay
+    st.markdown(
+        f"""
+        <div style="display: flex; justify-content: center; margin: 1rem 0;">
+            {svg}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    # If showing solution, no interaction needed
+    if show_solution:
+        return None
+    
+    # Render clickable grid below the board for move input
     clicked_square = None
     move_made = None
     
-    # File labels
-    file_labels = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
-    if flipped:
-        file_labels = file_labels[::-1]
+    # Calculate square size based on board
+    square_size = BOARD_SIZE // 8
     
-    # Render file labels at top
-    label_cols = st.columns(8)
-    for i, label in enumerate(file_labels):
-        with label_cols[i]:
-            st.markdown(f"<div style='text-align: center; font-size: 0.8rem; color: #666;'>{label}</div>", unsafe_allow_html=True)
-    
-    # Render 8x8 grid of buttons
+    # Render the clickable square grid
     ranks = range(7, -1, -1) if not flipped else range(8)
     files_order = range(8) if not flipped else range(7, -1, -1)
     
@@ -865,27 +850,21 @@ def render_move_input_grid(
             is_legal_dest = square in legal_destinations
             piece_can_move = square in pieces_with_moves and piece and piece.color == player_color
             
-            # Display symbol
+            # Display: show piece symbol or empty
             piece_symbol = PIECE_SYMBOLS.get(piece.symbol(), '') if piece else ''
             
             with cols[col_idx]:
-                # Style based on state
-                if is_selected:
-                    btn_type = "primary"
-                elif is_legal_dest:
-                    btn_type = "secondary"  
-                else:
-                    btn_type = "secondary"
+                btn_key = f"sq_{square}_{selected_square}_{hash(board.fen()) % 1000}"
                 
-                # Unique key
-                btn_key = f"mv_{square}_{selected_square}"
+                # Use primary button style for selected square
+                btn_type = "primary" if is_selected else "secondary"
                 
                 clicked = st.button(
-                    piece_symbol if piece_symbol else "·",
+                    piece_symbol if piece_symbol else " ",
                     key=btn_key,
-                    help=f"{chess.square_name(square)}" + (" (selected)" if is_selected else " (can move here)" if is_legal_dest else ""),
+                    help=chess.square_name(square),
                     use_container_width=True,
-                    type=btn_type if is_selected else "secondary",
+                    type=btn_type,
                 )
                 
                 if clicked:
@@ -934,7 +913,7 @@ def render_clickable_board(
     selected = PuzzleUIState.get_selected_square()
     flipped = puzzle.side_to_move == "black"
     
-    result = render_move_input_grid(
+    result = render_interactive_svg_board(
         board=board,
         flipped=flipped,
         selected_square=selected,
