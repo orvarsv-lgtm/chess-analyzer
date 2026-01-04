@@ -150,24 +150,31 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         st.write(f"Progress: **{progress.current_index + 1} / {len(puzzles)}**")
         st.write(f"Solved: **{progress.solved}**")
 
+        show_explanation = st.checkbox("📖 Show explanation", key="puzzle_show_explanation_v2")
+
         if progress.last_result == "correct":
             st.success("Correct!")
+            if puzzle.explanation:
+                st.info(f"💡 {puzzle.explanation}")
         elif progress.last_result == "incorrect":
             st.error("Incorrect. Try again.")
+            if show_explanation:
+                st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
 
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Next", use_container_width=True):
+        if progress.last_result is None and show_explanation:
+            st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
+
+        nav1, nav2, nav3 = st.columns(3)
+        with nav1:
+            if st.button("Back", use_container_width=True, disabled=progress.current_index <= 0):
+                progress.current_index = max(progress.current_index - 1, 0)
+                st.rerun()
+        with nav2:
+            if st.button("Next", use_container_width=True, disabled=progress.current_index >= len(puzzles) - 1):
                 progress.current_index = min(progress.current_index + 1, len(puzzles) - 1)
-                # active_puzzle_index reset will run on next render
                 st.rerun()
-        with c2:
+        with nav3:
+            # Full reset: clears index, solved, last result, last move, accepted position.
             if st.button("Reset", use_container_width=True):
-                progress.last_result = None
-                progress.last_uci = None
-                progress.current_fen = puzzle.fen
+                _reset_progress()
                 st.rerun()
-
-        if st.button("Restart Session", use_container_width=True):
-            _reset_progress()
-            st.rerun()
