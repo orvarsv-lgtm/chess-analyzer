@@ -115,14 +115,30 @@ class PuzzleExplanation:
 
 
 def detect_fork(board_after: chess.Board, attacker_color: chess.Color, 
-                moving_piece_square: int) -> Tuple[bool, List[Tuple[int, int]]]:
+                moving_piece_square: int) -> Tuple[bool, List[Tuple[int, int, bool]]]:
     """
-    Detect if a fork exists (one piece attacks 2+ valuable pieces).
+    Detect if a fork exists (one piece attacks 2+ valuable pieces) AND wins material.
+    
+    A fork only "wins material" if:
+    - One forked piece is the King (must move), OR
+    - The forking piece is worth less than a forked piece that's undefended, OR
+    - The forking piece is worth less than a forked piece (even if defended)
+    
+    For example:
+    - Pawn forks King + defended Knight = wins Knight (pawn < knight)
+    - Queen forks King + defended Knight = NOT winning (queen > knight)
+    - Queen forks King + Queen = wins Queen (equal trade)
     
     Returns:
-        (is_fork, list of (piece_type, square) tuples of forked pieces)
+        (is_winning_fork, list of (piece_type, square, is_defended) tuples)
     """
+    forking_piece = board_after.piece_at(moving_piece_square)
+    if not forking_piece:
+        return False, []
+    
+    forking_value = PIECE_VALUES.get(forking_piece.piece_type, 0)
     attacked_valuable = []
+    defender_color = not attacker_color
     
     for square in chess.SQUARES:
         piece = board_after.piece_at(square)
@@ -135,10 +151,43 @@ def detect_fork(board_after: chess.Board, attacker_color: chess.Color,
                     # Only count valuable pieces (not pawns, unless it's the king)
                     if piece.piece_type in (chess.KNIGHT, chess.BISHOP, chess.ROOK, 
                                            chess.QUEEN, chess.KING):
-                        attacked_valuable.append((piece.piece_type, square))
+                        is_defended = board_after.is_attacked_by(defender_color, square)
+                        attacked_valuable.append((piece.piece_type, square, is_defended))
     
-    is_fork = len(attacked_valuable) >= 2
-    return is_fork, attacked_valuable
+    # Need at least 2 pieces attacked
+    if len(attacked_valuable) < 2:
+        return False, attacked_valuable
+    
+    # Check if this fork actually wins material
+    # A fork wins if: King is forked (must move) AND at least one other piece can be won
+    has_king = any(pt == chess.KING for pt, sq, defended in attacked_valuable)
+    
+    if has_king:
+        # King must move - check if we can profitably capture something else
+        for pt, sq, is_defended in attacked_valuable:
+            if pt != chess.KING:
+                piece_value = PIECE_VALUES.get(pt, 0)
+                if not is_defended:
+                    # Undefended piece = free capture
+                    return True, attacked_valuable
+                elif forking_value < piece_value:
+                    # Our piece is worth less than theirs = winning exchange
+                    return True, attacked_valuable
+                elif forking_value == piece_value and pt == chess.QUEEN:
+                    # Trading queens is significant
+                    return True, attacked_valuable
+        # King is forked but other pieces are defended and worth less than forker
+        # This is NOT a winning fork (e.g., Queen forks King + defended Knight)
+        return False, attacked_valuable
+    else:
+        # No king - check if any piece is undefended or worth more than forker
+        for pt, sq, is_defended in attacked_valuable:
+            piece_value = PIECE_VALUES.get(pt, 0)
+            if not is_defended:
+                return True, attacked_valuable
+            elif forking_value < piece_value:
+                return True, attacked_valuable
+        return False, attacked_valuable
 
 
 def detect_pin(board: chess.Board, move: chess.Move) -> Tuple[bool, bool, Optional[str]]:
@@ -884,21 +933,22 @@ def generate_puzzle_explanation_v2(
         explanation.human_readable_summary = descriptions[0]
         return explanation
     
-    # 2. Fork detection
-    is_fork, forked_pieces = detect_fork(board_after, moving_piece.color, best_move.to_square)
-    if is_fork:
+    # 2. Fork detection (only counts as fork if it actually wins material)
+    is_winning_fork, forked_pieces = detect_fork(board_after, moving_piece.color, best_move.to_square)
+    if is_winning_fork:
         motifs_found.append(TacticalMotif.FORK)
         piece_names = []
-        for pt, sq in forked_pieces:
+        for pt, sq, is_defended in forked_pieces:
             if pt == chess.KING:
                 piece_names.append("King")
             else:
+                defended_note = "" if not is_defended else ""
                 piece_names.append(f"{chess.piece_name(pt).title()} on {chess.square_name(sq)}")
         
         if gives_check:
             fork_desc = f"This check forks the {' and '.join(piece_names)}, winning material."
         else:
-            fork_desc = f"The {piece_name} forks the {' and '.join(piece_names)}."
+            fork_desc = f"The {piece_name} forks the {' and '.join(piece_names)}, winning material."
         descriptions.append(fork_desc)
     
     # 3. Pin detection

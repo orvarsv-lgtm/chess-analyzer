@@ -35,35 +35,51 @@ from puzzles.explanation_engine import (
 class TestTacticalMotifDetection(unittest.TestCase):
     """Tests for individual tactical motif detection functions."""
     
-    def test_detect_fork_knight_fork_king_and_rook(self):
-        """Test knight fork detection on king and rook."""
-        # Position: White knight on f6 attacks black king on e8 and rook on h8
-        fen = "4k2r/8/5N2/8/8/8/8/4K3 w - - 0 1"  # White to move - after Nf6
+    def test_detect_fork_knight_fork_king_and_queen(self):
+        """Test knight fork detection on king and queen (winning fork)."""
+        # Knight on f6 forks king on g8 and queen on d7
+        # This is a winning fork because knight < queen
+        fen = "6k1/3q4/5N2/8/8/8/8/4K3 w - - 0 1"
         board = chess.Board(fen)
-        
-        # Knight is on f6 attacking king on e8 and rook on h8
         is_fork, forked_pieces = detect_fork(board, chess.WHITE, chess.F6)
         
-        # Knight on f6 attacks e8 (king) and h8 (rook)? Let's verify
-        # Knight on f6 attacks: d5, e4, g4, h5, h7, g8, e8, d7
-        # So it attacks e8 (king) but not h8 (rook - needs 2 squares)
-        # Let's use a correct fork position instead
-        
-        # Better position: Nf6 forks king on g8 and queen on d7
-        fen2 = "6k1/3q4/5N2/8/8/8/8/4K3 w - - 0 1"
-        board2 = chess.Board(fen2)
-        is_fork2, forked_pieces2 = detect_fork(board2, chess.WHITE, chess.F6)
-        
         # Nf6 attacks: d5, e4, g4, h5, h7, g8, e8, d7
-        # Attacks king on g8 and queen on d7
-        self.assertTrue(is_fork2)
-        self.assertEqual(len(forked_pieces2), 2)
+        # Attacks king on g8 and queen on d7 - knight wins queen
+        self.assertTrue(is_fork)
+        self.assertEqual(len(forked_pieces), 2)
         
-        forked_types = {pt for pt, sq in forked_pieces2}
+        forked_types = {pt for pt, sq, defended in forked_pieces}
         self.assertIn(chess.KING, forked_types)
         self.assertIn(chess.QUEEN, forked_types)
     
-    def test_detect_fork_queen_fork(self):
+    def test_detect_fork_queen_fork_king_and_defended_knight_not_winning(self):
+        """Test that queen forking king + defended knight is NOT a winning fork."""
+        # Queen forks king and knight, but knight is defended by pawn
+        # Queen (900) > Knight (320), so this is NOT winning
+        
+        # Setup: Queen on e5 forks king on e8 and knight on c3 (defended by black pawn on b4)
+        fen = "4k3/8/8/4Q3/1p6/2n5/8/4K3 w - - 0 1"
+        board = chess.Board(fen)
+        # Qe5 attacks e8 (king) and c3 (knight defended by b4 pawn)
+        is_fork, forked_pieces = detect_fork(board, chess.WHITE, chess.E5)
+        
+        # Queen forking King + defended Knight should NOT be a winning fork
+        # because Queen (900) > Knight (320)
+        self.assertFalse(is_fork)  # Not a WINNING fork
+    
+    def test_detect_fork_pawn_fork_is_winning(self):
+        """Test that pawn fork wins even against defended pieces."""
+        # Pawn forks knight and bishop (both worth more than pawn)
+        fen = "4k3/8/8/2n1b3/3P4/8/8/4K3 w - - 0 1"
+        board = chess.Board(fen)
+        # Pawn on d4, pieces on c5 and e5
+        is_fork, forked_pieces = detect_fork(board, chess.WHITE, chess.D4)
+        
+        # Pawn (100) < Knight (320) and Bishop (330)
+        # Even if defended, pawn fork wins material
+        self.assertTrue(is_fork)
+    
+    def test_detect_fork_queen_fork_king_and_queen(self):
         """Test queen fork on king and rook."""
         # Queen on d5 attacks king on g8 and rook on a8
         # Queen on d5 attacks: a8, b7, c6, e6, f7, g8 (diagonal)
