@@ -695,6 +695,13 @@ def render_puzzle_page(
         # Hint button
         if st.checkbox("💡 Show hint", key="puzzle_show_hint"):
             render_puzzle_hint(puzzle)
+
+        # Explanation (deterministic, derived from the position)
+        if st.checkbox("📖 Show explanation", key="puzzle_show_explanation"):
+            if puzzle.explanation:
+                st.info(puzzle.explanation)
+            else:
+                st.info("Explanation will appear once puzzles are regenerated.")
     
     with col_board:
         try:
