@@ -179,6 +179,42 @@
         return `data:image/svg+xml;charset=utf-8,${encoded}`;
       }
 
+      // Optional: user-provided piece assets.
+      // If these files exist, we prefer them to match chess-site visuals.
+      // Place files in: ui/chessboard_component_frontend/pieces/
+      // Expected names: wK,wQ,wR,wB,wN,wP and bK,bQ,bR,bB,bN,bP (svg or png)
+      function assetKeyFromPieceChar(pieceChar) {
+        const kind = (pieceChar || "").toUpperCase();
+        const color = pieceChar && pieceChar.toUpperCase() === pieceChar ? "w" : "b";
+        return `${color}${kind}`;
+      }
+
+      function createPieceElement(pieceChar) {
+        const key = assetKeyFromPieceChar(pieceChar);
+        const kind = (pieceChar || "").toUpperCase();
+        const pieceColor = pieceChar.toUpperCase() === pieceChar ? "w" : "b";
+
+        const img = document.createElement("img");
+        img.className = "piece";
+        img.alt = key;
+
+        // Try local assets first: svg -> png -> fallback to built-in SVG.
+        let stage = 0;
+        const trySrc = () => {
+          stage += 1;
+          if (stage === 1) img.src = `pieces/${key}.svg`;
+          else if (stage === 2) img.src = `pieces/${key}.png`;
+          else {
+            const svg = pieceSvg(kind, pieceColor);
+            img.src = svgDataUri(svg);
+          }
+        };
+        img.onerror = () => trySrc();
+        trySrc();
+
+        return img;
+      }
+
       function pieceSvg(kind, color) {
         // kind: P,N,B,R,Q,K ; color: 'w'|'b'
         const isWhite = color === "w";
@@ -448,14 +484,9 @@
             if (pieceChar) {
               sqEl.classList.add("occupied");
 
-              const pieceEl = document.createElement("img");
-              pieceEl.className = "piece";
+              const pieceEl = createPieceElement(pieceChar);
 
-              const kind = (pieceChar || "").toUpperCase();
               const pieceColor = pieceChar.toUpperCase() === pieceChar ? "w" : "b";
-              const svg = pieceSvg(kind, pieceColor);
-              pieceEl.src = svgDataUri(svg);
-              pieceEl.alt = `${pieceColor}${kind}`;
 
               const draggable = pieceColor === sideToMove;
               pieceEl.draggable = draggable;
