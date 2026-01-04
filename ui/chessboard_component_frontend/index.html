@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chessboard Component</title>
+    <style>
+      :root {
+        --light: #f0d9b5;
+        --dark: #b58863;
+        --legal: rgba(59, 130, 246, 0.35);
+        --selected: rgba(34, 197, 94, 0.35);
+        --correct: rgba(34, 197, 94, 0.55);
+        --incorrect: rgba(239, 68, 68, 0.55);
+        --piece-white: #111827;
+        --piece-black: #111827;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+      }
+
+      .wrap {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 8px 0;
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(8, 52px);
+        grid-template-rows: repeat(8, 52px);
+        border-radius: 10px;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .sq {
+        width: 52px;
+        height: 52px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        position: relative;
+      }
+
+      .sq.light {
+        background: var(--light);
+      }
+
+      .sq.dark {
+        background: var(--dark);
+      }
+
+      .sq.legal {
+        box-shadow: inset 0 0 0 4px var(--legal);
+      }
+
+      .sq.selected {
+        box-shadow: inset 0 0 0 4px var(--selected);
+      }
+
+      .sq.correct {
+        box-shadow: inset 0 0 0 4px var(--correct);
+      }
+
+      .sq.incorrect {
+        box-shadow: inset 0 0 0 4px var(--incorrect);
+      }
+
+      .piece {
+        font-size: 34px;
+        line-height: 1;
+        cursor: grab;
+      }
+
+      .piece.dragging {
+        opacity: 0.6;
+        cursor: grabbing;
+      }
+
+      .hint {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        font-size: 12px;
+        color: rgba(0, 0, 0, 0.6);
+        text-align: center;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div id="board" class="board" aria-label="Chessboard"></div>
+    </div>
+    <div id="hint" class="hint"></div>
+
+    <script>
+      // --- Streamlit Component Protocol (minimal) ---
+      function _postMessage(message) {
+        window.parent.postMessage(message, "*");
+      }
+
+      function setComponentValue(value) {
+        _postMessage({
+          isStreamlitMessage: true,
+          type: "streamlit:setComponentValue",
+          value: value,
+        });
+      }
+
+      function setFrameHeight(height) {
+        _postMessage({
+          isStreamlitMessage: true,
+          type: "streamlit:setFrameHeight",
+          height: height,
+        });
+      }
+
+      function componentReady() {
+        _postMessage({
+          isStreamlitMessage: true,
+          type: "streamlit:componentReady",
+          apiVersion: 1,
+        });
+      }
+
+      // --- Chessboard Rendering ---
+      const PIECES = {
+        P: "♙",
+        N: "♘",
+        B: "♗",
+        R: "♖",
+        Q: "♕",
+        K: "♔",
+        p: "♟",
+        n: "♞",
+        b: "♝",
+        r: "♜",
+        q: "♛",
+        k: "♚",
+      };
+
+      function parseFenPieces(fen) {
+        // Returns map like {"e4": "P"}
+        const parts = (fen || "").split(" ");
+        const placement = parts[0] || "";
+        const rows = placement.split("/");
+        const out = {};
+        if (rows.length !== 8) return out;
+
+        for (let r = 0; r < 8; r++) {
+          const row = rows[r];
+          let file = 0;
+          for (const ch of row) {
+            if (ch >= "1" && ch <= "8") {
+              file += parseInt(ch, 10);
+            } else {
+              const sq = String.fromCharCode("a".charCodeAt(0) + file) + (8 - r);
+              out[sq] = ch;
+              file += 1;
+            }
+          }
+        }
+        return out;
+      }
+
+      function squareColor(fileIdx, rankIdx) {
+        return (fileIdx + rankIdx) % 2 === 0 ? "dark" : "light";
+      }
+
+      function uciFromSquares(fromSq, toSq, legalMoves) {
+        const base = fromSq + toSq;
+        // Prefer exact match.
+        for (const m of legalMoves) {
+          if (m === base) return m;
+        }
+        // Handle promotions (e7e8q etc)
+        const candidates = legalMoves.filter((m) => m.startsWith(base));
+        if (candidates.length === 0) return null;
+        // Prefer queen promotion when ambiguous
+        const q = candidates.find((m) => m.length === 5 && m.endsWith("q"));
+        return q || candidates[0];
+      }
+
+      let args = {
+        fen: chessStartFen(),
+        orientation: "white",
+        legal_moves: [],
+        side_to_move: "w",
+        highlights: {
+          legal_to: [],
+          selected: null,
+          correct_squares: [],
+          incorrect_squares: [],
+        },
+        ui: {
+          hint: "",
+        },
+      };
+
+      function chessStartFen() {
+        return "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+      }
+
+      let selectedSquare = null;
+
+      function render() {
+        const boardEl = document.getElementById("board");
+        const hintEl = document.getElementById("hint");
+        const pieces = parseFenPieces(args.fen);
+
+        const orientation = args.orientation === "black" ? "black" : "white";
+        const legalMoves = Array.isArray(args.legal_moves) ? args.legal_moves : [];
+        const sideToMove = args.side_to_move === "b" ? "b" : "w";
+
+        hintEl.textContent = (args.ui && args.ui.hint) || "";
+
+        // Square iteration order based on orientation.
+        const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        const ranks = [1, 2, 3, 4, 5, 6, 7, 8];
+        const viewFiles = orientation === "white" ? files : [...files].reverse();
+        const viewRanks = orientation === "white" ? [...ranks].reverse() : ranks;
+
+        // Build destination highlight set for selectedSquare
+        const legalDestinations = new Set();
+        if (selectedSquare) {
+          for (const m of legalMoves) {
+            if (m && m.startsWith(selectedSquare) && m.length >= 4) {
+              legalDestinations.add(m.slice(2, 4));
+            }
+          }
+        }
+
+        const correctSq = new Set((args.highlights && args.highlights.correct_squares) || []);
+        const incorrectSq = new Set((args.highlights && args.highlights.incorrect_squares) || []);
+
+        boardEl.innerHTML = "";
+
+        for (let rIdx = 0; rIdx < 8; rIdx++) {
+          for (let fIdx = 0; fIdx < 8; fIdx++) {
+            const file = viewFiles[fIdx];
+            const rank = viewRanks[rIdx];
+            const sq = file + String(rank);
+
+            const sqEl = document.createElement("div");
+            sqEl.className = `sq ${squareColor(
+              // We want colors fixed to real board, not orientation.
+              files.indexOf(file),
+              ranks.indexOf(rank)
+            )}`;
+            sqEl.dataset.square = sq;
+
+            if (selectedSquare === sq) sqEl.classList.add("selected");
+            if (legalDestinations.has(sq)) sqEl.classList.add("legal");
+            if (correctSq.has(sq)) sqEl.classList.add("correct");
+            if (incorrectSq.has(sq)) sqEl.classList.add("incorrect");
+
+            // Drop target logic
+            sqEl.addEventListener("dragover", (e) => {
+              if (!selectedSquare) return;
+              if (!legalDestinations.has(sq)) return;
+              e.preventDefault();
+            });
+            sqEl.addEventListener("drop", (e) => {
+              e.preventDefault();
+              if (!selectedSquare) return;
+              const uci = uciFromSquares(selectedSquare, sq, legalMoves);
+              if (!uci) return;
+              setComponentValue({ uci });
+            });
+
+            // Click-to-move
+            sqEl.addEventListener("click", () => {
+              const piece = pieces[sq] || null;
+              const pieceColor = piece ? (piece.toUpperCase() === piece ? "w" : "b") : null;
+
+              if (selectedSquare) {
+                // If clicking a legal destination, emit move
+                if (legalDestinations.has(sq)) {
+                  const uci = uciFromSquares(selectedSquare, sq, legalMoves);
+                  if (uci) {
+                    setComponentValue({ uci });
+                  }
+                  return;
+                }
+
+                // Switch selection if clicking another own piece
+                if (piece && pieceColor === sideToMove) {
+                  selectedSquare = sq;
+                  render();
+                  return;
+                }
+
+                // Otherwise clear selection
+                selectedSquare = null;
+                render();
+                return;
+              }
+
+              // No selection yet: select if own piece
+              if (piece && pieceColor === sideToMove) {
+                selectedSquare = sq;
+                render();
+              }
+            });
+
+            const pieceChar = pieces[sq];
+            if (pieceChar) {
+              const pieceEl = document.createElement("div");
+              pieceEl.className = "piece";
+              pieceEl.textContent = PIECES[pieceChar] || "";
+
+              const pieceColor = pieceChar.toUpperCase() === pieceChar ? "w" : "b";
+              const draggable = pieceColor === sideToMove;
+              pieceEl.draggable = draggable;
+
+              pieceEl.addEventListener("dragstart", (e) => {
+                if (!draggable) {
+                  e.preventDefault();
+                  return;
+                }
+                selectedSquare = sq;
+                pieceEl.classList.add("dragging");
+                try {
+                  e.dataTransfer.setData("text/plain", sq);
+                } catch (_) {}
+                render();
+              });
+              pieceEl.addEventListener("dragend", () => {
+                pieceEl.classList.remove("dragging");
+              });
+
+              sqEl.appendChild(pieceEl);
+            }
+
+            boardEl.appendChild(sqEl);
+          }
+        }
+
+        // Height: board + hint
+        setFrameHeight(document.body.scrollHeight);
+      }
+
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (!data || data.type !== "streamlit:render") return;
+
+        args = data.args || args;
+        // Reset selection if the underlying position changed (prevents stale selections)
+        if (typeof args.fen === "string") {
+          // keep selection; selection is recalculated against legal_moves
+        }
+        render();
+      });
+
+      componentReady();
+      // Render a default board while waiting for Streamlit args
+      render();
+    </script>
+  </body>
+</html>

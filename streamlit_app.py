@@ -26,6 +26,10 @@ from puzzles import (
     PuzzleType,
 )
 
+# New JS-board puzzle UI (single real board)
+from puzzles.puzzle_store import from_legacy_puzzles
+from ui.puzzle_ui import render_puzzle_trainer
+
 BASE_DIR = os.path.dirname(__file__)
 OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
 
@@ -1613,11 +1617,9 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     # Premium status (for demo, always False - implement real check)
     IS_PREMIUM = False
     
-    # Render puzzle interface
-    render_puzzle_page(
-        puzzles=filtered_puzzles,
-        is_premium=IS_PREMIUM,
-    )
+    # Render puzzle interface (single JS board with drag/click)
+    puzzle_defs = from_legacy_puzzles(filtered_puzzles)
+    render_puzzle_trainer(puzzle_defs)
 
 
 def _filter_puzzles(

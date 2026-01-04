@@ -376,6 +376,13 @@ class PuzzleGenerator:
                 except Exception:
                     board.push(played_move)
                     continue
+
+            # Ensure we always have UCI for the best move when possible.
+            if not best_move_uci:
+                try:
+                    best_move_uci = board.parse_san(best_move_san).uci()
+                except Exception:
+                    best_move_uci = None
             
             # Classify puzzle type
             try:
