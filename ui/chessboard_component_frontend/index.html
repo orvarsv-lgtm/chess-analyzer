@@ -74,13 +74,12 @@
       }
 
       .piece {
-        font-size: 38px;
-        line-height: 1;
+        width: 42px;
+        height: 42px;
         cursor: grab;
-        font-family: "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols 2", "Arial Unicode MS", system-ui;
-        text-shadow:
-          0 1px 0 rgba(255, 255, 255, 0.35),
-          0 2px 6px rgba(0, 0, 0, 0.25);
+        -webkit-user-drag: element;
+        user-select: none;
+        -webkit-user-select: none;
       }
 
       .piece.dragging {
@@ -103,7 +102,7 @@
       }
 
       /* If a piece is on the square, make the dot a subtle ring instead */
-      .sq.legal:has(.piece)::after {
+      .sq.legal.occupied::after {
         width: 34px;
         height: 34px;
         background: transparent;
@@ -157,19 +156,94 @@
 
       // --- Chessboard Rendering ---
       const PIECES = {
-        P: "♙",
-        N: "♘",
-        B: "♗",
-        R: "♖",
-        Q: "♕",
-        K: "♔",
-        p: "♟",
-        n: "♞",
-        b: "♝",
-        r: "♜",
-        q: "♛",
-        k: "♚",
+        P: "P",
+        N: "N",
+        B: "B",
+        R: "R",
+        Q: "Q",
+        K: "K",
+        p: "p",
+        n: "n",
+        b: "b",
+        r: "r",
+        q: "q",
+        k: "k",
       };
+
+      // Original, locally-embedded SVG piece set (no external downloads/CDNs).
+      function svgDataUri(svg) {
+        // Encode as a safe data URI.
+        const encoded = encodeURIComponent(svg)
+          .replace(/%0A/g, "")
+          .replace(/%20/g, " ");
+        return `data:image/svg+xml;charset=utf-8,${encoded}`;
+      }
+
+      function pieceSvg(kind, color) {
+        // kind: P,N,B,R,Q,K ; color: 'w'|'b'
+        const fill = color === "w" ? "#f9fafb" : "#111827";
+        const stroke = "#111827";
+        const s = 2.2;
+        const common = `fill=\"${fill}\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"`;
+
+        // Each piece uses simple geometric shapes in a consistent style.
+        if (kind === "P") {
+          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
+  <circle cx=\"32\" cy=\"20\" r=\"10\" ${common}/>
+  <path d=\"M22 52h20c6 0 10-4 10-9 0-8-6-13-12-18-2-2-3-4-3-7H27c0 3-1 5-3 7-6 5-12 10-12 18 0 5 4 9 10 9z\" ${common}/>
+  <path d=\"M18 56h28\" ${common}/>
+</svg>`;
+        }
+
+        if (kind === "N") {
+          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
+  <path d=\"M18 54h28c2 0 4-2 4-4 0-10-6-16-12-22l6-6c2-2 2-5 0-7-2-2-5-2-7 0l-9 9c-3 3-5 6-5 12v7\" ${common}/>
+  <path d=\"M25 30c2-6 7-11 13-14\" ${common}/>
+  <circle cx=\"36\" cy=\"23\" r=\"2.4\" fill=\"${stroke}\"/>
+  <path d=\"M16 56h32\" ${common}/>
+</svg>`;
+        }
+
+        if (kind === "B") {
+          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
+  <path d=\"M32 10c-7 6-11 12-11 19 0 5 3 9 7 12-4 3-7 6-7 10 0 4 3 7 7 7h8c4 0 7-3 7-7 0-4-3-7-7-10 4-3 7-7 7-12 0-7-4-13-11-19z\" ${common}/>
+  <path d=\"M28 28l8 8\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\"/>
+  <path d=\"M18 56h28\" ${common}/>
+</svg>`;
+        }
+
+        if (kind === "R") {
+          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
+  <path d=\"M18 18h6v-8h8v8h6v-8h8v8h6v10H18V18z\" ${common}/>
+  <path d=\"M22 28h20v18H22V28z\" ${common}/>
+  <path d=\"M18 50h28v6H18v-6z\" ${common}/>
+</svg>`;
+        }
+
+        if (kind === "Q") {
+          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
+  <circle cx=\"16\" cy=\"18\" r=\"4\" ${common}/>
+  <circle cx=\"32\" cy=\"14\" r=\"4\" ${common}/>
+  <circle cx=\"48\" cy=\"18\" r=\"4\" ${common}/>
+  <path d=\"M18 22l6 16h16l6-16\" ${common}/>
+  <path d=\"M22 38h20c4 0 8 4 8 9 0 5-4 9-9 9H23c-5 0-9-4-9-9 0-5 4-9 8-9z\" ${common}/>
+  <path d=\"M18 56h28\" ${common}/>
+</svg>`;
+        }
+
+        // King
+        return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
+  <path d=\"M32 10v10\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\"/>
+  <path d=\"M27 15h10\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\"/>
+  <path d=\"M24 28c0-6 4-10 8-10s8 4 8 10c0 4-2 7-4 9 4 3 8 6 8 12 0 4-3 7-7 7H27c-4 0-7-3-7-7 0-6 4-9 8-12-2-2-4-5-4-9z\" ${common}/>
+  <path d=\"M18 56h28\" ${common}/>
+</svg>`;
 
       function parseFenPieces(fen) {
         // Returns map like {"e4": "P"}
@@ -337,11 +411,17 @@
 
             const pieceChar = pieces[sq];
             if (pieceChar) {
-              const pieceEl = document.createElement("div");
-              pieceEl.className = "piece";
-              pieceEl.textContent = PIECES[pieceChar] || "";
+              sqEl.classList.add("occupied");
 
+              const pieceEl = document.createElement("img");
+              pieceEl.className = "piece";
+
+              const kind = (pieceChar || "").toUpperCase();
               const pieceColor = pieceChar.toUpperCase() === pieceChar ? "w" : "b";
+              const svg = pieceSvg(kind, pieceColor);
+              pieceEl.src = svgDataUri(svg);
+              pieceEl.alt = `${pieceColor}${kind}`;
+
               const draggable = pieceColor === sideToMove;
               pieceEl.draggable = draggable;
 
