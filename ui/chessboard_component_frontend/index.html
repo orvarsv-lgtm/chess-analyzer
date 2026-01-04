@@ -181,68 +181,101 @@
 
       function pieceSvg(kind, color) {
         // kind: P,N,B,R,Q,K ; color: 'w'|'b'
-        const fill = color === "w" ? "#f9fafb" : "#111827";
-        const stroke = "#111827";
-        const s = 2.2;
-        const common = `fill=\"${fill}\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"`;
+        const isWhite = color === "w";
+        const baseFill = isWhite ? "#f8fafc" : "#111827";
+        const shadeFill = isWhite ? "#e5e7eb" : "#0b1220";
+        const stroke = isWhite ? "#111827" : "#0f172a";
+        const s = 2;
 
-        // Each piece uses simple geometric shapes in a consistent style.
+        const defs = `
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${baseFill}"/>
+      <stop offset="1" stop-color="${shadeFill}"/>
+    </linearGradient>
+    <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="1.2" flood-color="rgba(0,0,0,0.35)"/>
+    </filter>
+  </defs>`;
+
+        const common = `fill="url(#g)" stroke="${stroke}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"`;
+        const commonFlat = `fill="${baseFill}" stroke="${stroke}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"`;
+
+        // These are original, Staunton-inspired silhouettes (not copied from chess.com/lichess).
         if (kind === "P") {
-          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
-  <circle cx=\"32\" cy=\"20\" r=\"10\" ${common}/>
-  <path d=\"M22 52h20c6 0 10-4 10-9 0-8-6-13-12-18-2-2-3-4-3-7H27c0 3-1 5-3 7-6 5-12 10-12 18 0 5 4 9 10 9z\" ${common}/>
-  <path d=\"M18 56h28\" ${common}/>
+          return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  ${defs}
+  <g filter="url(#ds)">
+    <circle cx="32" cy="18" r="8" ${commonFlat}/>
+    <path d="M24 28c0-4 3-7 8-7s8 3 8 7c0 3-1 5-2 7 5 3 9 8 9 14 0 5-4 9-9 9H26c-5 0-9-4-9-9 0-6 4-11 9-14-1-2-2-4-2-7z" ${common}/>
+    <path d="M20 56h24" ${commonFlat}/>
+  </g>
 </svg>`;
         }
 
         if (kind === "N") {
-          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
-  <path d=\"M18 54h28c2 0 4-2 4-4 0-10-6-16-12-22l6-6c2-2 2-5 0-7-2-2-5-2-7 0l-9 9c-3 3-5 6-5 12v7\" ${common}/>
-  <path d=\"M25 30c2-6 7-11 13-14\" ${common}/>
-  <circle cx=\"36\" cy=\"23\" r=\"2.4\" fill=\"${stroke}\"/>
-  <path d=\"M16 56h32\" ${common}/>
+          return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  ${defs}
+  <g filter="url(#ds)">
+    <path d="M22 54h26c3 0 6-2 6-6 0-10-6-16-12-22 2-2 4-4 6-6 3-3 2-8-2-10-3-2-7-1-9 2l-6 8c-5 6-7 11-7 18v6z" ${common}/>
+    <path d="M28 28c2-6 7-11 14-14" ${commonFlat}/>
+    <circle cx="40" cy="22" r="2.2" fill="${stroke}"/>
+    <path d="M18 56h28" ${commonFlat}/>
+  </g>
 </svg>`;
         }
 
         if (kind === "B") {
-          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
-  <path d=\"M32 10c-7 6-11 12-11 19 0 5 3 9 7 12-4 3-7 6-7 10 0 4 3 7 7 7h8c4 0 7-3 7-7 0-4-3-7-7-10 4-3 7-7 7-12 0-7-4-13-11-19z\" ${common}/>
-  <path d=\"M28 28l8 8\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\"/>
-  <path d=\"M18 56h28\" ${common}/>
+          return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  ${defs}
+  <g filter="url(#ds)">
+    <path d="M32 10c-8 7-12 14-12 22 0 6 3 11 8 14-4 3-7 6-7 10 0 4 3 8 8 8h6c5 0 8-4 8-8 0-4-3-7-7-10 5-3 8-8 8-14 0-8-4-15-12-22z" ${common}/>
+    <path d="M28 30l8 8" stroke="${stroke}" stroke-width="${s}" stroke-linecap="round"/>
+    <path d="M20 56h24" ${commonFlat}/>
+  </g>
 </svg>`;
         }
 
         if (kind === "R") {
-          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
-  <path d=\"M18 18h6v-8h8v8h6v-8h8v8h6v10H18V18z\" ${common}/>
-  <path d=\"M22 28h20v18H22V28z\" ${common}/>
-  <path d=\"M18 50h28v6H18v-6z\" ${common}/>
+          return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  ${defs}
+  <g filter="url(#ds)">
+    <path d="M18 18h6v-8h6v8h4v-8h6v8h4v-8h6v8h6v12H18V18z" ${common}/>
+    <path d="M22 30h20v18H22V30z" ${common}/>
+    <path d="M18 50h28v8H18v-8z" ${common}/>
+  </g>
 </svg>`;
         }
 
         if (kind === "Q") {
-          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
-  <circle cx=\"16\" cy=\"18\" r=\"4\" ${common}/>
-  <circle cx=\"32\" cy=\"14\" r=\"4\" ${common}/>
-  <circle cx=\"48\" cy=\"18\" r=\"4\" ${common}/>
-  <path d=\"M18 22l6 16h16l6-16\" ${common}/>
-  <path d=\"M22 38h20c4 0 8 4 8 9 0 5-4 9-9 9H23c-5 0-9-4-9-9 0-5 4-9 8-9z\" ${common}/>
-  <path d=\"M18 56h28\" ${common}/>
+          return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  ${defs}
+  <g filter="url(#ds)">
+    <circle cx="18" cy="18" r="4" ${commonFlat}/>
+    <circle cx="32" cy="14" r="4" ${commonFlat}/>
+    <circle cx="46" cy="18" r="4" ${commonFlat}/>
+    <path d="M18 22l6 16h16l6-16" ${common}/>
+    <path d="M22 38h20c5 0 10 5 10 11 0 6-5 11-11 11H23c-6 0-11-5-11-11 0-6 5-11 10-11z" ${common}/>
+    <path d="M18 56h28" ${commonFlat}/>
+  </g>
 </svg>`;
         }
 
         // King
-        return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">
-  <path d=\"M32 10v10\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\"/>
-  <path d=\"M27 15h10\" stroke=\"${stroke}\" stroke-width=\"${s}\" stroke-linecap=\"round\"/>
-  <path d=\"M24 28c0-6 4-10 8-10s8 4 8 10c0 4-2 7-4 9 4 3 8 6 8 12 0 4-3 7-7 7H27c-4 0-7-3-7-7 0-6 4-9 8-12-2-2-4-5-4-9z\" ${common}/>
-  <path d=\"M18 56h28\" ${common}/>
+        return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  ${defs}
+  <g filter="url(#ds)">
+    <path d="M32 10v10" stroke="${stroke}" stroke-width="${s}" stroke-linecap="round"/>
+    <path d="M27 15h10" stroke="${stroke}" stroke-width="${s}" stroke-linecap="round"/>
+    <path d="M24 28c0-7 4-12 8-12s8 5 8 12c0 4-2 7-4 9 6 4 10 8 10 14 0 5-4 9-9 9H27c-5 0-9-4-9-9 0-6 4-10 10-14-2-2-4-5-4-9z" ${common}/>
+    <path d="M18 56h28" ${commonFlat}/>
+  </g>
 </svg>`;
 
       }
