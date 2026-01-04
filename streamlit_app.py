@@ -709,10 +709,6 @@ def _post_to_engine(pgn_text: str, max_games: int) -> dict:
         st.error(f"Invalid payload keys: {sorted(payload.keys())}. Expected ['max_games', 'pgn']")
         st.stop()
 
-    # Temporary debug logging to confirm correct route/payload
-    st.write("POSTING TO:", endpoint)
-    st.write("Payload keys:", list(payload.keys()))
-
     resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
 
     if resp.status_code == 403:

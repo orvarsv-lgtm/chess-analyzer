@@ -238,6 +238,169 @@ def _next_square_in_direction(square: int, direction: Optional[tuple]) -> Option
 
 
 # =============================================================================
+# PUZZLE EXPLANATION GENERATION (DETERMINISTIC)
+# =============================================================================
+
+
+def generate_puzzle_explanation(
+    board: chess.Board,
+    best_move: chess.Move,
+    eval_loss_cp: int,
+    puzzle_type: PuzzleType,
+    phase: str,
+) -> str:
+    """
+    Generate a deterministic explanation of why the best move is correct.
+    
+    This analyzes the position and the move to create a human-readable
+    explanation without using any AI/LLM - purely rule-based.
+    
+    Args:
+        board: Position before the move
+        best_move: The correct move
+        eval_loss_cp: How much was lost by not playing this move
+        puzzle_type: Classified type of the puzzle
+        phase: Game phase (opening, middlegame, endgame)
+    
+    Returns:
+        A descriptive explanation string
+    """
+    explanations = []
+    
+    # Get piece information
+    moving_piece = board.piece_at(best_move.from_square)
+    if not moving_piece:
+        return "Find the best move in this position."
+    
+    piece_name = chess.piece_name(moving_piece.piece_type).title()
+    from_sq_name = chess.square_name(best_move.from_square)
+    to_sq_name = chess.square_name(best_move.to_square)
+    
+    # Check for captures
+    captured_piece = board.piece_at(best_move.to_square)
+    is_capture = captured_piece is not None
+    captured_name = chess.piece_name(captured_piece.piece_type).title() if captured_piece else None
+    
+    # Check if move gives check
+    board_after = board.copy()
+    board_after.push(best_move)
+    gives_check = board.gives_check(best_move)
+    is_checkmate = board_after.is_checkmate()
+    
+    # Check for tactical motifs
+    is_fork = _is_fork_position(board_after)
+    creates_pin = _involves_pin(board, best_move)
+    is_discovery = _is_discovered_attack(board, best_move)
+    
+    # Get attacked pieces after the move (for fork detection)
+    attacked_valuable_pieces = _get_attacked_valuable_pieces(board_after, moving_piece.color)
+    
+    # Build explanation based on what the move does
+    if is_checkmate:
+        explanations.append(f"**{best_move}** delivers checkmate!")
+        return " ".join(explanations)
+    
+    if gives_check and is_capture:
+        explanations.append(f"This check by the {piece_name} also captures the {captured_name}.")
+    elif gives_check and is_fork:
+        pieces_str = _format_attacked_pieces(attacked_valuable_pieces)
+        explanations.append(f"This check forks the King and {pieces_str}, winning material.")
+    elif gives_check:
+        explanations.append(f"The {piece_name} delivers check.")
+    
+    if is_fork and not gives_check:
+        pieces_str = _format_attacked_pieces(attacked_valuable_pieces)
+        if len(attacked_valuable_pieces) >= 2:
+            explanations.append(f"The {piece_name} forks {pieces_str}. One piece will be won.")
+    
+    if is_capture and not gives_check:
+        # Check if the capture is safe
+        is_safe_capture = not board_after.is_attacked_by(board_after.turn, best_move.to_square)
+        if is_safe_capture:
+            explanations.append(f"The {piece_name} captures the undefended {captured_name}.")
+        else:
+            # Check if it's still winning (trading down)
+            piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, 
+                          chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 100}
+            captured_val = piece_values.get(captured_piece.piece_type, 0)
+            moving_val = piece_values.get(moving_piece.piece_type, 0)
+            if captured_val > moving_val:
+                explanations.append(f"Capturing the {captured_name} wins material even after recapture.")
+    
+    if creates_pin:
+        explanations.append(f"This move creates a pin against the opponent's King.")
+    
+    if is_discovery:
+        explanations.append(f"This discovered attack threatens multiple pieces.")
+    
+    # Phase-specific guidance
+    if phase == "endgame" and not explanations:
+        if moving_piece.piece_type == chess.PAWN:
+            to_rank = chess.square_rank(best_move.to_square)
+            if (moving_piece.color == chess.WHITE and to_rank >= 5) or \
+               (moving_piece.color == chess.BLACK and to_rank <= 2):
+                explanations.append("This pawn advance creates a passed pawn threat.")
+            else:
+                explanations.append("Advancing the pawn is key in this endgame.")
+        elif moving_piece.piece_type == chess.KING:
+            explanations.append("King activity is crucial in the endgame.")
+    
+    if puzzle_type == PuzzleType.OPENING_ERROR and not explanations:
+        explanations.append("This move follows opening principles and maintains a good position.")
+    
+    # Add material assessment if significant eval loss
+    if eval_loss_cp >= 300:
+        if not explanations:
+            explanations.append("Missing this move costs significant material.")
+    elif eval_loss_cp >= 150:
+        if not explanations:
+            explanations.append("This tactical opportunity wins material.")
+    
+    # Fallback explanation
+    if not explanations:
+        explanations.append(f"The {piece_name} move to {to_sq_name} is the best continuation in this position.")
+    
+    return " ".join(explanations)
+
+
+def _get_attacked_valuable_pieces(board: chess.Board, attacker_color: chess.Color) -> list:
+    """Get list of valuable pieces being attacked after a move."""
+    attacked = []
+    opponent_color = not attacker_color
+    
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.color == opponent_color:
+            if board.is_attacked_by(attacker_color, square):
+                if piece.piece_type in (chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN, chess.KING):
+                    attacked.append((piece.piece_type, square))
+    
+    return attacked
+
+
+def _format_attacked_pieces(attacked: list) -> str:
+    """Format list of attacked pieces for display."""
+    if not attacked:
+        return "the opponent's pieces"
+    
+    piece_names = []
+    for piece_type, square in attacked:
+        name = chess.piece_name(piece_type).title()
+        sq_name = chess.square_name(square)
+        if piece_type == chess.KING:
+            piece_names.append("King")
+        else:
+            piece_names.append(f"{name} on {sq_name}")
+    
+    if len(piece_names) == 1:
+        return piece_names[0]
+    elif len(piece_names) == 2:
+        return f"{piece_names[0]} and {piece_names[1]}"
+    else:
+        return ", ".join(piece_names[:-1]) + f", and {piece_names[-1]}"
+
+
+# =============================================================================
 # BEST MOVE CALCULATION
 # =============================================================================
 
@@ -406,6 +569,18 @@ class PuzzleGenerator:
                 phase=phase,
             )
             
+            # Generate puzzle explanation (deterministic, based on position analysis)
+            try:
+                explanation = generate_puzzle_explanation(
+                    board=board,
+                    best_move=best_move_obj,
+                    eval_loss_cp=cp_loss,
+                    puzzle_type=puzzle_type,
+                    phase=phase,
+                )
+            except Exception:
+                explanation = "Find the best move in this position."
+            
             # Generate puzzle ID
             puzzle_id = f"{game_index}_{move_num}_{side_to_move}"
             
@@ -425,6 +600,7 @@ class PuzzleGenerator:
                 eval_before=eval_before if isinstance(eval_before, int) else None,
                 eval_after=eval_after if isinstance(eval_after, int) else None,
                 best_move_uci=best_move_uci,
+                explanation=explanation,
             )
             
             puzzles.append(puzzle)

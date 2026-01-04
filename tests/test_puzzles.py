@@ -28,6 +28,7 @@ from puzzles.puzzle_engine import (
     generate_puzzles_from_games,
     get_puzzle_stats,
     _classify_puzzle_type,
+    generate_puzzle_explanation,
 )
 from puzzles.puzzle_ui import (
     validate_move,
@@ -612,6 +613,67 @@ class TestDeterminism(unittest.TestCase):
         stats2 = session.get_stats()
         
         self.assertEqual(stats1, stats2)
+
+
+class TestPuzzleExplanation(unittest.TestCase):
+    """Tests for puzzle explanation generation."""
+    
+    def test_explanation_for_capture(self):
+        """Test explanation for a winning capture."""
+        # Position where white can capture undefended bishop
+        fen = "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4"
+        board = chess.Board(fen)
+        best_move = board.parse_san("Qxf7+")  # Queen takes f7 with check
+        
+        explanation = generate_puzzle_explanation(
+            board=board,
+            best_move=best_move,
+            eval_loss_cp=500,
+            puzzle_type=PuzzleType.MISSED_TACTIC,
+            phase="opening",
+        )
+        
+        self.assertIsInstance(explanation, str)
+        self.assertTrue(len(explanation) > 0)
+        # Should mention check
+        self.assertIn("check", explanation.lower())
+    
+    def test_explanation_for_checkmate(self):
+        """Test explanation for checkmate."""
+        # Back rank mate position
+        fen = "6k1/5ppp/8/8/8/8/8/R3K3 w Q - 0 1"
+        board = chess.Board(fen)
+        best_move = board.parse_san("Ra8#")
+        
+        explanation = generate_puzzle_explanation(
+            board=board,
+            best_move=best_move,
+            eval_loss_cp=10000,
+            puzzle_type=PuzzleType.MISSED_TACTIC,
+            phase="endgame",
+        )
+        
+        self.assertIn("checkmate", explanation.lower())
+    
+    def test_explanation_deterministic(self):
+        """Test that explanations are deterministic."""
+        fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+        board = chess.Board(fen)
+        best_move = board.parse_san("e5")
+        
+        explanations = []
+        for _ in range(5):
+            exp = generate_puzzle_explanation(
+                board=board,
+                best_move=best_move,
+                eval_loss_cp=100,
+                puzzle_type=PuzzleType.OPENING_ERROR,
+                phase="opening",
+            )
+            explanations.append(exp)
+        
+        # All explanations should be identical
+        self.assertEqual(len(set(explanations)), 1)
 
 
 if __name__ == "__main__":

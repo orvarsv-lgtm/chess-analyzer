@@ -87,6 +87,9 @@ class Puzzle:
     eval_after: Optional[int] = None   # Eval after the played move
     best_move_uci: Optional[str] = None  # UCI notation for move validation
     
+    # Deterministic explanation of why the move is correct (generated from position)
+    explanation: Optional[str] = None
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -104,6 +107,7 @@ class Puzzle:
             "eval_before": self.eval_before,
             "eval_after": self.eval_after,
             "best_move_uci": self.best_move_uci,
+            "explanation": self.explanation,
         }
     
     @classmethod
@@ -124,6 +128,7 @@ class Puzzle:
             eval_before=data.get("eval_before"),
             eval_after=data.get("eval_after"),
             best_move_uci=data.get("best_move_uci"),
+            explanation=data.get("explanation"),
         )
     
     def to_json(self) -> str:

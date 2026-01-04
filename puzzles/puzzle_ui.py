@@ -539,43 +539,55 @@ def render_puzzle_result(
     """Display the result of a puzzle attempt."""
     if is_correct:
         st.success(message)
+        # Show explanation after correct answer
+        if puzzle.explanation:
+            st.info(f"💡 **Why this works:** {puzzle.explanation}")
         st.balloons()
     else:
         st.error(message)
         
         # Show the played move that was a mistake
         st.caption(f"The mistake played was: **{puzzle.played_move_san}**")
+        
+        # Show explanation for the correct move
+        if puzzle.explanation:
+            st.info(f"💡 **Explanation:** {puzzle.explanation}")
 
 
-def render_puzzle_navigation(session: PuzzleSession) -> Tuple[bool, bool]:
+def render_puzzle_navigation(session: PuzzleSession) -> Tuple[bool, bool, bool]:
     """
     Render navigation controls between puzzles.
     
     Returns:
-        (next_clicked, reset_clicked)
+        (next_clicked, prev_clicked, reset_clicked)
     """
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    
+    prev_clicked = False
+    next_clicked = False
+    reset_clicked = False
     
     with col1:
         prev_disabled = session.current_index <= 0
-        if st.button("⬅️ Previous", disabled=prev_disabled, key="puzzle_prev"):
-            if session.current_index > 0:
-                session.current_index -= 1
-                PuzzleUIState.clear_last_result()
-                PuzzleUIState.clear_selected_square()
-                st.rerun()
+        if st.button("⬅️ Back", disabled=prev_disabled, key="puzzle_prev"):
+            prev_clicked = True
     
     with col2:
-        st.write(f"**{session.current_index + 1}** / {session.available_puzzle_count}")
+        st.markdown(f"<div style='text-align:center;padding-top:5px;'><b>{session.current_index + 1}</b> / {session.available_puzzle_count}</div>", unsafe_allow_html=True)
     
     with col3:
         next_disabled = (
             session.current_index >= session.total_puzzles - 1 or
             session.is_at_limit
         )
-        next_clicked = st.button("Next ➡️", disabled=next_disabled, key="puzzle_next")
+        if st.button("Next ➡️", disabled=next_disabled, key="puzzle_next"):
+            next_clicked = True
     
-    return next_clicked, False
+    with col4:
+        if st.button("🔄 Reset", key="puzzle_reset_nav"):
+            reset_clicked = True
+    
+    return next_clicked, prev_clicked, reset_clicked
 
 
 def render_puzzle_stats(session: PuzzleSession) -> None:
@@ -739,13 +751,26 @@ def render_puzzle_page(
     
     # Navigation
     st.divider()
-    next_clicked, _ = render_puzzle_navigation(session)
+    next_clicked, prev_clicked, reset_clicked = render_puzzle_navigation(session)
     
     if next_clicked:
         if session.advance_to_next():
             PuzzleUIState.clear_last_result()
             PuzzleUIState.clear_selected_square()
             st.rerun()
+    
+    if prev_clicked:
+        if session.current_index > 0:
+            session.current_index -= 1
+            PuzzleUIState.clear_last_result()
+            PuzzleUIState.clear_selected_square()
+            st.rerun()
+    
+    if reset_clicked:
+        session.reset()
+        PuzzleUIState.clear_last_result()
+        PuzzleUIState.clear_selected_square()
+        st.rerun()
     
     # Stats at bottom
     st.divider()
