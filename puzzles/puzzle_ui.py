@@ -10,7 +10,8 @@ All UI is deterministic - no AI/LLM, move validation is rule-based.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional, Tuple, Any, FrozenSet
+from functools import lru_cache
 import base64
 import io
 import re
@@ -35,6 +36,18 @@ HIGHLIGHT_LAST_MOVE = "#aaa23a88"  # Yellow-ish for last move
 HIGHLIGHT_CORRECT = "#4ade8088"   # Green for correct
 HIGHLIGHT_INCORRECT = "#ef444488"  # Red for incorrect
 HIGHLIGHT_LEGAL = "#3b82f688"     # Blue for legal moves
+HIGHLIGHT_SELECTED = "#7fa650"    # Green for selected piece
+HIGHLIGHT_LEGAL_DOT = "#00000033" # Semi-transparent for move dots
+
+# Square colors
+LIGHT_SQUARE = "#f0d9b5"
+DARK_SQUARE = "#b58863"
+
+# Piece unicode symbols (global for reuse)
+PIECE_SYMBOLS = {
+    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔',
+    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
+}
 
 # Free tier limits
 IS_PREMIUM_DEFAULT = False
@@ -130,6 +143,59 @@ class PuzzleUIState:
         """Clear last result."""
         if "puzzle_last_result" in st.session_state:
             del st.session_state["puzzle_last_result"]
+
+
+# =============================================================================
+# PERFORMANCE-OPTIMIZED LEGAL MOVE COMPUTATION
+# =============================================================================
+
+
+@lru_cache(maxsize=256)
+def _get_legal_destinations_cached(fen: str, from_square: int) -> FrozenSet[int]:
+    """
+    Get legal destination squares for a piece (cached for performance).
+    
+    Args:
+        fen: Board position FEN string
+        from_square: Square index of the piece
+        
+    Returns:
+        Frozenset of legal destination square indices
+    """
+    board = chess.Board(fen)
+    destinations = set()
+    for move in board.legal_moves:
+        if move.from_square == from_square:
+            destinations.add(move.to_square)
+    return frozenset(destinations)
+
+
+@lru_cache(maxsize=256)
+def _get_pieces_with_moves_cached(fen: str) -> FrozenSet[int]:
+    """
+    Get squares of pieces that have at least one legal move (cached).
+    
+    Args:
+        fen: Board position FEN string
+        
+    Returns:
+        Frozenset of square indices with movable pieces
+    """
+    board = chess.Board(fen)
+    pieces_with_moves = set()
+    for move in board.legal_moves:
+        pieces_with_moves.add(move.from_square)
+    return frozenset(pieces_with_moves)
+
+
+def get_legal_destinations(board: chess.Board, from_square: int) -> set:
+    """Get all legal destination squares for a piece."""
+    return set(_get_legal_destinations_cached(board.fen(), from_square))
+
+
+def get_pieces_with_moves(board: chess.Board) -> set:
+    """Get squares of pieces that have at least one legal move."""
+    return set(_get_pieces_with_moves_cached(board.fen()))
 
 
 # =============================================================================
@@ -496,6 +562,7 @@ def render_puzzle_navigation(session: PuzzleSession) -> Tuple[bool, bool]:
             if session.current_index > 0:
                 session.current_index -= 1
                 PuzzleUIState.clear_last_result()
+                PuzzleUIState.clear_selected_square()
                 st.rerun()
     
     with col2:
@@ -565,7 +632,7 @@ def render_puzzle_page(
     is_premium: bool = False,
 ) -> None:
     """
-    Render the complete puzzle solving page.
+    Render the complete puzzle solving page with interactive board.
     
     Main entry point for the puzzle UI.
     
@@ -585,10 +652,11 @@ def render_puzzle_page(
     puzzle = session.current_puzzle
     
     if puzzle is None:
-        st.info("All puzzles completed!")
+        st.info("All puzzles completed! 🎉")
         render_puzzle_stats(session)
-        if st.button("Reset Puzzles", key="puzzle_reset_all"):
+        if st.button("🔄 Reset Puzzles", key="puzzle_reset_all"):
             session.reset()
+            PuzzleUIState.clear_selected_square()
             st.rerun()
         return
     
@@ -596,30 +664,110 @@ def render_puzzle_page(
     current_attempts = session.get_attempts_for_current()
     already_solved = any(a.is_correct for a in current_attempts)
     last_result = PuzzleUIState.get_last_result()
+    selected_square = PuzzleUIState.get_selected_square()
+    
+    # Free limit check
+    if session.is_at_limit:
+        st.warning("🔒 Free puzzle limit reached!")
+        st.info(f"You've completed {session.MAX_FREE_PUZZLES} free puzzles.")
+        _render_upgrade_placeholder()
+        return
     
     # Layout
     col_board, col_info = st.columns([2, 1])
-    
-    with col_board:
-        # Display board
-        render_puzzle_board(
-            puzzle=puzzle,
-            show_solution=already_solved or last_result == "incorrect",
-            last_result=last_result,
-        )
     
     with col_info:
         # Puzzle info
         render_puzzle_info(puzzle)
         
         # Hint button
-        if st.checkbox("Show hint", key="puzzle_show_hint"):
+        if st.checkbox("💡 Show hint", key="puzzle_show_hint"):
             render_puzzle_hint(puzzle)
+        
+        # Instructions for interactive board
+        if not already_solved and last_result != "incorrect":
+            st.markdown("---")
+            st.markdown("**How to play:**")
+            st.markdown("1. Click a piece to select it")
+            st.markdown("2. Dots show legal moves")
+            st.markdown("3. Click a dot to move")
     
-    st.divider()
+    with col_board:
+        try:
+            board = chess.Board(puzzle.fen)
+        except Exception:
+            st.error(f"Invalid FEN: {puzzle.fen}")
+            return
+        
+        flipped = puzzle.side_to_move == "black"
+        
+        # Show solution if already solved or incorrect
+        if already_solved or last_result == "incorrect":
+            # Non-interactive board showing the solution
+            highlights = {}
+            arrows = []
+            try:
+                solution_move = board.parse_san(puzzle.best_move_san)
+                arrows.append((solution_move.from_square, solution_move.to_square, "#22c55e"))
+                highlights[solution_move.from_square] = HIGHLIGHT_CORRECT
+                highlights[solution_move.to_square] = HIGHLIGHT_CORRECT
+            except Exception:
+                pass
+            
+            display_board(
+                board=board,
+                flipped=flipped,
+                highlight_squares=highlights,
+                arrows=arrows,
+            )
+        else:
+            # Interactive board for solving
+            move_made = render_interactive_board(
+                board=board,
+                flipped=flipped,
+                selected_square=selected_square,
+            )
+            
+            # Process click-to-move result
+            if move_made:
+                from_sq, to_sq = move_made
+                
+                # Create move (check for pawn promotion)
+                move = chess.Move(from_sq, to_sq)
+                piece = board.piece_at(from_sq)
+                
+                if piece and piece.piece_type == chess.PAWN:
+                    to_rank = chess.square_rank(to_sq)
+                    # Check if pawn is promoting
+                    if (piece.color == chess.WHITE and to_rank == 7) or \
+                       (piece.color == chess.BLACK and to_rank == 0):
+                        move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
+                
+                if move in board.legal_moves:
+                    # Check answer
+                    is_correct, result_msg = check_puzzle_answer(board, move, puzzle.best_move_san)
+                    user_san = board.san(move)
+                    session.record_attempt(user_san, is_correct)
+                    PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
+                    PuzzleUIState.clear_selected_square()
+                    st.rerun()
     
-    # Handle move input
+    # Show result if available
+    if last_result:
+        st.divider()
+        if last_result == "correct":
+            render_puzzle_result(True, "Correct! ✅", puzzle)
+        else:
+            render_puzzle_result(
+                False,
+                f"Incorrect. The best move was **{puzzle.best_move_san}**",
+                puzzle,
+            )
+    
+    # Text input fallback (only if not solved)
     if not already_solved and last_result != "incorrect":
+        st.divider()
+        st.caption("Or type your move:")
         user_move = render_puzzle_controls(session)
         
         if user_move:
@@ -642,22 +790,11 @@ def render_puzzle_page(
                     
                     # Set result for display
                     PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
-                    
+                    PuzzleUIState.clear_selected_square()
                     st.rerun()
                     
             except Exception as e:
                 st.error(f"Error processing move: {e}")
-    
-    # Show result if available
-    if last_result:
-        if last_result == "correct":
-            render_puzzle_result(True, "Correct! ✅", puzzle)
-        else:
-            render_puzzle_result(
-                False,
-                f"Incorrect. The best move was **{puzzle.best_move_san}**",
-                puzzle,
-            )
     
     # Navigation
     st.divider()
@@ -666,6 +803,7 @@ def render_puzzle_page(
     if next_clicked:
         if session.advance_to_next():
             PuzzleUIState.clear_last_result()
+            PuzzleUIState.clear_selected_square()
             st.rerun()
     
     # Stats at bottom
@@ -674,8 +812,122 @@ def render_puzzle_page(
 
 
 # =============================================================================
-# INTERACTIVE SQUARE SELECTION (Click-to-move)
+# INTERACTIVE SQUARE SELECTION (Click-to-move with legal move dots)
 # =============================================================================
+
+
+def render_interactive_board(
+    board: chess.Board,
+    flipped: bool = False,
+    selected_square: Optional[int] = None,
+    is_player_turn: bool = True,
+) -> Optional[Tuple[int, int]]:
+    """
+    Render an interactive chessboard with click-to-move functionality.
+    
+    Shows dots on legal destination squares when a piece is selected.
+    Only pieces that can legally move are clickable.
+    
+    Args:
+        board: Current chess board position
+        flipped: Whether to flip the board (black perspective)
+        selected_square: Currently selected square (if any)
+        is_player_turn: Whether it's the player's turn
+        
+    Returns:
+        (from_square, to_square) tuple if a complete move was made, None otherwise
+    """
+    # Pre-compute legal moves for performance
+    fen = board.fen()
+    pieces_with_moves = get_pieces_with_moves(board)
+    
+    legal_destinations = set()
+    if selected_square is not None:
+        legal_destinations = get_legal_destinations(board, selected_square)
+    
+    # Whose turn?
+    player_color = board.turn
+    
+    clicked_square = None
+    move_made = None
+    
+    # Render 8x8 grid of buttons
+    ranks = range(7, -1, -1) if not flipped else range(8)
+    files_order = range(8) if not flipped else range(7, -1, -1)
+    
+    for rank in ranks:
+        cols = st.columns(8)
+        for col_idx, file in enumerate(files_order):
+            square = chess.square(file, rank)
+            piece = board.piece_at(square)
+            
+            # Square color
+            is_light = (rank + file) % 2 == 1
+            base_color = LIGHT_SQUARE if is_light else DARK_SQUARE
+            
+            # Check if this square is a legal destination
+            is_legal_dest = square in legal_destinations
+            
+            # Check if this piece can move
+            piece_can_move = (
+                square in pieces_with_moves and 
+                piece is not None and 
+                piece.color == player_color
+            )
+            
+            # Determine display symbol
+            if piece:
+                piece_symbol = PIECE_SYMBOLS.get(piece.symbol(), '')
+            else:
+                piece_symbol = ''
+            
+            # Show legal move indicator: dot for empty square, piece stays visible for captures
+            if is_legal_dest and not piece:
+                # Empty square - show dot
+                display_text = "●"
+            else:
+                display_text = piece_symbol if piece_symbol else " "
+            
+            with cols[col_idx]:
+                # Unique key per square + board state
+                btn_key = f"psq_{square}_{hash(fen) % 10000}"
+                
+                clicked = st.button(
+                    display_text,
+                    key=btn_key,
+                    help=chess.square_name(square),
+                    use_container_width=True,
+                )
+                
+                if clicked:
+                    clicked_square = square
+    
+    # Handle click logic
+    if clicked_square is not None:
+        # Case 1: Clicked on a legal destination while piece selected -> make the move
+        if selected_square is not None and clicked_square in legal_destinations:
+            move_made = (selected_square, clicked_square)
+            PuzzleUIState.clear_selected_square()
+        
+        # Case 2: Clicked on own piece that can move -> select it
+        elif clicked_square in pieces_with_moves:
+            clicked_piece = board.piece_at(clicked_square)
+            if clicked_piece and clicked_piece.color == player_color:
+                if clicked_square == selected_square:
+                    # Clicked same piece -> deselect
+                    PuzzleUIState.clear_selected_square()
+                else:
+                    # Select new piece
+                    PuzzleUIState.set_selected_square(clicked_square)
+                st.rerun()
+        
+        # Case 3: Clicked elsewhere -> clear selection
+        else:
+            if selected_square is not None:
+                PuzzleUIState.clear_selected_square()
+                st.rerun()
+    
+    return move_made
 
 
 def render_clickable_board(
@@ -685,34 +937,41 @@ def render_clickable_board(
     """
     Render board with clickable squares for move input.
     
-    This is a more advanced UI using Streamlit's custom components
-    or button grid. For simplicity, we use text input above.
-    
-    Note: True click-to-move requires JavaScript interop which is
-    complex in Streamlit. The text input approach is more reliable.
+    Legacy wrapper - now redirects to render_interactive_board.
     """
-    # For now, redirect to standard board display
-    # True interactive clicking would require streamlit-drawable-canvas
-    # or custom component
-    st.info("Use the text input to enter your move (e.g., e4, Nf3)")
-    render_puzzle_board(puzzle)
+    try:
+        board = chess.Board(puzzle.fen)
+    except Exception:
+        st.error(f"Invalid FEN: {puzzle.fen}")
+        return
+    
+    selected = PuzzleUIState.get_selected_square()
+    flipped = puzzle.side_to_move == "black"
+    
+    result = render_interactive_board(
+        board=board,
+        flipped=flipped,
+        selected_square=selected,
+    )
+    
+    if result and on_move_callback:
+        from_sq, to_sq = result
+        on_move_callback(from_sq, to_sq)
 
 
 def render_square_buttons(board: chess.Board, selected: Optional[int] = None) -> Optional[int]:
     """
     Render board as grid of buttons for square selection.
     
-    This is a fallback interactive method.
+    Legacy fallback method.
     Returns clicked square or None.
     """
     clicked_square = None
     
-    # Get legal moves from selected square
+    # Get legal moves from selected square (cached)
     legal_destinations = set()
     if selected is not None:
-        for move in board.legal_moves:
-            if move.from_square == selected:
-                legal_destinations.add(move.to_square)
+        legal_destinations = get_legal_destinations(board, selected)
     
     # Render 8x8 grid
     for rank in range(7, -1, -1):  # 7 to 0 (rank 8 to 1)
@@ -723,21 +982,15 @@ def render_square_buttons(board: chess.Board, selected: Optional[int] = None) ->
             
             # Determine button style
             is_light = (rank + file) % 2 == 1
-            bg_color = "#f0d9b5" if is_light else "#b58863"
+            bg_color = LIGHT_SQUARE if is_light else DARK_SQUARE
             
             if square == selected:
-                bg_color = "#3b82f6"  # Blue for selected
+                bg_color = HIGHLIGHT_SELECTED
             elif square in legal_destinations:
                 bg_color = "#22c55e"  # Green for legal destination
             
             # Piece symbol
-            piece_symbol = ""
-            if piece:
-                piece_symbols = {
-                    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔',
-                    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
-                }
-                piece_symbol = piece_symbols.get(piece.symbol(), '')
+            piece_symbol = PIECE_SYMBOLS.get(piece.symbol(), '') if piece else ''
             
             with cols[file]:
                 if st.button(

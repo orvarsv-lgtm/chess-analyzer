@@ -1473,6 +1473,29 @@ def main() -> None:
 def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     """Render analysis results with tabbed interface including Puzzles."""
     
+    # CSS to make the puzzle tab larger and more prominent
+    st.markdown("""
+    <style>
+    /* Make tabs larger and more visible */
+    div[data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    div[data-baseweb="tab-list"] button[data-baseweb="tab"] {
+        font-size: 1.2rem;
+        padding: 12px 24px;
+        font-weight: 600;
+    }
+    /* Highlight the puzzle tab specifically */
+    div[data-baseweb="tab-list"] button[data-baseweb="tab"]:nth-child(2) {
+        background-color: rgba(127, 166, 80, 0.15);
+        border-radius: 8px 8px 0 0;
+    }
+    div[data-baseweb="tab-list"] button[data-baseweb="tab"]:nth-child(2):hover {
+        background-color: rgba(127, 166, 80, 0.25);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Create tabs for different views
     tab_analysis, tab_puzzles = st.tabs(["📊 Analysis", "♟️ Puzzles"])
     
