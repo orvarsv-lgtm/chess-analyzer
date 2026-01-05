@@ -39,6 +39,7 @@
         overflow: hidden;
         user-select: none;
         -webkit-user-select: none;
+        touch-action: manipulation;
       }
 
       .sq {
@@ -48,6 +49,7 @@
         justify-content: center;
         align-items: center;
         position: relative;
+        touch-action: manipulation;
       }
 
       .sq.light {
@@ -85,6 +87,7 @@
         -webkit-user-drag: element;
         user-select: none;
         -webkit-user-select: none;
+        touch-action: none;
       }
 
       .piece.dragging {
@@ -480,8 +483,11 @@
                   return;
                 }
 
-                // Otherwise clear selection
-                selectedSquare = null;
+                // Otherwise keep selection (prevents glitchy deselect on misclick)
+                // User can deselect by clicking the selected square again.
+                if (sq === selectedSquare) {
+                  selectedSquare = null;
+                }
                 render();
                 return;
               }

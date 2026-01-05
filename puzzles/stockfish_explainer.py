@@ -279,20 +279,33 @@ def _analyze_position_urgency(board: chess.Board,
     return urgency
 
 
+def _opponent_to_move_board(board: chess.Board) -> chess.Board:
+    """Return a fresh board with side-to-move flipped, without move history.
+
+    We deliberately avoid pushing a null move ("pass"). python-chess warns that
+    UCI engines cannot represent null moves in move history, and some engines
+    can desync when the history contains null moves.
+
+    For threat probing we only need a consistent *position* for the opponent to
+    move; a fresh board from FEN (no stack) is the most stable way.
+    """
+    test_board = chess.Board(board.fen())
+    test_board.turn = not board.turn
+    # A null move clears en-passant rights; approximate that here.
+    test_board.ep_square = None
+    return test_board
+
+
 def _detect_mate_threat(board: chess.Board, 
                         engine: chess.engine.SimpleEngine) -> Optional[str]:
     """Detect if opponent has a mating threat that must be addressed."""
     try:
-        # Simulate opponent's turn via null move
+        # Probe opponent's threat by analyzing the same position with
+        # side-to-move flipped (fresh board, no history).
         if board.is_check():
-            return None  # We're in check, can't do null move
-        
-        # Try to make a null move (pass) to see opponent's threat
-        test_board = board.copy()
-        try:
-            test_board.push(chess.Move.null())
-        except Exception:
-            return None  # Null move not legal in this position
+            return None
+
+        test_board = _opponent_to_move_board(board)
         
         info = engine.analyse(test_board, chess.engine.Limit(depth=6))
         score = info.get("score")
@@ -342,11 +355,11 @@ def _detect_tactical_threat(board: chess.Board,
                                 'misconception': f"the {piece_name} seems protected"
                             }
         
-        # Check opponent's best move for tactical threats via null move
+        # Check opponent's best move for tactical threats by probing the
+        # position with side-to-move flipped (no null-move history).
         if not board.is_check():
-            test_board = board.copy()
             try:
-                test_board.push(chess.Move.null())
+                test_board = _opponent_to_move_board(board)
                 info = engine.analyse(test_board, chess.engine.Limit(depth=6))
                 pv = info.get("pv", [])
                 if pv:
@@ -360,7 +373,7 @@ def _detect_tactical_threat(board: chess.Board,
                                 'misconception': "other plans"
                             }
             except Exception:
-                pass  # Null move failed, skip this check
+                pass
         
     except Exception:
         pass
@@ -395,11 +408,11 @@ def _detect_king_danger_inevitable(board: chess.Board,
         pawn_shield_weak = _is_pawn_shield_compromised(board, board.turn)
         
         if pawn_shield_weak and attackers_in_zone >= 3:
-            # Check if attack is building - look at opponent's moves via null move
+            # Check if attack is building - look at opponent's moves by probing
+            # side-to-move flipped position (no null-move history).
             if not board.is_check():
-                test_board = board.copy()
                 try:
-                    test_board.push(chess.Move.null())
+                    test_board = _opponent_to_move_board(board)
                     info = engine.analyse(test_board, chess.engine.Limit(depth=6))
                     pv = info.get("pv", [])
                     if pv:
@@ -414,7 +427,7 @@ def _detect_king_danger_inevitable(board: chess.Board,
                                 'pawn_break': None
                             }
                 except Exception:
-                    pass  # Null move failed, skip this check
+                    pass
         
         # Check for unstoppable pawn breaks
         # Look for pawn moves that open lines to our king
