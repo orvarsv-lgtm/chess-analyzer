@@ -850,7 +850,7 @@ def _analyze_piece_defense(board: chess.Board, sq: int, piece: chess.Piece) -> d
 
 
 def _detect_discovery_in_response(board: chess.Board, response: chess.Move) -> Optional[CounterfactualFailure]:
-    """Detect if opponent's response creates a discovered attack."""
+    """Detect if opponent's response creates a discovered attack that wins material."""
     board_after = board.copy()
     board_after.push(response)
     
@@ -877,29 +877,48 @@ def _detect_discovery_in_response(board: chess.Board, response: chess.Move) -> O
                         if target:
                             if target.color != responding_piece.color and PIECE_POINTS[target.piece_type] >= 3:
                                 behind_name = PIECE_NAMES[behind_piece.piece_type]
+                                behind_value = PIECE_POINTS[behind_piece.piece_type]
                                 target_name = PIECE_NAMES[target.piece_type]
+                                target_value = PIECE_POINTS[target.piece_type]
+                                
+                                # Check if target is defended and if attack actually wins
+                                defense_info = _analyze_piece_defense(board_after, target_sq, target)
                                 
                                 if gives_check:
+                                    # Discovered check - target is lost regardless of defense
+                                    # (must deal with check first)
                                     return CounterfactualFailure(
                                         failure_type="discovered_check",
-                                        description=f"If you don't play this move, opponent plays a discovered check, winning the {target_name}.",
+                                        description=f"If you don't play this move, opponent plays a discovered check, winning the {target_name}. The check must be addressed, so the {target_name} cannot be saved.",
                                         severity=2,
                                         misconception=f"the {target_name} seemed blocked from the {behind_name}"
                                     )
                                 
-                                return CounterfactualFailure(
-                                    failure_type="discovery",
-                                    description=f"If you don't play this move, opponent uncovers an attack on your {target_name}.",
-                                    severity=2,
-                                    misconception=f"the {target_name} seemed blocked"
-                                )
+                                # No check - does the discovery actually win material?
+                                if not defense_info['is_defended']:
+                                    return CounterfactualFailure(
+                                        failure_type="discovery",
+                                        description=f"If you don't play this move, opponent uncovers an attack on your {target_name}, which is undefended.",
+                                        severity=2,
+                                        misconception=f"the {target_name} seemed blocked"
+                                    )
+                                elif target_value > behind_value:
+                                    # Target worth more - exchange still wins
+                                    return CounterfactualFailure(
+                                        failure_type="discovery",
+                                        description=f"If you don't play this move, opponent uncovers an attack on your {target_name}. Although {defense_info['defense_description']}, the {behind_name} can profitably capture it.",
+                                        severity=2,
+                                        misconception=f"the {target_name} seemed safely defended"
+                                    )
+                                # Target is defended by equal/lower value piece - discovery doesn't win
+                                # Don't return a failure
                             break
     
     return None
 
 
 def _detect_pin_in_response(board: chess.Board, response: chess.Move) -> Optional[CounterfactualFailure]:
-    """Detect if opponent's response creates a pin or skewer."""
+    """Detect if opponent's response creates a pin or skewer that wins material."""
     board_after = board.copy()
     board_after.push(response)
     
@@ -908,6 +927,7 @@ def _detect_pin_in_response(board: chess.Board, response: chess.Move) -> Optiona
         return None
     
     responder_name = PIECE_NAMES[responding_piece.piece_type]
+    responder_value = PIECE_POINTS[responding_piece.piece_type]
     
     # Check rays from the moved piece
     for direction in _get_piece_directions(responding_piece.piece_type):
@@ -932,25 +952,85 @@ def _detect_pin_in_response(board: chess.Board, response: chess.Move) -> Optiona
             front_piece, front_sq = front
             back_piece, back_sq = back
             front_name = PIECE_NAMES[front_piece.piece_type]
+            front_value = PIECE_POINTS[front_piece.piece_type]
             back_name = PIECE_NAMES[back_piece.piece_type]
+            back_value = PIECE_POINTS[back_piece.piece_type]
             
-            # Pin to king
+            # Pin to king - always significant (pinned piece can't move legally)
             if back_piece.piece_type == chess.KING:
-                return CounterfactualFailure(
-                    failure_type="pin",
-                    description=f"If you don't play this move, the {responder_name} pins your {front_name} to the king.",
-                    severity=2 if PIECE_POINTS[front_piece.piece_type] >= 3 else 3,
-                    misconception=f"the {front_name} seemed free to move"
-                )
+                # Check if the pinned piece is actually valuable enough to matter
+                # and if capturing it would be profitable
+                front_defense = _analyze_piece_defense(board_after, front_sq, front_piece)
+                
+                if front_value >= 3:
+                    # Valuable piece pinned - significant
+                    if not front_defense['is_defended']:
+                        return CounterfactualFailure(
+                            failure_type="pin",
+                            description=f"If you don't play this move, the {responder_name} pins your {front_name} to the king. The {front_name} is undefended and will be lost.",
+                            severity=2,
+                            misconception=f"the {front_name} seemed free to move"
+                        )
+                    elif front_value > responder_value:
+                        return CounterfactualFailure(
+                            failure_type="pin",
+                            description=f"If you don't play this move, the {responder_name} pins your {front_name} to the king. The {front_name} cannot move, and the {responder_name} can capture it profitably.",
+                            severity=2,
+                            misconception=f"the {front_name} seemed safe"
+                        )
+                    else:
+                        # Pinned piece is defended and not worth more than attacker
+                        # Pin exists but doesn't immediately win material
+                        return CounterfactualFailure(
+                            failure_type="pin",
+                            description=f"If you don't play this move, the {responder_name} pins your {front_name} to the king. The {front_name} cannot move freely.",
+                            severity=3,  # Lower severity - positional not material
+                            misconception=f"the {front_name} seemed mobile"
+                        )
+                # Low value piece (pawn) pinned - usually not significant
+                return None
             
-            # Skewer (more valuable piece in front)
-            if PIECE_POINTS[front_piece.piece_type] > PIECE_POINTS[back_piece.piece_type]:
-                return CounterfactualFailure(
-                    failure_type="skewer",
-                    description=f"If you don't play this move, the {responder_name} skewers your {front_name} and {back_name}.",
-                    severity=2,
-                    misconception=f"the {front_name} seemed safe"
-                )
+            # Skewer (more valuable piece in front must move, exposing back piece)
+            if front_piece.piece_type == chess.KING or front_value > back_value:
+                # Check if back piece is actually capturable after front moves
+                back_defense = _analyze_piece_defense(board_after, back_sq, back_piece)
+                
+                if front_piece.piece_type == chess.KING:
+                    # King must move - back piece will be taken
+                    if not back_defense['is_defended']:
+                        return CounterfactualFailure(
+                            failure_type="skewer",
+                            description=f"If you don't play this move, the {responder_name} skewers your king and {back_name}. The king must move, and the undefended {back_name} is captured.",
+                            severity=2,
+                            misconception=f"the {back_name} seemed safe behind the king"
+                        )
+                    elif back_value > responder_value:
+                        return CounterfactualFailure(
+                            failure_type="skewer",
+                            description=f"If you don't play this move, the {responder_name} skewers your king and {back_name}. The king must move, and although the {back_name} is {back_defense['defense_description']}, the exchange favors opponent.",
+                            severity=2,
+                            misconception=f"the {back_name} seemed safely defended"
+                        )
+                    # Back piece is defended by equal/lower value - skewer doesn't win
+                    return None
+                else:
+                    # Non-king skewer - front piece should move to avoid loss
+                    if not back_defense['is_defended']:
+                        return CounterfactualFailure(
+                            failure_type="skewer",
+                            description=f"If you don't play this move, the {responder_name} skewers your {front_name} and {back_name}. The {front_name} should move, losing the undefended {back_name}.",
+                            severity=2,
+                            misconception=f"both pieces seemed safe"
+                        )
+                    elif back_value > responder_value:
+                        return CounterfactualFailure(
+                            failure_type="skewer",
+                            description=f"If you don't play this move, the {responder_name} attacks your {front_name} and {back_name} on the same line.",
+                            severity=3,
+                            misconception=f"the pieces seemed safe"
+                        )
+                    # Skewer doesn't win material
+                    return None
     
     return None
 
@@ -961,7 +1041,7 @@ def _describe_threat_sequence(
     opp_pv: List[chess.Move],
     engine: chess.engine.SimpleEngine,
 ) -> Optional[str]:
-    """Describe a multi-move threat sequence in human terms."""
+    """Describe a multi-move threat sequence in human terms with proper defense analysis."""
     if len(opp_pv) < 2:
         return None
     
@@ -983,7 +1063,20 @@ def _describe_threat_sequence(
                     elif test_board.is_capture(move):
                         captured = test_board.piece_at(move.to_square)
                         if captured:
-                            threats_found.append(f"wins {PIECE_NAMES[captured.piece_type]}")
+                            captured_name = PIECE_NAMES[captured.piece_type]
+                            captured_value = PIECE_POINTS[captured.piece_type]
+                            attacker_value = PIECE_POINTS[piece.piece_type]
+                            
+                            # Check if the capture actually wins material
+                            defense_info = _analyze_piece_defense(test_board, move.to_square, captured)
+                            
+                            if not defense_info['is_defended']:
+                                threats_found.append(f"wins undefended {captured_name}")
+                            elif captured_value > attacker_value:
+                                threats_found.append(f"wins {captured_name}")
+                            elif captured_value >= 3:
+                                # Significant piece, but defended - just say captures
+                                threats_found.append(f"captures {captured_name}")
             
             test_board.push(move)
         
@@ -1461,13 +1554,16 @@ def _why_cant_escape(board: chess.Board, sq: int, piece: chess.Piece) -> Optiona
 
 def _detect_pin_skewer_with_causality(board: chess.Board, 
                                        move: chess.Move) -> Optional[Dict]:
-    """Detect pin/skewer with human-readable causality."""
+    """Detect pin/skewer with human-readable causality and proper defense analysis."""
     board_after = board.copy()
     board_after.push(move)
     
     moving_piece = board.piece_at(move.from_square)
     if not moving_piece or moving_piece.piece_type not in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
         return None
+    
+    moving_name = PIECE_NAMES[moving_piece.piece_type]
+    moving_value = PIECE_POINTS[moving_piece.piece_type]
     
     # Check rays from the moved piece
     for direction in _get_piece_directions(moving_piece.piece_type):
@@ -1492,42 +1588,88 @@ def _detect_pin_skewer_with_causality(board: chess.Board,
             front_piece, front_sq = front
             back_piece, back_sq = back
             front_name = PIECE_NAMES[front_piece.piece_type]
+            front_value = PIECE_POINTS[front_piece.piece_type]
             back_name = PIECE_NAMES[back_piece.piece_type]
+            back_value = PIECE_POINTS[back_piece.piece_type]
             front_sq_name = chess.square_name(front_sq)
             back_sq_name = chess.square_name(back_sq)
             
-            # Pin to king
+            # Analyze defense of front piece
+            front_defense = _analyze_piece_defense(board_after, front_sq, front_piece)
+            
+            # Pin to king - front piece cannot move legally
             if back_piece.piece_type == chess.KING:
-                return {
-                    'description': f"This pins the {front_name} on {front_sq_name} to the king. The {front_name} cannot move without exposing the king to check.",
-                    'misconception': f"the {front_name} seemed free to move"
-                }
-            
-            # Pin to valuable piece
-            if PIECE_POINTS[back_piece.piece_type] > PIECE_POINTS[front_piece.piece_type]:
-                return {
-                    'description': f"This pins the {front_name} to the {back_name}. Moving the {front_name} loses the {back_name}.",
-                    'misconception': f"the {front_name} looked mobile"
-                }
-            
-            # Skewer
-            if front_piece.piece_type == chess.KING or PIECE_POINTS[front_piece.piece_type] > PIECE_POINTS[back_piece.piece_type]:
-                if front_piece.piece_type == chess.KING:
+                # Check if capturing the pinned piece would be profitable
+                if not front_defense['is_defended']:
                     return {
-                        'description': f"This skewers the king and {back_name}. The king must move, and the {back_name} is captured.",
-                        'misconception': f"the {back_name} seemed protected by the king's position"
+                        'description': f"This pins the {front_name} on {front_sq_name} to the king. The {front_name} cannot move, and since it's undefended, it will be captured.",
+                        'misconception': f"the {front_name} seemed free to move"
                     }
-                return {
-                    'description': f"This skewers the {front_name} and {back_name}.",
-                    'misconception': "both pieces seemed safe"
-                }
+                elif front_value > moving_value:
+                    return {
+                        'description': f"This pins the {front_name} on {front_sq_name} to the king. The {front_name} cannot move without exposing the king, and capturing it is profitable.",
+                        'misconception': f"the {front_name} seemed safely defended"
+                    }
+                else:
+                    # Pin exists but capturing wouldn't be profitable
+                    return {
+                        'description': f"This pins the {front_name} on {front_sq_name} to the king. The {front_name} cannot move without exposing the king to check.",
+                        'misconception': f"the {front_name} seemed free to move"
+                    }
+            
+            # Pin to valuable piece (back worth more than front)
+            if back_value > front_value:
+                # Check if back piece is actually at risk
+                back_defense = _analyze_piece_defense(board_after, back_sq, back_piece)
+                
+                if not back_defense['is_defended'] or back_value > moving_value:
+                    return {
+                        'description': f"This pins the {front_name} to the {back_name}. Moving the {front_name} exposes the more valuable {back_name}.",
+                        'misconception': f"the {front_name} looked mobile"
+                    }
+                # Back piece is well defended - pin doesn't win material
+                return None
+            
+            # Skewer (more valuable piece in front must move, exposing back)
+            if front_piece.piece_type == chess.KING or front_value > back_value:
+                # Check if back piece will actually be lost
+                back_defense = _analyze_piece_defense(board_after, back_sq, back_piece)
+                
+                if front_piece.piece_type == chess.KING:
+                    # King must move - check if back piece is capturable
+                    if not back_defense['is_defended']:
+                        return {
+                            'description': f"This skewers the king and {back_name}. The king must move, and the undefended {back_name} is captured.",
+                            'misconception': f"the {back_name} seemed protected by the king's position"
+                        }
+                    elif back_value > moving_value:
+                        return {
+                            'description': f"This skewers the king and {back_name}. The king must move, and the {back_name} can be captured profitably.",
+                            'misconception': f"the {back_name} seemed safely defended"
+                        }
+                    # Back piece is defended and not worth more - skewer doesn't win
+                    return None
+                else:
+                    # Non-king skewer
+                    if not back_defense['is_defended']:
+                        return {
+                            'description': f"This skewers the {front_name} and {back_name}. The {front_name} should move, losing the undefended {back_name}.",
+                            'misconception': "both pieces seemed safe"
+                        }
+                    elif back_value > moving_value:
+                        return {
+                            'description': f"This skewers the {front_name} and {back_name}.",
+                            'misconception': "both pieces seemed safe"
+                        }
+                    # Skewer doesn't win material
+                    return None
     
     return None
 
 
 def _detect_discovered_attack(board: chess.Board, move: chess.Move,
                                gives_check: bool) -> Optional[Dict]:
-    """Detect discovered attacks with causality."""
+    """Detect discovered attacks with causality and proper defense analysis."""
     board_after = board.copy()
     board_after.push(move)
     
@@ -1536,6 +1678,7 @@ def _detect_discovered_attack(board: chess.Board, move: chess.Move,
         return None
     
     moving_name = PIECE_NAMES[moving_piece.piece_type]
+    moving_value = PIECE_POINTS[moving_piece.piece_type]
     from_sq = move.from_square
     
     # Check if moving unblocked an attack
@@ -1554,9 +1697,15 @@ def _detect_discovered_attack(board: chess.Board, move: chess.Move,
                         if target:
                             if target.color != moving_piece.color and PIECE_POINTS[target.piece_type] >= 3:
                                 behind_name = PIECE_NAMES[behind_piece.piece_type]
+                                behind_value = PIECE_POINTS[behind_piece.piece_type]
                                 target_name = PIECE_NAMES[target.piece_type]
+                                target_value = PIECE_POINTS[target.piece_type]
+                                
+                                # Analyze target defense
+                                target_defense = _analyze_piece_defense(board_after, target_sq, target)
                                 
                                 if gives_check:
+                                    # Discovered check - king must respond
                                     captured = board.piece_at(move.to_square)
                                     if captured and PIECE_POINTS[captured.piece_type] >= 3:
                                         cap_name = PIECE_NAMES[captured.piece_type]
@@ -1564,26 +1713,53 @@ def _detect_discovered_attack(board: chess.Board, move: chess.Move,
                                             'description': f"This captures the {cap_name} with discovered check. The king must respond, so the capture is free.",
                                             'misconception': f"the {cap_name} seemed defended"
                                         }
-                                
-                                return {
-                                    'description': f"Moving the {moving_name} discovers an attack on the {target_name} by the {behind_name}.",
-                                    'misconception': f"the {moving_name} seemed to be blocking nothing"
-                                }
+                                    # Discovered check but no significant capture
+                                    if not target_defense['is_defended']:
+                                        return {
+                                            'description': f"Moving the {moving_name} gives discovered check while the {behind_name} attacks the undefended {target_name}.",
+                                            'misconception': f"the {moving_name} seemed to be blocking nothing"
+                                        }
+                                    elif target_value > behind_value:
+                                        return {
+                                            'description': f"Moving the {moving_name} gives discovered check. The {behind_name} then wins the {target_name}.",
+                                            'misconception': f"the {target_name} seemed safe"
+                                        }
+                                else:
+                                    # Regular discovery - check if it actually wins material
+                                    if not target_defense['is_defended']:
+                                        return {
+                                            'description': f"Moving the {moving_name} discovers an attack on the undefended {target_name} by the {behind_name}.",
+                                            'misconception': f"the {moving_name} seemed to be blocking nothing"
+                                        }
+                                    elif target_value > behind_value:
+                                        return {
+                                            'description': f"Moving the {moving_name} discovers an attack on the {target_name} by the {behind_name}. The {target_name} is worth more, so this exchange wins material.",
+                                            'misconception': f"the {target_name} seemed safe"
+                                        }
+                                    # Target is defended and not worth more - discovery doesn't win
+                                    return None
                             break
     
     return None
 
 
 def _detect_trapped_piece(board: chess.Board, move: chess.Move) -> Optional[Dict]:
-    """Detect trapped pieces with escape analysis."""
+    """Detect trapped pieces with escape analysis and proper defense checking."""
     board_after = board.copy()
     board_after.push(move)
+    
+    moving_piece = board.piece_at(move.from_square)
+    moving_value = PIECE_POINTS.get(moving_piece.piece_type, 1) if moving_piece else 1
     
     for sq in chess.SQUARES:
         piece = board_after.piece_at(sq)
         if piece and piece.color == board_after.turn and piece.piece_type not in [chess.PAWN, chess.KING]:
             if not board_after.is_attacked_by(not board_after.turn, sq):
                 continue  # Not attacked
+            
+            piece_value = PIECE_POINTS[piece.piece_type]
+            piece_name = PIECE_NAMES[piece.piece_type]
+            sq_name = chess.square_name(sq)
             
             # Count escape squares
             escapes = []
@@ -1594,14 +1770,32 @@ def _detect_trapped_piece(board: chess.Board, move: chess.Move) -> Optional[Dict
                     if not test.is_attacked_by(not piece.color, m.to_square):
                         escapes.append(chess.square_name(m.to_square))
             
-            if len(escapes) == 0 and PIECE_POINTS[piece.piece_type] >= 3:
-                piece_name = PIECE_NAMES[piece.piece_type]
-                sq_name = chess.square_name(sq)
+            if len(escapes) == 0 and piece_value >= 3:
+                # Piece is trapped - but is it actually lost?
+                # Check if the trapped piece is defended
+                defense_info = _analyze_piece_defense(board_after, sq, piece)
                 
-                return {
-                    'description': f"This traps the {piece_name} on {sq_name}. Every potential escape square is controlled.",
-                    'misconception': f"the {piece_name} looked like it could escape"
-                }
+                if not defense_info['is_defended']:
+                    return {
+                        'description': f"This traps the undefended {piece_name} on {sq_name}. Every potential escape square is controlled, and it will be captured for free.",
+                        'misconception': f"the {piece_name} looked like it could escape"
+                    }
+                elif piece_value > moving_value:
+                    # Trapped and capturing it is profitable
+                    return {
+                        'description': f"This traps the {piece_name} on {sq_name}. Every escape square is controlled, and capturing it wins material ({defense_info['defense_description']}).",
+                        'misconception': f"the {piece_name} seemed safe or escapable"
+                    }
+                elif defense_info['min_defender_value'] > piece_value:
+                    # Defended only by more valuable pieces
+                    return {
+                        'description': f"This traps the {piece_name} on {sq_name}. It's {defense_info['defense_description']}, but defending loses even more material.",
+                        'misconception': f"the {piece_name} seemed adequately defended"
+                    }
+                else:
+                    # Trapped but well defended - not a material win
+                    # Still could be positionally significant but not a "wins piece" claim
+                    return None
     
     return None
 
