@@ -813,7 +813,7 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
             ]
         )
         st.subheader("Games")
-        st.dataframe(summary_df, use_container_width=True)
+        st.dataframe(summary_df, width="stretch")
 
         for g in games:
             title = f"Game {g.get('index')}: {g.get('white')} vs {g.get('black')} ({g.get('result')})"
@@ -824,7 +824,7 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
                 )
                 moves_df = pd.DataFrame(g.get("moves_table") or [])
                 if not moves_df.empty:
-                    st.dataframe(moves_df, use_container_width=True)
+                    st.dataframe(moves_df, width="stretch")
                     
                     # Add evaluation chart (line chart showing score_cp over ply)
                     if "score_cp" in moves_df.columns and "ply" in moves_df.columns:
@@ -856,7 +856,7 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
                 for p in phase_order if p in phase_stats
             ]
         )
-        st.dataframe(phase_df, use_container_width=True)
+        st.dataframe(phase_df, width="stretch")
 
         # Create separate bar charts for each metric (3 charts side by side)
         st.write("**Phase Performance Charts**")
@@ -1042,7 +1042,7 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
                             "Checks": ps.checks,
                         })
                 if piece_rows:
-                    st.dataframe(pd.DataFrame(piece_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(piece_rows), width="stretch", hide_index=True)
     
     st.divider()
     
@@ -1085,7 +1085,7 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
             {"Type": k.replace("_", " ").title(), "Count": v}
             for k, v in by_type.items()
         ]).sort_values("Count", ascending=False)
-        st.dataframe(type_df, use_container_width=True, hide_index=True)
+        st.dataframe(type_df, width="stretch", hide_index=True)
         
         # Chart
         if len(type_df) > 1:
@@ -1100,7 +1100,7 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
             {"Phase": p.title(), "Blunders": c}
             for p, c in by_phase.items()
         ])
-        st.dataframe(phase_df, use_container_width=True, hide_index=True)
+        st.dataframe(phase_df, width="stretch", hide_index=True)
     
     # Blunder examples
     if blunder.examples:
@@ -1136,7 +1136,7 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
                     "Conversion %": stats.get("conversion_rate_pct", 0),
                 })
         if endgame_rows:
-            st.dataframe(pd.DataFrame(endgame_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(endgame_rows), width="stretch", hide_index=True)
     
     # --- Opening Deviations ---
     opening_dev = coaching_report.opening_deviations
@@ -1274,7 +1274,7 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
                 })
         if phase_percentiles:
             st.write("**Phase-by-Phase Performance:**")
-            st.dataframe(pd.DataFrame(phase_percentiles), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(phase_percentiles), width="stretch", hide_index=True)
     
     # --- LLM-Ready JSON Export ---
     with st.expander("🤖 Export for AI Coach (JSON)", expanded=False):
@@ -1533,7 +1533,7 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
         st.session_state["main_view"] = "📊 Analysis"
 
     view = st.radio(
-        "",
+        "Main view",
         options=["📊 Analysis", "♟️ Puzzles"],
         horizontal=True,
         key="main_view",

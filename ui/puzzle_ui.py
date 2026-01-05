@@ -387,15 +387,15 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
         nav1, nav2, nav3 = st.columns(3)
         with nav1:
-            if st.button("Back", use_container_width=True, disabled=progress.current_index <= 0):
+            if st.button("Back", width="stretch", disabled=progress.current_index <= 0):
                 progress.current_index = max(progress.current_index - 1, 0)
                 st.rerun()
         with nav2:
-            if st.button("Next", use_container_width=True, disabled=progress.current_index >= len(puzzles) - 1):
+            if st.button("Next", width="stretch", disabled=progress.current_index >= len(puzzles) - 1):
                 progress.current_index = min(progress.current_index + 1, len(puzzles) - 1)
                 st.rerun()
         with nav3:
             # Full reset: clears index, solved, last result, last move, accepted position.
-            if st.button("Reset", use_container_width=True):
+            if st.button("Reset", width="stretch"):
                 _reset_progress()
                 st.rerun()
