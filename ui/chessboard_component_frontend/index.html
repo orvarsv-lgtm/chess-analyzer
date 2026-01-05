@@ -134,7 +134,12 @@
 
     <script>
       // --- Streamlit Component Protocol (minimal) ---
+      let _componentId = null;
+
       function _postMessage(message) {
+        if (_componentId && !message.componentId) {
+          message.componentId = _componentId;
+        }
         window.parent.postMessage(message, "*");
       }
 
@@ -568,6 +573,10 @@
       window.addEventListener("message", (event) => {
         const data = event.data;
         if (!data || data.type !== "streamlit:render") return;
+
+        if (data.componentId) {
+          _componentId = data.componentId;
+        }
 
         const newArgs = data.args || args;
         
