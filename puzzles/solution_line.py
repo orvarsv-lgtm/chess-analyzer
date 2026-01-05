@@ -223,8 +223,8 @@ def _find_best_opponent_response(
         return legal_moves[0]
     
     try:
-        # Use a slightly higher time limit to ensure good defense
-        result = engine.play(board, chess.engine.Limit(time=0.2))
+        # Use depth for determinism across runs/environments.
+        result = engine.play(board, chess.engine.Limit(depth=10))
         return result.move
     except Exception:
         return None
@@ -245,7 +245,7 @@ def _find_player_forcing_move(
     
     try:
         # Get best move
-        result = engine.play(board, chess.engine.Limit(time=0.2))
+        result = engine.play(board, chess.engine.Limit(depth=10))
         best_move = result.move
         
         if not best_move:

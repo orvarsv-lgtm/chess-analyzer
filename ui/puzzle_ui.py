@@ -38,6 +38,10 @@ class PuzzleProgress:
     reveal_puzzle_index: Optional[int] = None
     reveal_solution_move_index: Optional[int] = None
 
+    # UI nonce to force-remount the chessboard component when needed
+    # (prevents stale component outputs being processed as moves on rerun).
+    board_nonce: int = 0
+
 
 _STATE_KEY = "puzzle_progress_v2"
 _SOLUTION_CACHE_KEY = "puzzle_solution_line_cache_v1"
@@ -327,7 +331,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             side_to_move=side_to_move,
             highlights=highlights,
             hint=hint,
-            key=f"chessboard_v2_{progress.current_index}_{progress.solution_move_index}",
+            key=f"chessboard_v2_{progress.current_index}_{progress.solution_move_index}_{progress.board_nonce}",
         )
 
         # Process move only once (and not if puzzle is complete)
@@ -427,6 +431,9 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 progress.reveal_answer = True
                 progress.reveal_puzzle_index = progress.current_index
                 progress.reveal_solution_move_index = progress.solution_move_index
+            # Force-remount the board component to avoid processing any
+            # stale UCI move value the component might emit on this rerun.
+            progress.board_nonce += 1
 
         if (
             progress.reveal_answer
