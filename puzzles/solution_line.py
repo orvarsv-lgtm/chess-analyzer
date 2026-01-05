@@ -18,12 +18,38 @@ from typing import List, Optional, Tuple
 import chess
 import chess.engine
 import os
+import shutil
 
 # Try to import STOCKFISH_PATH, default to common location if not found
 try:
     from src.engine_analysis import STOCKFISH_PATH
 except ImportError:
     STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
+
+
+def _resolve_stockfish_cmd() -> str | None:
+    """Return a usable Stockfish command/path, or None if not found."""
+    env_path = (os.getenv("STOCKFISH_PATH") or "").strip()
+    if env_path and os.path.exists(env_path):
+        return env_path
+
+    # Prefer configured default path if it exists.
+    if STOCKFISH_PATH and os.path.exists(STOCKFISH_PATH):
+        return STOCKFISH_PATH
+
+    # Common locations across macOS + Linux.
+    for p in (
+        "/opt/homebrew/bin/stockfish",  # macOS (Homebrew on Apple Silicon)
+        "/usr/local/bin/stockfish",     # macOS (Homebrew on Intel)
+        "/usr/bin/stockfish",           # Linux
+        "/usr/games/stockfish",         # Debian/Ubuntu
+    ):
+        if os.path.exists(p):
+            return p
+
+    # Finally, try PATH.
+    found = shutil.which("stockfish")
+    return found
 
 
 def compute_solution_line(
@@ -75,15 +101,17 @@ def compute_solution_line(
     # Initialize engine for analysis
     engine = None
     try:
-        if os.path.exists(STOCKFISH_PATH):
-            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-        else:
-            # Try to find stockfish in path if not at specific location
-            engine = chess.engine.SimpleEngine.popen_uci("stockfish")
+        cmd = _resolve_stockfish_cmd()
+        if not cmd:
+            raise FileNotFoundError("stockfish not found")
+        engine = chess.engine.SimpleEngine.popen_uci(cmd)
     except Exception:
         # If engine is required but fails, we can't compute the line reliably.
         # Fallback to single move to avoid crashing, but this indicates setup issue.
-        print(f"Warning: Stockfish not found at {STOCKFISH_PATH} or in PATH. Puzzle continuation disabled.")
+        print(
+            "Warning: Stockfish not found (set STOCKFISH_PATH or install 'stockfish' in PATH). "
+            "Puzzle continuation disabled."
+        )
         return solution
 
     # If the first move already wins decisive material (after best defense), treat puzzle as complete.
