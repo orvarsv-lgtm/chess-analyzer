@@ -12,6 +12,7 @@
         --selected: rgba(34, 197, 94, 0.35);
         --correct: rgba(34, 197, 94, 0.55);
         --incorrect: rgba(239, 68, 68, 0.55);
+        --viable: rgba(234, 179, 8, 0.55);
         --piece-white: #111827;
         --piece-black: #111827;
       }
@@ -71,6 +72,10 @@
 
       .sq.incorrect {
         box-shadow: inset 0 0 0 4px var(--incorrect);
+      }
+
+      .sq.viable {
+        box-shadow: inset 0 0 0 4px var(--viable);
       }
 
       .piece {
@@ -368,6 +373,7 @@
           selected: null,
           correct_squares: [],
           incorrect_squares: [],
+          viable_squares: [],
         },
         ui: {
           hint: "",
@@ -409,6 +415,7 @@
 
         const correctSq = new Set((args.highlights && args.highlights.correct_squares) || []);
         const incorrectSq = new Set((args.highlights && args.highlights.incorrect_squares) || []);
+        const viableSq = new Set((args.highlights && args.highlights.viable_squares) || []);
 
         boardEl.innerHTML = "";
 
@@ -430,6 +437,7 @@
             if (legalDestinations.has(sq)) sqEl.classList.add("legal");
             if (correctSq.has(sq)) sqEl.classList.add("correct");
             if (incorrectSq.has(sq)) sqEl.classList.add("incorrect");
+            if (viableSq.has(sq)) sqEl.classList.add("viable");
 
             // Drop target logic
             sqEl.addEventListener("dragover", (e) => {

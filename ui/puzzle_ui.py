@@ -23,7 +23,7 @@ except Exception:
 class PuzzleProgress:
     current_index: int = 0
     solved: int = 0
-    last_result: Optional[str] = None  # "correct" | "incorrect" | "continue" | None
+    last_result: Optional[str] = None  # "correct" | "viable" | "incorrect" | "continue" | None
     last_uci: Optional[str] = None
     current_fen: Optional[str] = None  # tracks accepted position
     active_puzzle_index: Optional[int] = None
@@ -96,6 +96,10 @@ def _score_to_cp(score: chess.engine.PovScore) -> int:
         return 0
 
 
+# Constants for move classification
+VIABLE_CPL_THRESHOLD = 50  # 50 centipawns = 0.5 pawns
+
+
 def _get_acceptable_moves_uci(
     board: chess.Board,
     second_best_max_loss_cp: int = 50,
@@ -152,6 +156,86 @@ def _get_acceptable_moves_uci(
         if (best_cp - second_cp) <= second_best_max_loss_cp:
             return [best_uci, second_uci]
         return [best_uci]
+    finally:
+        try:
+            engine.quit()
+        except Exception:
+            pass
+
+
+def _classify_move(
+    board: chess.Board,
+    move_uci: str,
+    expected_uci: Optional[str],
+    depth: int = 12,
+) -> tuple[str, int]:
+    """
+    Classify a move as 'correct', 'viable', or 'incorrect'.
+    
+    Returns: (classification, cpl)
+    - 'correct': Best move or equal to best
+    - 'viable': Within 50 CPL of best (show yellow)
+    - 'incorrect': More than 50 CPL worse than best
+    """
+    # If it's the expected move, it's correct
+    if move_uci == expected_uci:
+        return ('correct', 0)
+    
+    engine = _open_stockfish_engine()
+    try:
+        infos = engine.analyse(board, chess.engine.Limit(depth=depth), multipv=5)
+        if not isinstance(infos, list):
+            infos = [infos]
+        
+        if not infos:
+            return ('incorrect', 100)
+        
+        # Get best move's eval
+        best_info = infos[0]
+        best_score = best_info.get("score")
+        if not best_score:
+            return ('incorrect', 100)
+        
+        best_cp = _score_to_cp(best_score.pov(board.turn))
+        best_pv = best_info.get("pv", [])
+        best_uci = best_pv[0].uci() if best_pv else None
+        
+        # If our move is the best move, it's correct
+        if move_uci == best_uci:
+            return ('correct', 0)
+        
+        # Find our move in multipv
+        for info in infos:
+            pv = info.get("pv", [])
+            if pv and pv[0].uci() == move_uci:
+                score = info.get("score")
+                if score:
+                    move_cp = _score_to_cp(score.pov(board.turn))
+                    cpl = best_cp - move_cp
+                    if cpl <= VIABLE_CPL_THRESHOLD:
+                        return ('viable', max(0, cpl))
+                    return ('incorrect', max(0, cpl))
+        
+        # Move not in top 5 - analyze specifically
+        try:
+            move = chess.Move.from_uci(move_uci)
+            if move in board.legal_moves:
+                board_after = board.copy()
+                board_after.push(move)
+                info = engine.analyse(board_after, chess.engine.Limit(depth=depth))
+                score = info.get("score")
+                if score:
+                    # Score is from opponent's perspective after our move
+                    move_cp = -_score_to_cp(score.pov(board_after.turn))
+                    cpl = best_cp - move_cp
+                    if cpl <= VIABLE_CPL_THRESHOLD:
+                        return ('viable', max(0, cpl))
+                    return ('incorrect', max(0, cpl))
+        except Exception:
+            pass
+        
+        return ('incorrect', 100)
+        
     finally:
         try:
             engine.quit()
@@ -278,12 +362,23 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     highlights = {
         "correct_squares": [],
         "incorrect_squares": [],
+        "viable_squares": [],
     }
 
     if progress.last_result == "correct" and progress.last_uci:
         try:
             mv = chess.Move.from_uci(progress.last_uci)
             highlights["correct_squares"] = [
+                chess.square_name(mv.from_square),
+                chess.square_name(mv.to_square),
+            ]
+        except Exception:
+            pass
+
+    if progress.last_result == "viable" and progress.last_uci:
+        try:
+            mv = chess.Move.from_uci(progress.last_uci)
+            highlights["viable_squares"] = [
                 chess.square_name(mv.from_square),
                 chess.square_name(mv.to_square),
             ]
@@ -335,7 +430,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         )
 
         # Process move only once (and not if puzzle is complete)
-        if uci and uci != progress.last_uci and progress.last_result != "correct":
+        if uci and uci != progress.last_uci and progress.last_result not in ("correct", "viable"):
             progress.last_uci = uci
             progress.opponent_just_moved = False
 
@@ -352,17 +447,17 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             # Check against expected move at current solution index
             expected = solution_moves[progress.solution_move_index] if progress.solution_move_index < len(solution_moves) else None
-            acceptable_moves: List[str] = []
+            
+            # Classify the move: correct (green), viable (yellow), or incorrect (red)
             try:
-                acceptable_moves = _get_acceptable_moves_uci(board, second_best_max_loss_cp=30)
+                classification, cpl = _classify_move(board, uci, expected)
             except Exception:
-                # Stockfish is required for proper validation; fall back to strict expected.
-                acceptable_moves = [expected] if expected else []
+                # Fallback: just check if it matches expected
+                classification = "correct" if uci == expected else "incorrect"
+                cpl = 0
 
-            is_viable = (uci == expected) or (uci in acceptable_moves)
-
-            if is_viable:
-                # Correct move!
+            if classification in ("correct", "viable"):
+                # Good move - continue the puzzle
                 # Recompute the solution line from this position so continuations follow Stockfish,
                 # even if the player chose an alternate-but-viable move.
                 try:
@@ -395,12 +490,12 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                     else:
                         # No valid opponent response, puzzle complete
                         progress.current_fen = board.fen()
-                        progress.last_result = "correct"
+                        progress.last_result = classification  # "correct" or "viable"
                         progress.solved += 1
                 else:
                     # No more moves - puzzle complete!
                     progress.current_fen = board.fen()
-                    progress.last_result = "correct"
+                    progress.last_result = classification  # "correct" or "viable"
                     progress.solved += 1
             else:
                 progress.last_result = "incorrect"
@@ -414,7 +509,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         
         # Show move progress for multi-move puzzles
         if total_player_moves > 1:
-            if progress.last_result == "correct":
+            if progress.last_result in ("correct", "viable"):
                 st.write(f"Moves: **{total_player_moves} / {total_player_moves}** ✓")
             else:
                 st.write(f"Moves: **{current_player_move_num} / {total_player_moves}**")
@@ -439,7 +534,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             progress.reveal_answer
             and progress.reveal_puzzle_index == progress.current_index
             and progress.reveal_solution_move_index == progress.solution_move_index
-            and progress.last_result != "correct"
+            and progress.last_result not in ("correct", "viable")
         ):
             expected_uci = (
                 solution_moves[progress.solution_move_index]
@@ -457,6 +552,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
         if progress.last_result == "correct":
             st.success("Correct!" if total_player_moves == 1 else f"Correct! ({total_player_moves} moves)")
+            if puzzle.explanation:
+                st.info(f"💡 {puzzle.explanation}")
+        elif progress.last_result == "viable":
+            st.warning("Viable move! This works, but there may be a better option." if total_player_moves == 1 else f"Viable! ({total_player_moves} moves) - This works, but not the best.")
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
         elif progress.last_result == "incorrect":
