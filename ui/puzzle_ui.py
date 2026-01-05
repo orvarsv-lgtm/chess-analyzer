@@ -19,6 +19,18 @@ except Exception:
     STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 
 
+# Piece values and names for explanations
+PIECE_POINTS = {
+    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
+}
+
+PIECE_NAMES = {
+    chess.PAWN: "pawn", chess.KNIGHT: "knight", chess.BISHOP: "bishop",
+    chess.ROOK: "rook", chess.QUEEN: "queen", chess.KING: "king",
+}
+
+
 @dataclass
 class PuzzleProgress:
     current_index: int = 0
@@ -168,18 +180,18 @@ def _classify_move(
     move_uci: str,
     expected_uci: Optional[str],
     depth: int = 12,
-) -> tuple[str, int]:
+) -> tuple[str, int, Optional[str]]:
     """
     Classify a move as 'correct', 'viable', or 'incorrect'.
     
-    Returns: (classification, cpl)
-    - 'correct': Best move or equal to best
-    - 'viable': Within 50 CPL of best (show yellow)
+    Returns: (classification, cpl, why_not_optimal)
+    - 'correct': Best move or equal to best (why_not_optimal is None)
+    - 'viable': Within 50 CPL of best (show yellow, includes why not optimal)
     - 'incorrect': More than 50 CPL worse than best
     """
     # If it's the expected move, it's correct
     if move_uci == expected_uci:
-        return ('correct', 0)
+        return ('correct', 0, None)
     
     engine = _open_stockfish_engine()
     try:
@@ -188,21 +200,22 @@ def _classify_move(
             infos = [infos]
         
         if not infos:
-            return ('incorrect', 100)
+            return ('incorrect', 100, None)
         
-        # Get best move's eval
+        # Get best move's eval and the best move itself
         best_info = infos[0]
         best_score = best_info.get("score")
         if not best_score:
-            return ('incorrect', 100)
+            return ('incorrect', 100, None)
         
         best_cp = _score_to_cp(best_score.pov(board.turn))
         best_pv = best_info.get("pv", [])
         best_uci = best_pv[0].uci() if best_pv else None
+        best_move = best_pv[0] if best_pv else None
         
         # If our move is the best move, it's correct
         if move_uci == best_uci:
-            return ('correct', 0)
+            return ('correct', 0, None)
         
         # Find our move in multipv
         for info in infos:
@@ -213,8 +226,10 @@ def _classify_move(
                     move_cp = _score_to_cp(score.pov(board.turn))
                     cpl = best_cp - move_cp
                     if cpl <= VIABLE_CPL_THRESHOLD:
-                        return ('viable', max(0, cpl))
-                    return ('incorrect', max(0, cpl))
+                        # Generate why not optimal
+                        why_not = _explain_why_not_optimal(board, move_uci, best_move)
+                        return ('viable', max(0, cpl), why_not)
+                    return ('incorrect', max(0, cpl), None)
         
         # Move not in top 5 - analyze specifically
         try:
@@ -229,18 +244,58 @@ def _classify_move(
                     move_cp = -_score_to_cp(score.pov(board_after.turn))
                     cpl = best_cp - move_cp
                     if cpl <= VIABLE_CPL_THRESHOLD:
-                        return ('viable', max(0, cpl))
-                    return ('incorrect', max(0, cpl))
+                        why_not = _explain_why_not_optimal(board, move_uci, best_move)
+                        return ('viable', max(0, cpl), why_not)
+                    return ('incorrect', max(0, cpl), None)
         except Exception:
             pass
         
-        return ('incorrect', 100)
+        return ('incorrect', 100, None)
         
     finally:
         try:
             engine.quit()
         except Exception:
             pass
+
+
+def _explain_why_not_optimal(board: chess.Board, 
+                              played_uci: str,
+                              best_move: Optional[chess.Move]) -> Optional[str]:
+    """Explain why a viable move isn't the optimal choice."""
+    if not best_move:
+        return "The best move is more precise."
+    
+    try:
+        played_move = chess.Move.from_uci(played_uci)
+        best_piece = board.piece_at(best_move.from_square)
+        played_piece = board.piece_at(played_move.from_square)
+        
+        if not best_piece or not played_piece:
+            return "The best move is more forcing."
+        
+        best_captures = board.piece_at(best_move.to_square)
+        played_captures = board.piece_at(played_move.to_square)
+        
+        # Best move wins more material
+        if best_captures and not played_captures:
+            return f"The best move captures the {PIECE_NAMES[best_captures.piece_type]}."
+        
+        if best_captures and played_captures:
+            if PIECE_POINTS[best_captures.piece_type] > PIECE_POINTS[played_captures.piece_type]:
+                return f"The best move wins the {PIECE_NAMES[best_captures.piece_type]} instead."
+        
+        # Best move gives check
+        best_check = board.gives_check(best_move)
+        played_check = board.gives_check(played_move)
+        
+        if best_check and not played_check:
+            return "The best move includes a check, gaining tempo."
+        
+        return "The best move is more forcing."
+        
+    except Exception:
+        return "The best move is more precise."
 
 
 def _get_player_move_indices(solution_moves: List[str]) -> List[int]:
@@ -450,11 +505,18 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             
             # Classify the move: correct (green), viable (yellow), or incorrect (red)
             try:
-                classification, cpl = _classify_move(board, uci, expected)
+                classification, cpl, why_not_optimal = _classify_move(board, uci, expected)
             except Exception:
                 # Fallback: just check if it matches expected
                 classification = "correct" if uci == expected else "incorrect"
                 cpl = 0
+                why_not_optimal = None
+            
+            # Store why_not_optimal for UI display
+            if classification == "viable" and why_not_optimal:
+                st.session_state["last_why_not_optimal"] = why_not_optimal
+            else:
+                st.session_state["last_why_not_optimal"] = None
 
             if classification in ("correct", "viable"):
                 # Good move - continue the puzzle
@@ -555,7 +617,12 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
         elif progress.last_result == "viable":
-            st.warning("Viable move! This works, but there may be a better option." if total_player_moves == 1 else f"Viable! ({total_player_moves} moves) - This works, but not the best.")
+            # Show why this isn't the optimal move
+            why_not = st.session_state.get("last_why_not_optimal")
+            if why_not:
+                st.warning(f"Viable move! {why_not}")
+            else:
+                st.warning("Viable move! This works, but there may be a better option.")
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
         elif progress.last_result == "incorrect":
