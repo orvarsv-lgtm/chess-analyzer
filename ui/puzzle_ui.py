@@ -358,6 +358,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     if progress.current_index >= len(puzzles):
         progress.current_index = len(puzzles) - 1
 
+    # Expose current puzzle index in session_state for stable component keying.
+    # This is intentionally stable across reruns while staying unique per puzzle.
+    st.session_state.puzzle_index = int(progress.current_index)
+
     puzzle = puzzles[progress.current_index]
 
     # Lazily compute the full solution line for the active puzzle only.
@@ -474,15 +478,26 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         else:
             hint = ""
             
-        uci = render_chessboard(
+        puzzle_id = (
+            getattr(puzzle, "id", None)
+            or getattr(puzzle, "puzzle_id", None)
+            or getattr(puzzle, "uuid", None)
+            or f"index_{progress.current_index}"
+        )
+
+        st.write("DEBUG: rendering board", puzzle_id)
+        move = render_chessboard(
             fen=board_fen,
             legal_moves=legal_moves,
             orientation=orientation,
             side_to_move=side_to_move,
             highlights=highlights,
             hint=hint,
-            key="puzzle_board",
+            key=f"puzzle_board_{st.session_state.puzzle_index}",
         )
+        st.write("DEBUG: board rendered")
+
+        uci = move
 
         # Process move only once (and not if puzzle is complete)
         if uci and uci != progress.last_uci and progress.last_result not in ("correct", "viable"):
@@ -588,9 +603,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 progress.reveal_answer = True
                 progress.reveal_puzzle_index = progress.current_index
                 progress.reveal_solution_move_index = progress.solution_move_index
-            # Force-remount the board component to avoid processing any
-            # stale UCI move value the component might emit on this rerun.
-            progress.board_nonce += 1
+                # Clear the last move so we don't treat the revealed state as an input.
+                progress.last_uci = None
 
         if (
             progress.reveal_answer

@@ -568,8 +568,9 @@
           }
         }
 
-        // Height: board + hint
-        setFrameHeight(document.body.scrollHeight);
+        // Height: ensure the board is always visible in the iframe.
+        // Keep a minimum height so Streamlit layouts don't collapse it.
+        setFrameHeight(Math.max(420, document.body.scrollHeight));
       }
 
       let lastFen = "";
@@ -580,11 +581,6 @@
 
         if (data.componentId) {
           _componentId = data.componentId;
-        }
-
-        // Only mark ready once we know componentId (required for host routing).
-        if (_componentId) {
-          componentReady();
         }
 
         const newArgs = data.args || args;
@@ -599,6 +595,10 @@
         args = newArgs;
         render();
       });
+
+      // IMPORTANT: Signal readiness immediately so Streamlit will send the first render.
+      // (Waiting for streamlit:render can deadlock and cause the board to never appear.)
+      componentReady();
 
       // Render a default board while waiting for Streamlit args
       render();
