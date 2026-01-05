@@ -1626,7 +1626,12 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     IS_PREMIUM = False
     
     # Render puzzle interface (single JS board with drag/click)
-    puzzle_defs = from_legacy_puzzles(filtered_puzzles)
+    game_players = {
+        int(g.get("index") or 0): (str(g.get("white") or ""), str(g.get("black") or ""))
+        for g in games
+        if int(g.get("index") or 0) > 0
+    }
+    puzzle_defs = from_legacy_puzzles(filtered_puzzles, game_players=game_players)
     render_puzzle_trainer(puzzle_defs)
 
 

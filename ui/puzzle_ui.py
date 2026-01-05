@@ -162,7 +162,7 @@ def _legal_moves_uci(fen: str) -> List[str]:
 def render_puzzle_metadata(game_metadata: dict):
     """Render metadata about the puzzle's source game."""
     st.markdown(
-        f"**Game {game_metadata['game_number']}**: {game_metadata['username']} vs {game_metadata['opponent']}"
+        f"**Game {game_metadata['game_number']}**, {game_metadata['username']} - {game_metadata['opponent']}"
     )
 
 
@@ -182,6 +182,18 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         progress.current_index = len(puzzles) - 1
 
     puzzle = puzzles[progress.current_index]
+
+    # Show source game metadata (if present)
+    if getattr(puzzle, "source_game_index", None):
+        white = (getattr(puzzle, "white", "") or "").strip() or "Unknown"
+        black = (getattr(puzzle, "black", "") or "").strip() or "Unknown"
+        render_puzzle_metadata(
+            {
+                "game_number": int(puzzle.source_game_index),
+                "username": white,
+                "opponent": black,
+            }
+        )
 
     # Use dynamic solution line (if player chose an alternate viable move)
     solution_moves = progress.active_solution_moves or puzzle.solution_moves

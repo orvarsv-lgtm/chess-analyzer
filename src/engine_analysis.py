@@ -106,7 +106,7 @@ DEBUG_ENGINE = False
 
 # Stockfish configuration
 STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
-ANALYSIS_DEPTH = 15
+ANALYSIS_DEPTH = 20
 
 # Optional remote engine (for Streamlit Cloud / environments without a Stockfish binary)
 VPS_ANALYSIS_URL = "http://72.60.185.247:8000/analyze_game"

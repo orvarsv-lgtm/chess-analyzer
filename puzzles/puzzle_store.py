@@ -20,6 +20,10 @@ class PuzzleDefinition:
     theme: str
     difficulty: int
     explanation: str = ""
+    # Optional source metadata for display in the trainer UI
+    source_game_index: int | None = None
+    white: str = ""
+    black: str = ""
 
 
 def _difficulty_to_int(d: Difficulty) -> int:
@@ -38,7 +42,11 @@ def _san_to_uci_cached(fen: str, san: str) -> str:
     return move.uci()
 
 
-def from_legacy_puzzle(p: Puzzle) -> PuzzleDefinition:
+def from_legacy_puzzle(
+    p: Puzzle,
+    *,
+    game_players: dict[int, tuple[str, str]] | None = None,
+) -> PuzzleDefinition:
     """Convert existing Puzzle -> PuzzleDefinition without changing generation."""
 
     if p.best_move_uci:
@@ -82,8 +90,15 @@ def from_legacy_puzzle(p: Puzzle) -> PuzzleDefinition:
         theme=p.puzzle_type.value,
         difficulty=_difficulty_to_int(p.difficulty),
         explanation=explanation or "Explanation unavailable for this puzzle.",
+        source_game_index=int(getattr(p, "source_game_index", 0) or 0) or None,
+        white=(game_players or {}).get(int(getattr(p, "source_game_index", 0) or 0), ("", ""))[0],
+        black=(game_players or {}).get(int(getattr(p, "source_game_index", 0) or 0), ("", ""))[1],
     )
 
 
-def from_legacy_puzzles(puzzles: List[Puzzle]) -> List[PuzzleDefinition]:
-    return [from_legacy_puzzle(p) for p in puzzles]
+def from_legacy_puzzles(
+    puzzles: List[Puzzle],
+    *,
+    game_players: dict[int, tuple[str, str]] | None = None,
+) -> List[PuzzleDefinition]:
+    return [from_legacy_puzzle(p, game_players=game_players) for p in puzzles]
