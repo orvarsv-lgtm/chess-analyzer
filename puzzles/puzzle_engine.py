@@ -475,7 +475,7 @@ class PuzzleGenerator:
         move_evals: List[dict],
         focus_color: Optional[str] = None,
         engine: chess.engine.SimpleEngine | None = None,
-        engine_depth: int = 12,
+        engine_depth: int = 8,
     ) -> List[Puzzle]:
         """
         Generate puzzles from a single analyzed game.
@@ -741,7 +741,7 @@ def generate_puzzles_from_games(
     focus_player: Optional[str] = None,
     min_eval_loss: int = MIN_PUZZLE_EVAL_LOSS,
     max_puzzles: int | None = 200,
-    engine_depth: int = 10,
+    engine_depth: int = 8,
 ) -> List[Puzzle]:
     """
     Generate puzzles from multiple analyzed games.
