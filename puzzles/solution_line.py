@@ -16,6 +16,14 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 import chess
+import chess.engine
+import os
+
+# Try to import STOCKFISH_PATH, default to common location if not found
+try:
+    from src.engine_analysis import STOCKFISH_PATH
+except ImportError:
+    STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 
 
 def compute_solution_line(
@@ -64,11 +72,29 @@ def compute_solution_line(
     if board.is_game_over():
         return solution
     
-    # Check if continuation is needed
-    continuation = _find_forcing_continuation(board, player_color, max_depth - 1)
-    
-    if continuation:
-        solution.extend(continuation)
+    # Initialize engine for analysis
+    engine = None
+    try:
+        if os.path.exists(STOCKFISH_PATH):
+            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+        else:
+            # Try to find stockfish in path if not at specific location
+            engine = chess.engine.SimpleEngine.popen_uci("stockfish")
+    except Exception:
+        # If engine is required but fails, we can't compute the line reliably.
+        # Fallback to single move to avoid crashing, but this indicates setup issue.
+        print(f"Warning: Stockfish not found at {STOCKFISH_PATH} or in PATH. Puzzle continuation disabled.")
+        return solution
+
+    try:
+        # Check if continuation is needed
+        continuation = _find_forcing_continuation(board, player_color, max_depth - 1, engine)
+        
+        if continuation:
+            solution.extend(continuation)
+    finally:
+        if engine:
+            engine.quit()
     
     return solution
 
@@ -77,6 +103,7 @@ def _find_forcing_continuation(
     board: chess.Board,
     player_color: chess.Color,
     remaining_depth: int,
+    engine: chess.engine.SimpleEngine,
 ) -> List[str]:
     """
     Find the forcing continuation after a move.
@@ -89,7 +116,7 @@ def _find_forcing_continuation(
         return []
     
     # It's opponent's turn - find their best response
-    opponent_response = _find_best_opponent_response(board)
+    opponent_response = _find_best_opponent_response(board, engine)
     
     if opponent_response is None:
         return []
@@ -103,7 +130,7 @@ def _find_forcing_continuation(
         return [opponent_response.uci()]
     
     # Now it's player's turn again - find their forcing continuation
-    player_continuation = _find_player_forcing_move(board_after_response, player_color)
+    player_continuation = _find_player_forcing_move(board_after_response, player_color, engine)
     
     if player_continuation is None:
         # No clear continuation - puzzle ends here
@@ -120,20 +147,18 @@ def _find_forcing_continuation(
         return result
     
     # Recurse for more continuation
-    further = _find_forcing_continuation(board_after_player, player_color, remaining_depth - 2)
+    further = _find_forcing_continuation(board_after_player, player_color, remaining_depth - 2, engine)
     result.extend(further)
     
     return result
 
 
-def _find_best_opponent_response(board: chess.Board) -> Optional[chess.Move]:
+def _find_best_opponent_response(
+    board: chess.Board, 
+    engine: chess.engine.SimpleEngine
+) -> Optional[chess.Move]:
     """
-    Find the opponent's best response to a forcing move.
-    
-    In a puzzle context, opponent plays the "best defense" which is usually:
-    - The only legal move (if in check with one escape)
-    - The most stubborn defense (delays mate longest)
-    - A move that doesn't immediately lose more material
+    Find the opponent's best response to a forcing move using Stockfish.
     """
     legal_moves = list(board.legal_moves)
     
@@ -144,161 +169,72 @@ def _find_best_opponent_response(board: chess.Board) -> Optional[chess.Move]:
     if len(legal_moves) == 1:
         return legal_moves[0]
     
-    # If in check, find the best escape
-    if board.is_check():
-        return _find_best_check_escape(board, legal_moves)
-    
-    # Otherwise, find the most reasonable defense
-    return _find_most_stubborn_defense(board, legal_moves)
+    try:
+        # Use a slightly higher time limit to ensure good defense
+        result = engine.play(board, chess.engine.Limit(time=0.2))
+        return result.move
+    except Exception:
+        return None
 
 
-def _find_best_check_escape(board: chess.Board, legal_moves: List[chess.Move]) -> Optional[chess.Move]:
-    """Find the best way to escape check."""
-    best_move = None
-    best_score = -100000
-    
-    for move in legal_moves:
-        score = _evaluate_defense_move(board, move)
-        if score > best_score:
-            best_score = score
-            best_move = move
-    
-    return best_move
-
-
-def _find_most_stubborn_defense(board: chess.Board, legal_moves: List[chess.Move]) -> Optional[chess.Move]:
-    """Find the most stubborn defensive move."""
-    # Score each move and return the best one
-    best_move = None
-    best_score = -100000
-    
-    for move in legal_moves:
-        score = _evaluate_defense_move(board, move)
-        if score > best_score:
-            best_score = score
-            best_move = move
-    
-    return best_move
-
-
-def _evaluate_defense_move(board: chess.Board, move: chess.Move) -> int:
+def _find_player_forcing_move(
+    board: chess.Board, 
+    player_color: chess.Color,
+    engine: chess.engine.SimpleEngine
+) -> Optional[chess.Move]:
     """
-    Evaluate a defensive move for the opponent.
+    Find the player's forcing continuation move using Stockfish.
     
-    Higher score = better defense.
-    """
-    score = 0
-    board_after = board.copy()
-    board_after.push(move)
-    
-    # Immediate checkmate is worst
-    if board_after.is_checkmate():
-        return -10000
-    
-    # Being in check after is bad
-    if board_after.is_check():
-        score -= 500
-    
-    # King move when not necessary is usually bad
-    piece = board.piece_at(move.from_square)
-    if piece and piece.piece_type == chess.KING:
-        score -= 50
-    
-    # Blocking with a valuable piece is bad
-    if piece and piece.piece_type in (chess.QUEEN, chess.ROOK):
-        score -= 100
-    
-    # Capturing the attacker is good
-    if board.is_capture(move):
-        captured = board.piece_at(move.to_square)
-        if captured:
-            score += _piece_value(captured.piece_type)
-    
-    return score
-
-
-def _find_player_forcing_move(board: chess.Board, player_color: chess.Color) -> Optional[chess.Move]:
-    """
-    Find the player's forcing continuation move.
-    
-    A move is "forcing" if:
-    - It's checkmate
-    - It's check (with a clear follow-up)
-    - It wins significant material with no good defense
+    Returns the best move if it is a check, capture, or leads to mate.
     """
     if board.turn != player_color:
         return None
     
-    legal_moves = list(board.legal_moves)
-    
-    # First, look for checkmate
-    for move in legal_moves:
+    try:
+        # Get best move
+        result = engine.play(board, chess.engine.Limit(time=0.2))
+        best_move = result.move
+        
+        if not best_move:
+            return None
+            
+        # Check if we should continue the line
+        # We continue if the best move is forcing (check, capture, or mate)
+        
+        # Check for mate
         board_after = board.copy()
-        board_after.push(move)
+        board_after.push(best_move)
         if board_after.is_checkmate():
-            return move
-    
-    # Look for forcing checks that lead to mate or material
-    best_check = None
-    best_check_score = 0
-    
-    for move in legal_moves:
-        if board.gives_check(move):
-            score = _evaluate_forcing_move(board, move)
-            if score > best_check_score:
-                best_check_score = score
-                best_check = move
-    
-    if best_check and best_check_score >= 300:  # At least minor piece equivalent
-        return best_check
-    
-    # Look for winning captures
-    best_capture = None
-    best_capture_score = 0
-    
-    for move in legal_moves:
-        if board.is_capture(move):
-            score = _evaluate_forcing_move(board, move)
-            if score > best_capture_score:
-                best_capture_score = score
-                best_capture = move
-    
-    if best_capture and best_capture_score >= 300:
-        return best_capture
-    
-    return None
+            return best_move
+            
+        # Check for check
+        if board.gives_check(best_move):
+            return best_move
+            
+        # Check for capture
+        if board.is_capture(best_move):
+            return best_move
+            
+        # If it's a quiet move, we generally stop the puzzle line here
+        # unless we want to support quiet moves in puzzles (which can be hard)
+        return None
+        
+    except Exception:
+        return None
 
 
-def _evaluate_forcing_move(board: chess.Board, move: chess.Move) -> int:
-    """Evaluate how forcing/strong a move is."""
-    score = 0
-    board_after = board.copy()
-    board_after.push(move)
-    
-    # Checkmate is best
-    if board_after.is_checkmate():
-        return 10000
-    
-    # Check is good
-    if board.gives_check(move):
-        score += 200
-    
-    # Capture value
-    if board.is_capture(move):
-        captured = board.piece_at(move.to_square)
-        if captured:
-            score += _piece_value(captured.piece_type)
-    
-    # Promotion is very good
-    if move.promotion:
-        score += 800
-    
-    # Check if opponent has limited responses
-    num_responses = len(list(board_after.legal_moves))
-    if num_responses <= 2:
-        score += 100
-    
-    return score
+def _piece_value(piece_type: int) -> int:
+    """Get piece value in centipawns."""
+    values = {
+        chess.PAWN: 100,
+        chess.KNIGHT: 320,
+        chess.BISHOP: 330,
+        chess.ROOK: 500,
+        chess.QUEEN: 900,
+        chess.KING: 0,
+    }
+    return values.get(piece_type, 0)
+
 
 
 def _piece_value(piece_type: int) -> int:
