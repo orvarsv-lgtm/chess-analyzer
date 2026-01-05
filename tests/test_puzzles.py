@@ -676,5 +676,89 @@ class TestPuzzleExplanation(unittest.TestCase):
         self.assertEqual(len(set(explanations)), 1)
 
 
+class TestSolutionLine(unittest.TestCase):
+    """Tests for multi-move solution line computation."""
+    
+    def test_single_move_no_continuation(self):
+        """Test that a simple non-forcing move returns single move."""
+        from puzzles.solution_line import compute_solution_line
+        
+        # Starting position, e4 is not forcing
+        fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        solution = compute_solution_line(fen, "e2e4")
+        
+        self.assertEqual(solution, ["e2e4"])
+    
+    def test_checkmate_in_one_no_continuation(self):
+        """Test that immediate checkmate returns single move."""
+        from puzzles.solution_line import compute_solution_line
+        
+        # Back rank mate: Qd1 is mate
+        fen = "6k1/5ppp/8/8/8/8/5PPP/3Q2K1 w - - 0 1"
+        solution = compute_solution_line(fen, "d1d8")
+        
+        self.assertEqual(solution, ["d1d8"])
+    
+    def test_mate_in_two_continuation(self):
+        """Test that check leading to mate extends the solution."""
+        from puzzles.solution_line import compute_solution_line
+        
+        # Back rank mate: Qc8+ Rxc8 Rxc8#
+        fen = "r5k1/5ppp/2Q5/8/8/8/5PPP/2R3K1 w - - 0 1"
+        solution = compute_solution_line(fen, "c6c8")
+        
+        # Should be: Qc8+, Rxc8, Rxc8#
+        self.assertEqual(len(solution), 3)
+        self.assertEqual(solution[0], "c6c8")  # Qc8+
+        self.assertEqual(solution[1], "a8c8")  # Rxc8 (forced)
+        self.assertEqual(solution[2], "c1c8")  # Rxc8#
+    
+    def test_solution_line_deterministic(self):
+        """Test that solution line computation is deterministic."""
+        from puzzles.solution_line import compute_solution_line
+        
+        fen = "6k1/5ppp/6Q1/8/8/8/8/6K1 w - - 0 1"
+        
+        results = []
+        for _ in range(5):
+            solution = compute_solution_line(fen, "g6h7")
+            results.append(tuple(solution))
+        
+        # All results should be identical
+        self.assertEqual(len(set(results)), 1)
+    
+    def test_is_multi_move_puzzle(self):
+        """Test multi-move puzzle detection."""
+        from puzzles.solution_line import is_multi_move_puzzle
+        
+        # Simple non-forcing move
+        fen_simple = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        self.assertFalse(is_multi_move_puzzle(fen_simple, "e2e4"))
+        
+        # Mate in one - single move
+        fen_mate1 = "6k1/5ppp/8/8/8/8/5PPP/3Q2K1 w - - 0 1"
+        self.assertFalse(is_multi_move_puzzle(fen_mate1, "d1d8"))
+    
+    def test_get_solution_with_responses(self):
+        """Test splitting solution into player/opponent moves."""
+        from puzzles.solution_line import get_solution_with_responses
+        
+        solution = ["e2e4", "e7e5", "g1f3", "b8c6", "f1b5"]
+        player, opponent = get_solution_with_responses(solution)
+        
+        self.assertEqual(player, ["e2e4", "g1f3", "f1b5"])
+        self.assertEqual(opponent, ["e7e5", "b8c6"])
+    
+    def test_empty_solution(self):
+        """Test handling of invalid/empty inputs."""
+        from puzzles.solution_line import compute_solution_line
+        
+        # Invalid move
+        fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        solution = compute_solution_line(fen, "a1a8")  # Illegal
+        
+        self.assertEqual(solution, ["a1a8"])  # Returns as-is
+
+
 if __name__ == "__main__":
     unittest.main()

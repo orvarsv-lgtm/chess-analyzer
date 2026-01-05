@@ -8,6 +8,7 @@ import chess
 
 from puzzles.puzzle_types import Puzzle, Difficulty
 from puzzles.puzzle_engine import generate_puzzle_explanation
+from puzzles.solution_line import compute_solution_line
 
 
 @dataclass(frozen=True)
@@ -15,7 +16,7 @@ class PuzzleDefinition:
     """Puzzle schema required by the JS board UI."""
 
     fen: str
-    solution_moves: List[str]  # UCI moves
+    solution_moves: List[str]  # UCI moves - alternating player/opponent/player/...
     theme: str
     difficulty: int
     explanation: str = ""
@@ -44,6 +45,9 @@ def from_legacy_puzzle(p: Puzzle) -> PuzzleDefinition:
         uci = p.best_move_uci
     else:
         uci = _san_to_uci_cached(p.fen, p.best_move_san)
+
+    # Compute full solution line (may be multi-move for forcing sequences)
+    solution_moves = compute_solution_line(p.fen, uci)
 
     # Guarantee explanation presence (backward compatible with legacy puzzles).
     explanation = getattr(p, "explanation", None)
@@ -74,7 +78,7 @@ def from_legacy_puzzle(p: Puzzle) -> PuzzleDefinition:
 
     return PuzzleDefinition(
         fen=p.fen,
-        solution_moves=[uci],
+        solution_moves=solution_moves,
         theme=p.puzzle_type.value,
         difficulty=_difficulty_to_int(p.difficulty),
         explanation=explanation or "Explanation unavailable for this puzzle.",
