@@ -34,6 +34,34 @@ BASE_DIR = os.path.dirname(__file__)
 OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
 
 
+def _get_build_id() -> str:
+    """Best-effort build identifier for debugging deployments."""
+    for key in (
+        "GITHUB_SHA",
+        "STREAMLIT_GIT_COMMIT",
+        "RENDER_GIT_COMMIT",
+        "HEROKU_SLUG_COMMIT",
+    ):
+        v = (os.getenv(key) or "").strip()
+        if v:
+            return v[:7]
+
+    # Try reading local .git metadata (available in many deployments)
+    try:
+        head_path = os.path.join(BASE_DIR, ".git", "HEAD")
+        with open(head_path, "r", encoding="utf-8") as f:
+            head = (f.read() or "").strip()
+        if head.startswith("ref:"):
+            ref = head.split(" ", 1)[1].strip()
+            ref_path = os.path.join(BASE_DIR, ".git", ref)
+            with open(ref_path, "r", encoding="utf-8") as f:
+                sha = (f.read() or "").strip()
+            return sha[:7] if sha else "unknown"
+        return head[:7] if head else "unknown"
+    except Exception:
+        return "unknown"
+
+
 # Load opening data as DataFrame (tab-separated)
 @st.cache_data(show_spinner=False)
 def load_opening_db() -> pd.DataFrame:
@@ -1522,6 +1550,7 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     """Render the puzzle training tab."""
     st.header("♟️ Chess Puzzles")
     st.caption("Practice tactical patterns from your analyzed games • No AI - purely engine-derived")
+    st.caption(f"Build: {_get_build_id()}")
     
     games = aggregated.get("games", [])
     
