@@ -1392,20 +1392,31 @@ def main() -> None:
             st.session_state["analysis_result"] = aggregated
 
     else:
-        uploaded = st.file_uploader("Upload PGN", type=["pgn"])
+        uploaded_files = st.file_uploader("Upload PGN", type=["pgn"], accept_multiple_files=True)
         if st.button("Run analysis"):
-            if not uploaded:
-                st.error("Please upload a PGN file.")
+            if not uploaded_files:
+                st.error("Please upload at least one PGN file.")
                 return
 
-            try:
-                pgn_text = uploaded.read().decode("utf-8", errors="ignore")
-            except Exception as e:
-                st.error(str(e))
-                st.stop()
+            combined_games: list[Any] = []
+            total_events = 0
 
-            games_inputs = _split_pgn_into_games(pgn_text, max_games=max_games)
-            num_games_in_pgn = max(pgn_text.count("[Event "), len(games_inputs))
+            for uploaded in uploaded_files:
+                try:
+                    pgn_text = uploaded.read().decode("utf-8", errors="ignore")
+                except Exception as e:
+                    st.error(f"Failed to read {uploaded.name}: {e}")
+                    st.stop()
+
+                total_events += pgn_text.count("[Event ")
+                combined_games.extend(_split_pgn_into_games(pgn_text, max_games=max_games))
+
+            if not combined_games:
+                st.error("No games found in uploaded files.")
+                return
+
+            games_inputs = combined_games
+            num_games_in_pgn = max(total_events, len(games_inputs))
             games_to_analyze = min(len(games_inputs), int(max_games))
             st.session_state["analysis_request"] = {
                 "source": "upload",
