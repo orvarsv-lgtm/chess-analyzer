@@ -13,8 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Any
 import hashlib
+import os
+import shutil
 
 import chess
+import chess.engine
 
 from .puzzle_types import Puzzle, PuzzleType, Difficulty
 from .difficulty import classify_difficulty
@@ -361,6 +364,43 @@ def _format_attacked_pieces(attacked: list) -> str:
 # =============================================================================
 
 
+def _resolve_stockfish_cmd() -> str | None:
+    """Return a usable Stockfish command/path, or None if not found."""
+    env_path = (os.getenv("STOCKFISH_PATH") or "").strip()
+    if env_path and os.path.exists(env_path):
+        return env_path
+
+    for p in (
+        "/opt/homebrew/bin/stockfish",  # macOS (Homebrew on Apple Silicon)
+        "/usr/local/bin/stockfish",     # macOS (Homebrew on Intel)
+        "/usr/bin/stockfish",           # Linux
+        "/usr/games/stockfish",         # Debian/Ubuntu
+    ):
+        if os.path.exists(p):
+            return p
+
+    found = shutil.which("stockfish")
+    return found
+
+
+def _open_stockfish_engine() -> chess.engine.SimpleEngine | None:
+    cmd = _resolve_stockfish_cmd()
+    if not cmd:
+        return None
+    try:
+        return chess.engine.SimpleEngine.popen_uci(cmd)
+    except Exception:
+        return None
+
+
+def _best_move_from_engine(board: chess.Board, engine: chess.engine.SimpleEngine, depth: int = 12) -> chess.Move | None:
+    try:
+        result = engine.play(board, chess.engine.Limit(depth=int(depth)))
+        return result.move
+    except Exception:
+        return None
+
+
 def _calculate_best_move_from_analysis(
     move_evals: List[dict],
     game_index: int,
@@ -427,146 +467,166 @@ class PuzzleGenerator:
         
         # Track board state as we replay the game
         board = chess.Board()
-        
-        for idx, move_eval in enumerate(move_evals):
-            san = move_eval.get("san") or ""
-            cp_loss = int(move_eval.get("cp_loss") or 0)
-            phase = move_eval.get("phase") or "middlegame"
-            move_num = int(move_eval.get("move_num") or ((idx // 2) + 1))
-            eval_before = move_eval.get("eval_before")
-            eval_after = move_eval.get("eval_after")
-            
-            # Skip if doesn't meet threshold
-            if cp_loss < self.min_eval_loss:
-                # Push move and continue
-                try:
-                    move = board.parse_san(san)
-                    board.push(move)
-                except Exception:
-                    pass
-                continue
-            
-            # Determine side to move from board state
-            side_to_move = "white" if board.turn == chess.WHITE else "black"
-            
-            # Filter by focus color if specified
-            if focus_color and side_to_move != focus_color:
-                try:
-                    move = board.parse_san(san)
-                    board.push(move)
-                except Exception:
-                    pass
-                continue
-            
-            # Get FEN before the move (puzzle position)
-            fen_before = board.fen()
-            
-            # Try to parse the played move
-            try:
-                played_move = board.parse_san(san)
-            except Exception:
-                continue
-            
-            # Generate best move from position
-            # Since we don't have engine access here, we need to rely on
-            # pre-computed best moves in the analysis data, OR use a heuristic
-            best_move_san = move_eval.get("best_move_san") or move_eval.get("best_move")
-            best_move_uci = move_eval.get("best_move_uci")
-            
-            # If best move not in data, try to find it via simple heuristics
-            if not best_move_san:
-                best_move_san = self._find_best_move_heuristic(board, played_move)
-            
-            if not best_move_san:
-                # Can't determine best move, skip this puzzle
-                try:
-                    board.push(played_move)
-                except Exception:
-                    pass
-                continue
-            
-            # Verify best move is legal
-            if self.require_legal_best_move:
-                try:
-                    best_move = board.parse_san(best_move_san)
-                    if best_move not in board.legal_moves:
-                        board.push(played_move)
-                        continue
-                except Exception:
-                    board.push(played_move)
+
+        # Best-effort engine for best-move selection when analysis data doesn't include it.
+        engine = _open_stockfish_engine()
+        engine_depth = 12
+
+        try:
+            for idx, move_eval in enumerate(move_evals):
+                san = move_eval.get("san") or ""
+                cp_loss = int(move_eval.get("cp_loss") or 0)
+                phase = move_eval.get("phase") or "middlegame"
+                move_num = int(move_eval.get("move_num") or ((idx // 2) + 1))
+                eval_before = move_eval.get("eval_before")
+                eval_after = move_eval.get("eval_after")
+
+                # Skip if doesn't meet threshold
+                if cp_loss < self.min_eval_loss:
+                    # Push move and continue
+                    try:
+                        move = board.parse_san(san)
+                        board.push(move)
+                    except Exception:
+                        pass
                     continue
 
-            # Ensure we always have UCI for the best move when possible.
-            if not best_move_uci:
+                # Determine side to move from board state
+                side_to_move = "white" if board.turn == chess.WHITE else "black"
+
+                # Filter by focus color if specified
+                if focus_color and side_to_move != focus_color:
+                    try:
+                        move = board.parse_san(san)
+                        board.push(move)
+                    except Exception:
+                        pass
+                    continue
+
+                # Get FEN before the move (puzzle position)
+                fen_before = board.fen()
+
+                # Try to parse the played move
                 try:
-                    best_move_uci = board.parse_san(best_move_san).uci()
+                    played_move = board.parse_san(san)
                 except Exception:
-                    best_move_uci = None
-            
-            # Classify puzzle type
-            try:
-                best_move_obj = board.parse_san(best_move_san)
-                puzzle_type = _classify_puzzle_type(
-                    board=board,
-                    best_move=best_move_obj,
-                    played_move=played_move,
+                    continue
+
+                # Generate best move from position.
+                # Priority:
+                # 1) pre-computed best move from analysis data (engine-derived)
+                # 2) local Stockfish best move (engine-derived)
+                # 3) heuristic fallback (last resort)
+                best_move_san = move_eval.get("best_move_san") or move_eval.get("best_move")
+                best_move_uci = move_eval.get("best_move_uci")
+
+                if not best_move_san and engine is not None:
+                    mv = _best_move_from_engine(board, engine, depth=engine_depth)
+                    if mv is not None and mv in board.legal_moves:
+                        try:
+                            best_move_san = board.san(mv)
+                            best_move_uci = mv.uci()
+                        except Exception:
+                            best_move_san = None
+
+                # If we still don't have a best move, we cannot create a valid puzzle.
+                # User requirement: correct moves must be Stockfish-derived (no heuristic fallback).
+                if not best_move_san:
+                    # Can't determine best move via analysis data or Stockfish, skip this puzzle
+                    try:
+                        board.push(played_move)
+                    except Exception:
+                        pass
+                    continue
+
+                # Verify best move is legal
+                if self.require_legal_best_move:
+                    try:
+                        best_move = board.parse_san(best_move_san)
+                        if best_move not in board.legal_moves:
+                            board.push(played_move)
+                            continue
+                    except Exception:
+                        board.push(played_move)
+                        continue
+
+                # Ensure we always have UCI for the best move when possible.
+                if not best_move_uci:
+                    try:
+                        best_move_uci = board.parse_san(best_move_san).uci()
+                    except Exception:
+                        best_move_uci = None
+
+                # Classify puzzle type
+                try:
+                    best_move_obj = board.parse_san(best_move_san)
+                    puzzle_type = _classify_puzzle_type(
+                        board=board,
+                        best_move=best_move_obj,
+                        played_move=played_move,
+                        eval_loss_cp=cp_loss,
+                        phase=phase,
+                        move_number=move_num,
+                    )
+                except Exception:
+                    puzzle_type = PuzzleType.MISSED_TACTIC
+
+                # Classify difficulty
+                difficulty = classify_difficulty(
+                    fen=fen_before,
+                    best_move_san=best_move_san,
                     eval_loss_cp=cp_loss,
                     phase=phase,
-                    move_number=move_num,
                 )
-            except Exception:
-                puzzle_type = PuzzleType.MISSED_TACTIC
-            
-            # Classify difficulty
-            difficulty = classify_difficulty(
-                fen=fen_before,
-                best_move_san=best_move_san,
-                eval_loss_cp=cp_loss,
-                phase=phase,
-            )
-            
-            # Generate puzzle explanation (deterministic, based on position analysis)
-            try:
-                explanation = generate_puzzle_explanation(
-                    board=board,
-                    best_move=best_move_obj,
+
+                # Generate puzzle explanation (deterministic, based on position analysis)
+                try:
+                    explanation = generate_puzzle_explanation(
+                        board=board,
+                        best_move=best_move_obj,
+                        eval_loss_cp=cp_loss,
+                        puzzle_type=puzzle_type,
+                        phase=phase,
+                    )
+                except Exception:
+                    explanation = "Find the best move in this position."
+
+                # Generate puzzle ID
+                puzzle_id = f"{game_index}_{move_num}_{side_to_move}"
+
+                # Create puzzle
+                puzzle = Puzzle(
+                    puzzle_id=puzzle_id,
+                    fen=fen_before,
+                    side_to_move=side_to_move,
+                    best_move_san=best_move_san,
+                    played_move_san=san,
                     eval_loss_cp=cp_loss,
+                    phase=phase,
                     puzzle_type=puzzle_type,
-                    phase=phase,
+                    difficulty=difficulty,
+                    source_game_index=game_index,
+                    move_number=move_num,
+                    eval_before=eval_before if isinstance(eval_before, int) else None,
+                    eval_after=eval_after if isinstance(eval_after, int) else None,
+                    best_move_uci=best_move_uci,
+                    explanation=explanation,
                 )
-            except Exception:
-                explanation = "Find the best move in this position."
-            
-            # Generate puzzle ID
-            puzzle_id = f"{game_index}_{move_num}_{side_to_move}"
-            
-            # Create puzzle
-            puzzle = Puzzle(
-                puzzle_id=puzzle_id,
-                fen=fen_before,
-                side_to_move=side_to_move,
-                best_move_san=best_move_san,
-                played_move_san=san,
-                eval_loss_cp=cp_loss,
-                phase=phase,
-                puzzle_type=puzzle_type,
-                difficulty=difficulty,
-                source_game_index=game_index,
-                move_number=move_num,
-                eval_before=eval_before if isinstance(eval_before, int) else None,
-                eval_after=eval_after if isinstance(eval_after, int) else None,
-                best_move_uci=best_move_uci,
-                explanation=explanation,
-            )
-            
-            puzzles.append(puzzle)
-            
-            # Push the played move to continue
-            try:
-                board.push(played_move)
-            except Exception:
-                pass
-        
+
+                puzzles.append(puzzle)
+
+                # Push the played move to continue
+                try:
+                    board.push(played_move)
+                except Exception:
+                    pass
+        finally:
+            if engine is not None:
+                try:
+                    engine.quit()
+                except Exception:
+                    pass
+
         return puzzles
     
     def _find_best_move_heuristic(

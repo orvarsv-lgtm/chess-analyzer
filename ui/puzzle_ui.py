@@ -33,6 +33,11 @@ class PuzzleProgress:
     # Dynamic solution line (allows alternate-but-viable moves)
     active_solution_moves: Optional[List[str]] = None
 
+    # Reveal-answer UI state
+    reveal_answer: bool = False
+    reveal_puzzle_index: Optional[int] = None
+    reveal_solution_move_index: Optional[int] = None
+
 
 _STATE_KEY = "puzzle_progress_v2"
 
@@ -57,6 +62,9 @@ def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
     progress.solution_move_index = 0
     progress.opponent_just_moved = False
     progress.active_solution_moves = None
+    progress.reveal_answer = False
+    progress.reveal_puzzle_index = None
+    progress.reveal_solution_move_index = None
 
 
 def _open_stockfish_engine() -> chess.engine.SimpleEngine:
@@ -370,6 +378,34 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         st.write(f"Solved: **{progress.solved}**")
 
         show_explanation = st.checkbox("📖 Show explanation", key="puzzle_show_explanation_v2")
+
+        # Reveal answer (next required move) without advancing the puzzle.
+        reveal_cols = st.columns(1)
+        with reveal_cols[0]:
+            if st.button("Reveal answer", width="stretch"):
+                progress.reveal_answer = True
+                progress.reveal_puzzle_index = progress.current_index
+                progress.reveal_solution_move_index = progress.solution_move_index
+
+        if (
+            progress.reveal_answer
+            and progress.reveal_puzzle_index == progress.current_index
+            and progress.reveal_solution_move_index == progress.solution_move_index
+            and progress.last_result != "correct"
+        ):
+            expected_uci = (
+                solution_moves[progress.solution_move_index]
+                if progress.solution_move_index < len(solution_moves)
+                else None
+            )
+            if expected_uci:
+                try:
+                    b = chess.Board(board_fen)
+                    mv = chess.Move.from_uci(expected_uci)
+                    expected_san = b.san(mv) if mv in b.legal_moves else expected_uci
+                except Exception:
+                    expected_san = expected_uci
+                st.info(f"Answer: **{expected_san}** ({expected_uci})")
 
         if progress.last_result == "correct":
             st.success("Correct!" if total_player_moves == 1 else f"Correct! ({total_player_moves} moves)")
