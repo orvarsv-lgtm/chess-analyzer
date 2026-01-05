@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import math
+import time
 from dataclasses import dataclass
 from io import StringIO
 from typing import Any, List
@@ -713,7 +714,7 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-def _post_to_engine(pgn_text: str, max_games: int) -> dict:
+def _post_to_engine(pgn_text: str, max_games: int, *, retries: int = 2) -> dict:
     url, api_key = _get_engine_endpoint()
     if not url:
         raise RuntimeError("Engine endpoint not configured")
@@ -737,37 +738,69 @@ def _post_to_engine(pgn_text: str, max_games: int) -> dict:
         st.error(f"Invalid payload keys: {sorted(payload.keys())}. Expected ['max_games', 'pgn']")
         st.stop()
 
-    resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
-
-    if resp.status_code == 403:
-        raise RuntimeError("VPS Authentication Failed")
-    if resp.status_code == 422:
-        st.error("Engine rejected request (422 Validation Error)")
-        st.info(
-            "Backend contract mismatch: the server at this URL is not accepting JSON bodies. "
-            "It is requiring multipart/form-data with a required 'file' field (confirmed by /openapi.json and by a direct JSON POST).\n\n"
-            "To satisfy the project rule (PGN text only; keys ['pgn','max_games']), you must either:\n"
-            "1) Point VPS_ANALYSIS_URL at the correct JSON-accepting backend, or\n"
-            "2) Update the FastAPI backend /analyze_game endpoint to accept application/json with a body containing 'pgn' and 'max_games'."
-        )
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
         try:
-            st.json(resp.json())
-        except Exception:
-            st.write(resp.text)
-        st.stop()
-    if resp.status_code == 404:
-        raise RuntimeError(f"Engine endpoint not found: {endpoint}. Check FastAPI route definition.")
-    if not resp.ok:
-        raise RuntimeError(f"Engine analysis failed (status {resp.status_code})")
+            resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
+        except Exception as e:
+            last_exc = e
+            if attempt < retries:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            raise
 
-    return resp.json()
+        if resp.status_code == 403:
+            raise RuntimeError("VPS Authentication Failed")
+        if resp.status_code == 422:
+            st.error("Engine rejected request (422 Validation Error)")
+            st.info(
+                "Backend contract mismatch: the server at this URL is not accepting JSON bodies. "
+                "It is requiring multipart/form-data with a required 'file' field (confirmed by /openapi.json and by a direct JSON POST).\n\n"
+                "To satisfy the project rule (PGN text only; keys ['pgn','max_games']), you must either:\n"
+                "1) Point VPS_ANALYSIS_URL at the correct JSON-accepting backend, or\n"
+                "2) Update the FastAPI backend /analyze_game endpoint to accept application/json with a body containing 'pgn' and 'max_games'."
+            )
+            try:
+                st.json(resp.json())
+            except Exception:
+                st.write(resp.text)
+            st.stop()
+        if resp.status_code == 404:
+            raise RuntimeError(
+                f"Engine endpoint not found: {endpoint}. Check FastAPI route definition."
+            )
+        if not resp.ok:
+            # Retry transient server errors.
+            if resp.status_code in {500, 502, 503, 504} and attempt < retries:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            body_preview = (resp.text or "").strip().replace("\n", " ")
+            if len(body_preview) > 500:
+                body_preview = body_preview[:500] + "…"
+            raise RuntimeError(
+                f"Engine analysis failed (status {resp.status_code}). "
+                + (f"Response: {body_preview}" if body_preview else "")
+            )
+
+        return resp.json()
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Engine analysis failed")
 
 
 def _validate_engine_response(data: dict) -> dict:
     if not isinstance(data, dict):
         raise RuntimeError("Invalid engine response: expected JSON object")
     if not data.get("success"):
-        raise RuntimeError("Engine reported failure")
+        detail = (
+            data.get("error")
+            or data.get("message")
+            or data.get("detail")
+            or data.get("reason")
+            or "(no error detail provided by engine)"
+        )
+        raise RuntimeError(f"Engine reported failure: {detail}")
     analysis = data.get("analysis")
     if not analysis:
         raise RuntimeError("Engine returned no analysis")
@@ -1340,8 +1373,22 @@ def main() -> None:
                     resp = _post_to_engine(gi.pgn, max_games=1)
                     valid = _validate_engine_response(resp)
                 except Exception as e:
-                    st.error(str(e))
-                    st.stop()
+                    if "failed_games" not in st.session_state:
+                        st.session_state["failed_games"] = []
+                    st.session_state["failed_games"].append(
+                        {
+                            "run_source": "lichess",
+                            "i": i,
+                            "game_index": gi.index,
+                            "white": gi.headers.get("White") or "",
+                            "black": gi.headers.get("Black") or "",
+                            "date": gi.headers.get("UTCDate") or gi.headers.get("Date") or "",
+                            "error": str(e),
+                        }
+                    )
+                    status.warning(f"Skipping game {i} due to engine error. Continuing...")
+                    progress.progress(int((i / games_to_analyze) * 100))
+                    continue
 
                 rows = valid.get("analysis", []) or []
                 # Build per-game rows table + phase stats
@@ -1452,8 +1499,22 @@ def main() -> None:
                     resp = _post_to_engine(gi.pgn, max_games=1)
                     valid = _validate_engine_response(resp)
                 except Exception as e:
-                    st.error(str(e))
-                    st.stop()
+                    if "failed_games" not in st.session_state:
+                        st.session_state["failed_games"] = []
+                    st.session_state["failed_games"].append(
+                        {
+                            "run_source": "upload",
+                            "i": i,
+                            "game_index": gi.index,
+                            "white": gi.headers.get("White") or "",
+                            "black": gi.headers.get("Black") or "",
+                            "date": gi.headers.get("UTCDate") or gi.headers.get("Date") or "",
+                            "error": str(e),
+                        }
+                    )
+                    status.warning(f"Skipping game {i} due to engine error. Continuing...")
+                    progress.progress(int((i / games_to_analyze) * 100))
+                    continue
 
                 rows = valid.get("analysis", []) or []
                 focus_color = _infer_focus_color(gi.headers, focus_player)
@@ -1497,6 +1558,11 @@ def main() -> None:
                 moves_counter.write(f"Total moves analyzed: {len(aggregated_rows)}")
 
             status.success("Backend status: 200 OK")
+
+            failed = st.session_state.get("failed_games") or []
+            if failed:
+                st.warning(f"Skipped {len(failed)} game(s) due to engine errors.")
+                st.dataframe(failed, width="stretch")
 
             aggregated = _aggregate_postprocessed_results(aggregated_games)
             aggregated["focus_player"] = focus_player  # Pass through for analytics
