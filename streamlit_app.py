@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import math
 import time
+import hashlib
 from dataclasses import dataclass
 from io import StringIO
 from typing import Any, List
@@ -1645,6 +1646,41 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     if not games:
         st.info("No games analyzed yet. Run an analysis to generate puzzles!")
         return
+
+    def _games_signature(gs: list[dict[str, Any]]) -> str:
+        """Create a stable-ish signature for the current analyzed game set.
+
+        Used to invalidate cached puzzles when the user analyzes a different
+        file/user/session.
+        """
+        h = hashlib.sha1()
+        h.update(str(len(gs)).encode("utf-8"))
+        # Sample a prefix to keep it cheap; enough to detect different imports.
+        for g in (gs[:25] if isinstance(gs, list) else []):
+            if not isinstance(g, dict):
+                continue
+            for k in ("game_id", "id", "url", "site", "created_at", "date", "white", "black", "result"):
+                v = g.get(k)
+                if v is None:
+                    continue
+                h.update(str(v).encode("utf-8"))
+                h.update(b"|")
+            moves = g.get("moves") or g.get("moves_san") or g.get("pgn_moves")
+            if isinstance(moves, list):
+                moves = " ".join(str(m) for m in moves[:12])
+            if isinstance(moves, str):
+                h.update(moves[:120].encode("utf-8"))
+                h.update(b"|")
+        return h.hexdigest()[:12]
+
+    games_sig = _games_signature(games)
+    prev_sig = st.session_state.get("generated_puzzles_sig")
+    if prev_sig != games_sig:
+        # New analysis input -> regenerate puzzles + reset puzzle UI caches.
+        st.session_state["generated_puzzles_sig"] = games_sig
+        st.session_state.pop("generated_puzzles", None)
+        st.session_state.pop("puzzle_progress_v2", None)
+        st.session_state.pop("puzzle_solution_line_cache_v1", None)
     
     # Generate puzzles from analyzed games
     if "generated_puzzles" not in st.session_state:
