@@ -481,7 +481,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             side_to_move=side_to_move,
             highlights=highlights,
             hint=hint,
-            key=f"chessboard_v2_{progress.current_index}_{progress.solution_move_index}_{progress.board_nonce}",
+            key=f"chessboard_v2_{progress.current_index}_{progress.board_nonce}",
         )
 
         # Process move only once (and not if puzzle is complete)
