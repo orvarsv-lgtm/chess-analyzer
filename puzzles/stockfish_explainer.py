@@ -283,17 +283,16 @@ def _detect_mate_threat(board: chess.Board,
                         engine: chess.engine.SimpleEngine) -> Optional[str]:
     """Detect if opponent has a mating threat that must be addressed."""
     try:
-        # Simulate opponent's turn
+        # Simulate opponent's turn via null move
         if board.is_check():
-            return None  # We're in check, different handling
+            return None  # We're in check, can't do null move
         
-        # What if we passed? (null move analysis)
-        # Check opponent's best response
+        # Try to make a null move (pass) to see opponent's threat
         test_board = board.copy()
-        test_board.turn = not test_board.turn
-        
-        if not test_board.is_valid():
-            return None
+        try:
+            test_board.push(chess.Move.null())
+        except Exception:
+            return None  # Null move not legal in this position
         
         info = engine.analyse(test_board, chess.engine.Limit(depth=6))
         score = info.get("score")
@@ -343,22 +342,25 @@ def _detect_tactical_threat(board: chess.Board,
                                 'misconception': f"the {piece_name} seems protected"
                             }
         
-        # Check opponent's best move for tactical threats
-        test_board = board.copy()
-        test_board.turn = not test_board.turn
-        if test_board.is_valid():
-            info = engine.analyse(test_board, chess.engine.Limit(depth=6))
-            pv = info.get("pv", [])
-            if pv:
-                threat = pv[0]
-                captured = test_board.piece_at(threat.to_square)
-                if captured and captured.color == board.turn:
-                    if PIECE_POINTS[captured.piece_type] >= 3:
-                        return {
-                            'description': f"The {PIECE_NAMES[captured.piece_type]} is under attack.",
-                            'square': threat.to_square,
-                            'misconception': "other plans"
-                        }
+        # Check opponent's best move for tactical threats via null move
+        if not board.is_check():
+            test_board = board.copy()
+            try:
+                test_board.push(chess.Move.null())
+                info = engine.analyse(test_board, chess.engine.Limit(depth=6))
+                pv = info.get("pv", [])
+                if pv:
+                    threat = pv[0]
+                    captured = test_board.piece_at(threat.to_square)
+                    if captured and captured.color == board.turn:
+                        if PIECE_POINTS[captured.piece_type] >= 3:
+                            return {
+                                'description': f"The {PIECE_NAMES[captured.piece_type]} is under attack.",
+                                'square': threat.to_square,
+                                'misconception': "other plans"
+                            }
+            except Exception:
+                pass  # Null move failed, skip this check
         
     except Exception:
         pass
@@ -393,23 +395,26 @@ def _detect_king_danger_inevitable(board: chess.Board,
         pawn_shield_weak = _is_pawn_shield_compromised(board, board.turn)
         
         if pawn_shield_weak and attackers_in_zone >= 3:
-            # Check if attack is building - look at opponent's moves
-            test_board = board.copy()
-            test_board.turn = not test_board.turn
-            if test_board.is_valid():
-                info = engine.analyse(test_board, chess.engine.Limit(depth=6))
-                pv = info.get("pv", [])
-                if pv:
-                    threat = pv[0]
-                    # Is opponent bringing more pieces to attack?
-                    moving_piece = test_board.piece_at(threat.from_square)
-                    if moving_piece and threat.to_square in king_zone:
-                        piece_name = PIECE_NAMES[moving_piece.piece_type]
-                        return {
-                            'description': f"The king's pawn cover is weak and opponent is bringing the {piece_name} into the attack.",
-                            'inevitable': True,
-                            'pawn_break': None
-                        }
+            # Check if attack is building - look at opponent's moves via null move
+            if not board.is_check():
+                test_board = board.copy()
+                try:
+                    test_board.push(chess.Move.null())
+                    info = engine.analyse(test_board, chess.engine.Limit(depth=6))
+                    pv = info.get("pv", [])
+                    if pv:
+                        threat = pv[0]
+                        # Is opponent bringing more pieces to attack?
+                        moving_piece = test_board.piece_at(threat.from_square)
+                        if moving_piece and threat.to_square in king_zone:
+                            piece_name = PIECE_NAMES[moving_piece.piece_type]
+                            return {
+                                'description': f"The king's pawn cover is weak and opponent is bringing the {piece_name} into the attack.",
+                                'inevitable': True,
+                                'pawn_break': None
+                            }
+                except Exception:
+                    pass  # Null move failed, skip this check
         
         # Check for unstoppable pawn breaks
         # Look for pawn moves that open lines to our king
