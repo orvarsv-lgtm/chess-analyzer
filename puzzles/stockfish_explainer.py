@@ -1,5 +1,5 @@
 """
-Stockfish-Based Move Explanation Engine (v3 - Position-Level Urgency)
+Stockfish-Based Move Explanation Engine (v3.1 - True Counterfactual Reasoning)
 
 FUNDAMENTAL PRINCIPLE:
 ======================
@@ -8,54 +8,71 @@ Stockfish is the master. Stockfish determines what's best. We explain WHY.
 But the explanation is about THE POSITION'S DEMAND, not the move's benefit.
 
 The key question is NOT: "What good thing does this move do?"
-The key question IS: "What is the worst thing that happens if you play wrong?"
+The key question IS: "What is the FIRST thing that breaks if you DON'T play this move?"
 
-ARCHITECTURAL CHANGE FROM V2:
+ARCHITECTURAL CHANGE FROM V3:
 =============================
-v2: Analyze best move → Find highest-priority benefit → Explain benefit
-v3: Analyze position urgency → Determine what MUST be addressed → Explain how best move addresses it
+v3.0: Analyze position → Find highest-priority threat → Explain how move addresses it
+v3.1: Analyze COUNTERFACTUAL → "What happens if I play something else?" → Explain failure
 
-This means:
-- If position has a mating threat, explanation is about preventing mate
-- Even if the best move ALSO wins material
-- Because the POSITION demands survival first
+This is TRUE DOMINANCE REASONING:
+- We simulate what happens if the best move is NOT played
+- We find the first irreversible consequence in the response chain
+- We explain the move in terms of PREVENTING that consequence
+
+Example (Knight-Bishop-Queen puzzle):
+- Queen is "safe now" (not attacked)
+- v3.0 might say: "Improves the queen to a better square"
+- v3.1 says: "If you don't move the queen, the knight moves and the bishop
+             attacks it. The queen looks safe now, but becomes a target."
 
 CORE CONCEPTS:
 ==============
 
-1. POSITION-LEVEL URGENCY (not move-level benefit)
-   Ask: "If I played a different move, what is the FIRST concrete thing that goes wrong?"
-   That determines the explanation priority - BEFORE analyzing the best move.
+1. COUNTERFACTUAL SIMULATION (the key change)
+   For each puzzle, we ask: "What if the human plays ANY other move?"
+   We simulate the opponent's best response and identify what breaks.
+   
+   The CounterfactualFailure dataclass captures:
+   - failure_type: "mate", "material", "fork", "conditional_threat", etc.
+   - description: Human-readable explanation starting with "If you don't..."
+   - severity: 1=mate, 2=major material, 3=minor material, 4=positional
+   - misconception: Why the human might miss this ("the queen seemed safe")
 
-2. IRREVERSIBILITY (not material thresholds)
+2. CONDITIONAL THREATS (the knight-bishop-queen case)
+   A piece may not be attacked NOW, but becomes attacked after wrong move.
+   We specifically detect when:
+   - Piece was NOT attacked before wrong move
+   - Piece IS attacked after wrong move + opponent's response
+   This is the "looks safe but isn't" case.
+
+3. IRREVERSIBILITY (not material thresholds)
    "Only move" means alternatives permanently concede something unfixable:
    - Forced perpetual allowed
    - Fortress collapsed
    - Opposition lost
    - Key tempo lost in pawn race
-   - Dark square weakness permanent
    NOT just "loses 3 pawns"
 
-3. DYNAMIC INEVITABILITY (not static danger)
-   King safety isn't "is king attacked now?"
-   It's "is attack INEVITABLE with correct play?"
-   - Unstoppable pawn breaks
-   - Sacrifices that force lines open
-   - Zugzwang-like pressure
-
-4. HUMAN MISCONCEPTION (not pattern description)
+4. HUMAN MISCONCEPTION (attack the oversight)
    Don't just describe the tactic.
    Attack WHY the human missed it:
-   - "The rook looks safe, but the back rank is weak"
-   - "You focused on material, but your king was in danger"
+   - "The queen seemed safe because it's not attacked yet"
+   - "You focused on developing, but the threat was building"
 
 5. MECHANISM OF COLLAPSE (not outcome)
    Don't say "position collapses"
-   Say WHICH piece becomes loose, WHICH square becomes weak, WHICH pawn breaks
+   Say WHICH piece becomes loose, WHICH square becomes weak
 
-6. GEOMETRY AND TEMPO (for endgames)
-   Name the specific square, the specific pawn, the specific tempo.
-   Not "activates the king" but "the king reaches d5 before Black's king"
+6. PRIORITY ORDER
+   1. Mate threats (must be addressed)
+   2. Immediate tactical threats (hanging pieces)
+   3. Counterfactual threats (what breaks if you don't play this)
+   4. King safety issues
+   5. Structural collapse
+   6. Endgame critical moments
+   7. Tactical opportunities
+   8. Positional improvements (only if nothing else applies)
 
 VIABLE MOVES WARNING:
 =====================
@@ -174,14 +191,23 @@ class PositionUrgency:
     
     # Human misconception hint
     likely_human_focus: Optional[str] = None  # What the human was probably looking at
+    
+    # COUNTERFACTUAL ANALYSIS (True Dominance)
+    counterfactual_failure: Optional['CounterfactualFailure'] = None
 
 
 def _analyze_position_urgency(board: chess.Board, 
-                               engine: chess.engine.SimpleEngine) -> PositionUrgency:
+                               engine: chess.engine.SimpleEngine,
+                               best_move: Optional[chess.Move] = None) -> PositionUrgency:
     """
     Analyze what the POSITION demands, independent of the best move.
     
     Key question: "What is the worst thing that happens if you play wrong?"
+    
+    ARCHITECTURAL CHANGE (v3.1 - True Counterfactual Reasoning):
+    After checking immediate threats, we now analyze what happens if the best
+    move is NOT played. This catches conditional threats (e.g., piece looks safe
+    but becomes attacked after opponent's response to a wrong move).
     """
     urgency = PositionUrgency()
     
@@ -204,9 +230,12 @@ def _analyze_position_urgency(board: chess.Board,
         best_info = infos[0]
         best_score = best_info.get("score")
         best_pv = best_info.get("pv", [])
-        best_move = best_pv[0] if best_pv else None
+        engine_best_move = best_pv[0] if best_pv else None
         
-        if not best_score or not best_move:
+        # Use provided best_move or engine's best
+        the_best_move = best_move or engine_best_move
+        
+        if not best_score or not the_best_move:
             return urgency
         
         best_cp = best_score.pov(board.turn).score(mate_score=10000)
@@ -231,7 +260,19 @@ def _analyze_position_urgency(board: chess.Board,
             urgency.likely_human_focus = tactical_threat.get('misconception')
             return urgency
         
-        # CHECK 3: Is our king in danger that's about to become critical?
+        # CHECK 3: COUNTERFACTUAL ANALYSIS (True Dominance)
+        # What happens if the best move is NOT played?
+        # This catches conditional threats that don't exist yet but will emerge.
+        counterfactual = _analyze_counterfactual_failure(board, the_best_move, engine)
+        if counterfactual and counterfactual.severity <= 3:
+            urgency.priority = Priority.PREVENT_THREAT
+            urgency.counterfactual_failure = counterfactual
+            urgency.threat_type = counterfactual.failure_type
+            urgency.threat_description = counterfactual.description
+            urgency.likely_human_focus = counterfactual.misconception
+            return urgency
+        
+        # CHECK 4: Is our king in danger that's about to become critical?
         king_danger = _detect_king_danger_inevitable(board, engine)
         if king_danger:
             urgency.priority = Priority.KING_SAFETY_URGENT
@@ -242,7 +283,7 @@ def _analyze_position_urgency(board: chess.Board,
             urgency.likely_human_focus = "the center or material"
             return urgency
         
-        # CHECK 4: Are alternatives structurally collapsing (not just losing eval)?
+        # CHECK 5: Are alternatives structurally collapsing (not just losing eval)?
         collapse = _detect_structural_collapse(board, engine, infos)
         if collapse:
             urgency.priority = Priority.ONLY_MOVE
@@ -251,7 +292,7 @@ def _analyze_position_urgency(board: chess.Board,
             urgency.likely_human_focus = collapse.get('misconception')
             return urgency
         
-        # CHECK 5: Is this a critical endgame moment?
+        # CHECK 6: Is this a critical endgame moment?
         if urgency.is_endgame:
             endgame_critical = _detect_endgame_critical(board, engine)
             if endgame_critical:
@@ -262,13 +303,17 @@ def _analyze_position_urgency(board: chess.Board,
                 urgency.threat_description = endgame_critical['description']
                 return urgency
         
-        # CHECK 6: Is there a tactical opportunity we should seize?
-        tactical_opportunity = _detect_tactical_opportunity(board, best_move, engine)
+        # CHECK 7: Is there a tactical opportunity we should seize?
+        tactical_opportunity = _detect_tactical_opportunity(board, the_best_move, engine)
         if tactical_opportunity:
             urgency.priority = Priority.FORCED_TACTICS
             urgency.threat_description = tactical_opportunity['description']
             urgency.likely_human_focus = tactical_opportunity.get('misconception')
             return urgency
+        
+        # CHECK 8: Store counterfactual even if lower severity (for fallback)
+        if counterfactual:
+            urgency.counterfactual_failure = counterfactual
         
         # Default: positional considerations
         urgency.priority = Priority.POSITIONAL
@@ -374,6 +419,458 @@ def _detect_tactical_threat(board: chess.Board,
                             }
             except Exception:
                 pass
+        
+    except Exception:
+        pass
+    
+    return None
+
+
+# =============================================================================
+# COUNTERFACTUAL FAILURE ANALYSIS (True Dominance Reasoning)
+# =============================================================================
+
+@dataclass
+class CounterfactualFailure:
+    """What goes wrong if the best move is NOT played."""
+    failure_type: str  # "mate", "material", "fork", "pin", "positional"
+    description: str  # Human-readable explanation
+    severity: int  # 1=mate, 2=major material, 3=minor material, 4=positional
+    misconception: Optional[str] = None  # Why human might miss this
+    threat_sequence: Optional[List[str]] = None  # e.g., ["Nf3", "Bxd5+", "Nxe7"]
+
+
+def _analyze_counterfactual_failure(
+    board: chess.Board,
+    best_move: chess.Move,
+    engine: chess.engine.SimpleEngine,
+) -> Optional[CounterfactualFailure]:
+    """
+    TRUE DOMINANCE REASONING: What breaks if the best move is NOT played?
+    
+    This is the key architectural change from move-centric to position-centric reasoning.
+    
+    Instead of asking "what does the best move achieve?", we ask:
+    "What is the FIRST irreversible failure if ANY other move is played?"
+    
+    Algorithm:
+    1. Get alternatives to the best move
+    2. For each alternative, simulate opponent's best response
+    3. Identify the worst consequence in the response chain
+    4. Return the highest-priority failure
+    """
+    try:
+        # Get position eval with best move
+        best_info = engine.analyse(board, chess.engine.Limit(depth=10), multipv=1)
+        best_score = best_info.get("score")
+        if not best_score:
+            return None
+        
+        best_cp = best_score.pov(board.turn).score(mate_score=10000) or 0
+        
+        # Find the most instructive "wrong" move to analyze
+        # We want a move that LOOKS reasonable but fails
+        wrong_move = _find_instructive_wrong_move(board, best_move, engine)
+        if not wrong_move:
+            return None
+        
+        # Simulate: what happens if we play the wrong move?
+        board_after_wrong = board.copy()
+        board_after_wrong.push(wrong_move)
+        
+        # Get opponent's best response and the resulting position
+        opp_info = engine.analyse(board_after_wrong, chess.engine.Limit(depth=10))
+        opp_pv = opp_info.get("pv", [])
+        opp_score = opp_info.get("score")
+        
+        if not opp_pv or not opp_score:
+            return None
+        
+        opp_response = opp_pv[0]
+        
+        # Calculate the swing (how much worse are we after wrong move + response?)
+        # Note: opponent's score is from their perspective, so negate it
+        after_wrong_cp = -opp_score.pov(board_after_wrong.turn).score(mate_score=10000) or 0
+        swing = best_cp - after_wrong_cp
+        
+        if swing < 50:
+            # Not significant enough to explain
+            return None
+        
+        # Now analyze WHAT specifically goes wrong
+        failure = _identify_failure_mechanism(
+            board, best_move, wrong_move, opp_response, opp_pv, swing, engine
+        )
+        
+        return failure
+        
+    except Exception:
+        return None
+
+
+def _find_instructive_wrong_move(
+    board: chess.Board,
+    best_move: chess.Move,
+    engine: chess.engine.SimpleEngine,
+) -> Optional[chess.Move]:
+    """
+    Find a "wrong" move that looks reasonable but fails.
+    
+    This is crucial for explanations: we want to show WHY the human might
+    have considered a different move, and why it doesn't work.
+    
+    Preference order:
+    1. Move that develops/improves the same piece
+    2. Move that achieves something tactical-looking
+    3. Second-best move from engine
+    """
+    try:
+        moving_piece = board.piece_at(best_move.from_square)
+        
+        # First: look for alternative moves with the same piece
+        if moving_piece:
+            for move in board.legal_moves:
+                if move.from_square == best_move.from_square and move != best_move:
+                    # This moves the same piece elsewhere
+                    return move
+        
+        # Second: look for moves that look active (captures, checks)
+        for move in board.legal_moves:
+            if move == best_move:
+                continue
+            if board.is_capture(move) or board.gives_check(move):
+                return move
+        
+        # Third: use engine's second-best
+        infos = engine.analyse(board, chess.engine.Limit(depth=8), multipv=2)
+        if isinstance(infos, list) and len(infos) >= 2:
+            alt_pv = infos[1].get("pv", [])
+            if alt_pv and alt_pv[0] != best_move:
+                return alt_pv[0]
+        
+        # Fallback: any legal move that isn't the best
+        for move in board.legal_moves:
+            if move != best_move:
+                return move
+        
+    except Exception:
+        pass
+    
+    return None
+
+
+def _identify_failure_mechanism(
+    board: chess.Board,
+    best_move: chess.Move,
+    wrong_move: chess.Move,
+    opp_response: chess.Move,
+    opp_pv: List[chess.Move],
+    swing_cp: int,
+    engine: chess.engine.SimpleEngine,
+) -> Optional[CounterfactualFailure]:
+    """
+    Identify the SPECIFIC mechanism of failure.
+    
+    This is where we answer "what goes wrong and why?"
+    """
+    board_after_wrong = board.copy()
+    board_after_wrong.push(wrong_move)
+    
+    board_after_response = board_after_wrong.copy()
+    board_after_response.push(opp_response)
+    
+    moving_piece = board.piece_at(best_move.from_square)
+    wrong_piece = board.piece_at(wrong_move.from_square)
+    
+    # Check for forced mate
+    opp_mate = None
+    for info_key in ["score"]:
+        score = engine.analyse(board_after_wrong, chess.engine.Limit(depth=8)).get("score")
+        if score:
+            mate = score.pov(board_after_wrong.turn).mate()
+            if mate is not None and mate < 0:
+                opp_mate = -mate
+                break
+    
+    if opp_mate and opp_mate <= 5:
+        return CounterfactualFailure(
+            failure_type="mate",
+            description=f"If you don't play this move, opponent has forced checkmate in {opp_mate}.",
+            severity=1,
+            misconception="the position looked safe",
+            threat_sequence=[m.uci() for m in opp_pv[:min(3, len(opp_pv))]]
+        )
+    
+    # Check for immediate material loss on the response
+    captured_by_response = board_after_wrong.piece_at(opp_response.to_square)
+    if captured_by_response and captured_by_response.color == board.turn:
+        captured_name = PIECE_NAMES[captured_by_response.piece_type]
+        captured_value = PIECE_POINTS[captured_by_response.piece_type]
+        
+        if captured_value >= 3:
+            # What piece is being taken and why?
+            captured_sq = chess.square_name(opp_response.to_square)
+            
+            # Check if this is a CONDITIONAL threat (the key insight!)
+            # The piece might be "safe" now, but becomes attackable after wrong move
+            was_attacked_before = board.is_attacked_by(not board.turn, opp_response.to_square)
+            is_attacked_after = board_after_wrong.is_attacked_by(not board.turn, opp_response.to_square)
+            
+            if not was_attacked_before and is_attacked_after:
+                # This is a CONDITIONAL threat - exactly the case user described!
+                # The piece became attackable because of the wrong move
+                attacking_piece = board_after_wrong.piece_at(opp_response.from_square)
+                attacker_name = PIECE_NAMES[attacking_piece.piece_type] if attacking_piece else "piece"
+                
+                return CounterfactualFailure(
+                    failure_type="conditional_threat",
+                    description=f"If you don't move the {captured_name}, the {attacker_name} attacks it. The {captured_name} looks safe now, but becomes a target.",
+                    severity=2,
+                    misconception=f"the {captured_name} seemed safe because it's not attacked yet",
+                    threat_sequence=[opp_response.uci()]
+                )
+            
+            # Direct material loss
+            return CounterfactualFailure(
+                failure_type="material",
+                description=f"If you don't play this move, the {captured_name} on {captured_sq} is lost.",
+                severity=2,
+                misconception=f"the {captured_name} seemed protected"
+            )
+    
+    # Check for fork/double attack in response
+    fork = _detect_fork_in_response(board_after_wrong, opp_response)
+    if fork:
+        return fork
+    
+    # Check for discovered attack in response
+    discovery = _detect_discovery_in_response(board_after_wrong, opp_response)
+    if discovery:
+        return discovery
+    
+    # Check for pin/skewer in response
+    pin = _detect_pin_in_response(board_after_wrong, opp_response)
+    if pin:
+        return pin
+    
+    # Large positional swing without obvious tactic
+    if swing_cp >= 200:
+        # Try to identify what's happening in the next few moves
+        threat_desc = _describe_threat_sequence(board, wrong_move, opp_pv, engine)
+        if threat_desc:
+            return CounterfactualFailure(
+                failure_type="tactical_sequence",
+                description=threat_desc,
+                severity=3,
+                misconception="the alternative looked reasonable"
+            )
+    
+    # Moderate swing - positional collapse
+    if swing_cp >= 100:
+        return CounterfactualFailure(
+            failure_type="positional",
+            description="Without this move, the position becomes significantly worse.",
+            severity=4,
+            misconception="the alternative seemed playable"
+        )
+    
+    return None
+
+
+def _detect_fork_in_response(board: chess.Board, response: chess.Move) -> Optional[CounterfactualFailure]:
+    """Detect if opponent's response creates a fork."""
+    board_after = board.copy()
+    board_after.push(response)
+    
+    responding_piece = board.piece_at(response.from_square)
+    if not responding_piece:
+        return None
+    
+    responder_name = PIECE_NAMES[responding_piece.piece_type]
+    
+    # Find pieces attacked by the moved piece after the response
+    attacked_pieces = []
+    for sq in chess.SQUARES:
+        piece = board_after.piece_at(sq)
+        if piece and piece.color != responding_piece.color:
+            if board_after.is_attacked_by(responding_piece.color, sq):
+                # Check if the response piece is doing the attacking
+                attackers = board_after.attackers(responding_piece.color, sq)
+                if response.to_square in attackers:
+                    attacked_pieces.append({
+                        'piece': piece,
+                        'square': sq,
+                        'name': PIECE_NAMES[piece.piece_type],
+                        'value': PIECE_POINTS[piece.piece_type]
+                    })
+    
+    if len(attacked_pieces) >= 2:
+        # Sort by value
+        attacked_pieces.sort(key=lambda x: -x['value'])
+        target1, target2 = attacked_pieces[0], attacked_pieces[1]
+        
+        has_king = any(p['piece'].piece_type == chess.KING for p in attacked_pieces)
+        
+        if has_king:
+            # Fork with king - most instructive
+            non_king = target1 if target1['piece'].piece_type != chess.KING else target2
+            return CounterfactualFailure(
+                failure_type="fork",
+                description=f"If you don't play this move, the {responder_name} forks your king and {non_king['name']}. The king must move, losing the {non_king['name']}.",
+                severity=2,
+                misconception=f"the {non_king['name']} looked safe, but becomes vulnerable to a fork"
+            )
+        else:
+            return CounterfactualFailure(
+                failure_type="fork",
+                description=f"If you don't play this move, the {responder_name} forks the {target1['name']} and {target2['name']}. One will be lost.",
+                severity=2,
+                misconception="both pieces seemed safe"
+            )
+    
+    return None
+
+
+def _detect_discovery_in_response(board: chess.Board, response: chess.Move) -> Optional[CounterfactualFailure]:
+    """Detect if opponent's response creates a discovered attack."""
+    board_after = board.copy()
+    board_after.push(response)
+    
+    responding_piece = board.piece_at(response.from_square)
+    if not responding_piece:
+        return None
+    
+    from_sq = response.from_square
+    gives_check = board.gives_check(response)
+    
+    # Check if moving unblocked an attack
+    for sq in chess.SQUARES:
+        behind_piece = board.piece_at(sq)
+        if behind_piece and behind_piece.color == responding_piece.color:
+            if behind_piece.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
+                direction = _direction_between(sq, from_sq)
+                if direction:
+                    target_sq = from_sq
+                    while True:
+                        target_sq = _step_square(target_sq, direction)
+                        if target_sq is None:
+                            break
+                        target = board_after.piece_at(target_sq)
+                        if target:
+                            if target.color != responding_piece.color and PIECE_POINTS[target.piece_type] >= 3:
+                                behind_name = PIECE_NAMES[behind_piece.piece_type]
+                                target_name = PIECE_NAMES[target.piece_type]
+                                
+                                if gives_check:
+                                    return CounterfactualFailure(
+                                        failure_type="discovered_check",
+                                        description=f"If you don't play this move, opponent plays a discovered check, winning the {target_name}.",
+                                        severity=2,
+                                        misconception=f"the {target_name} seemed blocked from the {behind_name}"
+                                    )
+                                
+                                return CounterfactualFailure(
+                                    failure_type="discovery",
+                                    description=f"If you don't play this move, opponent uncovers an attack on your {target_name}.",
+                                    severity=2,
+                                    misconception=f"the {target_name} seemed blocked"
+                                )
+                            break
+    
+    return None
+
+
+def _detect_pin_in_response(board: chess.Board, response: chess.Move) -> Optional[CounterfactualFailure]:
+    """Detect if opponent's response creates a pin or skewer."""
+    board_after = board.copy()
+    board_after.push(response)
+    
+    responding_piece = board.piece_at(response.from_square)
+    if not responding_piece or responding_piece.piece_type not in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
+        return None
+    
+    responder_name = PIECE_NAMES[responding_piece.piece_type]
+    
+    # Check rays from the moved piece
+    for direction in _get_piece_directions(responding_piece.piece_type):
+        pieces_on_ray = []
+        sq = response.to_square
+        
+        while True:
+            sq = _step_square(sq, direction)
+            if sq is None:
+                break
+            piece = board_after.piece_at(sq)
+            if piece:
+                if piece.color != responding_piece.color:
+                    pieces_on_ray.append((piece, sq))
+                else:
+                    break
+                if len(pieces_on_ray) >= 2:
+                    break
+        
+        if len(pieces_on_ray) >= 2:
+            front, back = pieces_on_ray[0], pieces_on_ray[1]
+            front_piece, front_sq = front
+            back_piece, back_sq = back
+            front_name = PIECE_NAMES[front_piece.piece_type]
+            back_name = PIECE_NAMES[back_piece.piece_type]
+            
+            # Pin to king
+            if back_piece.piece_type == chess.KING:
+                return CounterfactualFailure(
+                    failure_type="pin",
+                    description=f"If you don't play this move, the {responder_name} pins your {front_name} to the king.",
+                    severity=2 if PIECE_POINTS[front_piece.piece_type] >= 3 else 3,
+                    misconception=f"the {front_name} seemed free to move"
+                )
+            
+            # Skewer (more valuable piece in front)
+            if PIECE_POINTS[front_piece.piece_type] > PIECE_POINTS[back_piece.piece_type]:
+                return CounterfactualFailure(
+                    failure_type="skewer",
+                    description=f"If you don't play this move, the {responder_name} skewers your {front_name} and {back_name}.",
+                    severity=2,
+                    misconception=f"the {front_name} seemed safe"
+                )
+    
+    return None
+
+
+def _describe_threat_sequence(
+    board: chess.Board,
+    wrong_move: chess.Move,
+    opp_pv: List[chess.Move],
+    engine: chess.engine.SimpleEngine,
+) -> Optional[str]:
+    """Describe a multi-move threat sequence in human terms."""
+    if len(opp_pv) < 2:
+        return None
+    
+    try:
+        board_after = board.copy()
+        board_after.push(wrong_move)
+        
+        # Look at the first few moves of opponent's response
+        threats_found = []
+        test_board = board_after.copy()
+        
+        for i, move in enumerate(opp_pv[:3]):
+            if i % 2 == 0:  # Opponent's move
+                piece = test_board.piece_at(move.from_square)
+                if piece:
+                    piece_name = PIECE_NAMES[piece.piece_type]
+                    if test_board.gives_check(move):
+                        threats_found.append(f"{piece_name} check")
+                    elif test_board.is_capture(move):
+                        captured = test_board.piece_at(move.to_square)
+                        if captured:
+                            threats_found.append(f"wins {PIECE_NAMES[captured.piece_type]}")
+            
+            test_board.push(move)
+        
+        if threats_found:
+            return f"If you don't play this move, opponent's sequence leads to: {', '.join(threats_found)}."
         
     except Exception:
         pass
@@ -1098,20 +1595,25 @@ def generate_move_explanation(
     phase: str = "middlegame",
 ) -> str:
     """
-    Generate explanation using POSITION-LEVEL URGENCY model.
+    Generate explanation using POSITION-LEVEL URGENCY model (v3.1 - True Counterfactual).
     
     Architecture:
     1. Analyze what the POSITION demands (before looking at best move's benefits)
-    2. Explain how the best move addresses that demand
-    3. Include what the human likely overlooked
+    2. Use COUNTERFACTUAL reasoning: "what breaks if you don't play this?"
+    3. Explain how the best move addresses that demand
+    4. Include what the human likely overlooked
+    
+    Key insight: We now ask "what happens if you DON'T play this move?"
+    rather than "what does this move achieve?"
     """
     engine = _open_engine()
     if not engine:
         return "This is the best move according to the engine."
     
     try:
-        # STEP 1: Analyze position-level urgency
-        urgency = _analyze_position_urgency(board, engine)
+        # STEP 1: Analyze position-level urgency WITH counterfactual analysis
+        # Pass the best_move so counterfactual can analyze "what if NOT this move?"
+        urgency = _analyze_position_urgency(board, engine, best_move)
         
         # STEP 2: Generate explanation based on urgency
         explanation = _generate_explanation_from_urgency(board, best_move, urgency, engine)
@@ -1139,7 +1641,7 @@ def _generate_explanation_from_urgency(board: chess.Board,
                 urgency.likely_human_focus
             )
     
-    # Priority 2: Tactical opportunities
+    # Priority 2: Tactical opportunities (we're winning something)
     if urgency.priority == Priority.FORCED_TACTICS:
         if urgency.threat_description:
             return _format_with_misconception(
@@ -1147,8 +1649,16 @@ def _generate_explanation_from_urgency(board: chess.Board,
                 urgency.likely_human_focus
             )
     
-    # Priority 3: Defensive requirements
+    # Priority 3: Defensive requirements / COUNTERFACTUAL THREATS
+    # This is where the key change happens - we now explain what BREAKS if you don't play
     if urgency.priority == Priority.PREVENT_THREAT:
+        # If we have counterfactual analysis, use it (more specific)
+        if urgency.counterfactual_failure:
+            cf = urgency.counterfactual_failure
+            # The counterfactual description already says "if you don't play this move..."
+            return _format_with_misconception(cf.description, cf.misconception)
+        
+        # Fallback to traditional threat description
         if urgency.threat_description:
             return _format_with_misconception(
                 f"This addresses the critical threat. {urgency.threat_description}",
@@ -1184,7 +1694,19 @@ def _generate_fallback_explanation(board: chess.Board,
                                     best_move: chess.Move,
                                     urgency: PositionUrgency,
                                     engine: chess.engine.SimpleEngine) -> str:
-    """Generate explanation by analyzing the best move directly."""
+    """Generate explanation by analyzing the best move directly.
+    
+    IMPORTANT: Even in fallback, we now prefer counterfactual explanations
+    ("what breaks if you don't play this") over move-benefit explanations
+    ("what this move achieves").
+    """
+    
+    # FIRST: If we have counterfactual analysis even at lower priority, use it
+    # This prevents generic "improves the piece" explanations when there's
+    # a real tactical reason.
+    if urgency.counterfactual_failure:
+        cf = urgency.counterfactual_failure
+        return _format_with_misconception(cf.description, cf.misconception)
     
     moving_piece = board.piece_at(best_move.from_square)
     if not moving_piece:
