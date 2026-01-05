@@ -464,15 +464,12 @@
               const pieceColor = piece ? (piece.toUpperCase() === piece ? "w" : "b") : null;
 
               if (selectedSquare) {
-                // If clicking a legal destination, emit move
-                if (legalDestinations.has(sq)) {
-                  const uci = uciFromSquares(selectedSquare, sq, legalMoves);
-                  if (uci) {
-                    // Clear selection BEFORE emitting to prevent stale state on rerender
-                    selectedSquare = null;
-                    setComponentValue({ uci });
-                    // No render() - Streamlit will rerender with new position
-                  }
+                // Try to resolve a legal move even if highlights are stale.
+                // (This makes click-to-move robust in embedded iframes.)
+                const uci = uciFromSquares(selectedSquare, sq, legalMoves);
+                if (uci) {
+                  selectedSquare = null;
+                  setComponentValue({ uci });
                   return;
                 }
 
