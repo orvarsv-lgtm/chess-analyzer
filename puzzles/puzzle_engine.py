@@ -450,6 +450,8 @@ class PuzzleGenerator:
         game_index: int,
         move_evals: List[dict],
         focus_color: Optional[str] = None,
+        engine: chess.engine.SimpleEngine | None = None,
+        engine_depth: int = 12,
     ) -> List[Puzzle]:
         """
         Generate puzzles from a single analyzed game.
@@ -469,8 +471,11 @@ class PuzzleGenerator:
         board = chess.Board()
 
         # Best-effort engine for best-move selection when analysis data doesn't include it.
-        engine = _open_stockfish_engine()
-        engine_depth = 12
+        # For performance, callers can pass a shared engine instance.
+        owned_engine = False
+        if engine is None:
+            engine = _open_stockfish_engine()
+            owned_engine = True
 
         try:
             for idx, move_eval in enumerate(move_evals):
@@ -621,7 +626,7 @@ class PuzzleGenerator:
                 except Exception:
                     pass
         finally:
-            if engine is not None:
+            if owned_engine and engine is not None:
                 try:
                     engine.quit()
                 except Exception:
@@ -711,6 +716,8 @@ def generate_puzzles_from_games(
     analyzed_games: List[dict],
     focus_player: Optional[str] = None,
     min_eval_loss: int = MIN_PUZZLE_EVAL_LOSS,
+    max_puzzles: int | None = 200,
+    engine_depth: int = 10,
 ) -> List[Puzzle]:
     """
     Generate puzzles from multiple analyzed games.
@@ -742,23 +749,43 @@ def generate_puzzles_from_games(
     """
     generator = PuzzleGenerator(min_eval_loss=min_eval_loss)
     all_puzzles: List[Puzzle] = []
-    
-    for game in analyzed_games:
-        game_index = game.get("index", 0)
-        moves_table = game.get("moves_table") or []
-        focus_color = game.get("focus_color")
-        
-        # Convert moves_table format to move_evals format
-        move_evals = _convert_moves_table_to_evals(moves_table, focus_color)
-        
-        # Generate puzzles for this game
-        game_puzzles = generator.generate_from_game(
-            game_index=game_index,
-            move_evals=move_evals,
-            focus_color=focus_color,
-        )
-        
-        all_puzzles.extend(game_puzzles)
+
+    # Reuse a single engine instance across games to avoid repeated process startup.
+    shared_engine = _open_stockfish_engine()
+    try:
+        for game in analyzed_games:
+            if max_puzzles is not None and len(all_puzzles) >= max_puzzles:
+                break
+
+            game_index = game.get("index", 0)
+            moves_table = game.get("moves_table") or []
+            focus_color = game.get("focus_color")
+
+            # Convert moves_table format to move_evals format
+            move_evals = _convert_moves_table_to_evals(moves_table, focus_color)
+
+            # Generate puzzles for this game
+            game_puzzles = generator.generate_from_game(
+                game_index=game_index,
+                move_evals=move_evals,
+                focus_color=focus_color,
+                engine=shared_engine,
+                engine_depth=engine_depth,
+            )
+
+            if max_puzzles is not None and game_puzzles:
+                remaining = max_puzzles - len(all_puzzles)
+                if remaining <= 0:
+                    break
+                all_puzzles.extend(game_puzzles[:remaining])
+            else:
+                all_puzzles.extend(game_puzzles)
+    finally:
+        if shared_engine is not None:
+            try:
+                shared_engine.quit()
+            except Exception:
+                pass
     
     # Sort by game index, then move number
     all_puzzles.sort(key=lambda p: (p.source_game_index, p.move_number))

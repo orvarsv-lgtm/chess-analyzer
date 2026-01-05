@@ -1652,10 +1652,15 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
             puzzles = generate_puzzles_from_games(
                 analyzed_games=games,
                 min_eval_loss=100,  # Minimum 100cp loss to be a puzzle
+                max_puzzles=200,     # Cap for performance on large imports
+                engine_depth=10,     # Slightly lower depth for faster puzzle extraction
             )
             st.session_state["generated_puzzles"] = puzzles
     else:
         puzzles = st.session_state["generated_puzzles"]
+
+    if len(games) > 120 and len(puzzles) >= 200:
+        st.caption("Note: showing up to 200 puzzles for performance.")
     
     if not puzzles:
         st.warning(
