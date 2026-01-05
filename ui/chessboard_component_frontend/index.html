@@ -159,7 +159,11 @@
         });
       }
 
+      let _isReady = false;
+
       function componentReady() {
+        if (_isReady) return;
+        _isReady = true;
         _postMessage({
           isStreamlitMessage: true,
           type: "streamlit:componentReady",
@@ -578,6 +582,11 @@
           _componentId = data.componentId;
         }
 
+        // Only mark ready once we know componentId (required for host routing).
+        if (_componentId) {
+          componentReady();
+        }
+
         const newArgs = data.args || args;
         
         // Clear selection if the FEN (position) changed - this means the move was accepted
@@ -591,7 +600,6 @@
         render();
       });
 
-      componentReady();
       // Render a default board while waiting for Streamlit args
       render();
     </script>
