@@ -159,6 +159,13 @@ def _legal_moves_uci(fen: str) -> List[str]:
     return [m.uci() for m in board.legal_moves]
 
 
+def render_puzzle_metadata(game_metadata: dict):
+    """Render metadata about the puzzle's source game."""
+    st.markdown(
+        f"**Game {game_metadata['game_number']}**: {game_metadata['username']} vs {game_metadata['opponent']}"
+    )
+
+
 def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     """Render the new JS-board-based puzzle trainer with multi-move support."""
 
