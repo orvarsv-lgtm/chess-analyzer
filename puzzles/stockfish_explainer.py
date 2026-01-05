@@ -678,7 +678,7 @@ def _identify_failure_mechanism(
 
 
 def _detect_fork_in_response(board: chess.Board, response: chess.Move) -> Optional[CounterfactualFailure]:
-    """Detect if opponent's response creates a fork."""
+    """Detect if opponent's response creates a fork that actually wins material."""
     board_after = board.copy()
     board_after.push(response)
     
@@ -687,6 +687,7 @@ def _detect_fork_in_response(board: chess.Board, response: chess.Move) -> Option
         return None
     
     responder_name = PIECE_NAMES[responding_piece.piece_type]
+    responder_value = PIECE_POINTS[responding_piece.piece_type]
     
     # Find pieces attacked by the moved piece after the response
     attacked_pieces = []
@@ -697,38 +698,155 @@ def _detect_fork_in_response(board: chess.Board, response: chess.Move) -> Option
                 # Check if the response piece is doing the attacking
                 attackers = board_after.attackers(responding_piece.color, sq)
                 if response.to_square in attackers:
+                    # Get detailed defense information
+                    defense_info = _analyze_piece_defense(board_after, sq, piece)
                     attacked_pieces.append({
                         'piece': piece,
                         'square': sq,
                         'name': PIECE_NAMES[piece.piece_type],
-                        'value': PIECE_POINTS[piece.piece_type]
+                        'value': PIECE_POINTS[piece.piece_type],
+                        **defense_info
                     })
     
-    if len(attacked_pieces) >= 2:
-        # Sort by value
-        attacked_pieces.sort(key=lambda x: -x['value'])
-        target1, target2 = attacked_pieces[0], attacked_pieces[1]
-        
-        has_king = any(p['piece'].piece_type == chess.KING for p in attacked_pieces)
-        
-        if has_king:
-            # Fork with king - most instructive
-            non_king = target1 if target1['piece'].piece_type != chess.KING else target2
+    if len(attacked_pieces) < 2:
+        return None
+    
+    # Sort by value (highest first)
+    attacked_pieces.sort(key=lambda x: -x['value'])
+    
+    has_king = any(p['piece'].piece_type == chess.KING for p in attacked_pieces)
+    
+    if has_king:
+        # Fork with king - the non-king piece will be lost regardless of defense
+        # (king MUST move, so the other piece is captured even if defended)
+        non_king = next(p for p in attacked_pieces if p['piece'].piece_type != chess.KING)
+        return CounterfactualFailure(
+            failure_type="fork",
+            description=f"If you don't play this move, the {responder_name} forks your king and {non_king['name']}. The king must move, losing the {non_king['name']}.",
+            severity=2,
+            misconception=f"the {non_king['name']} looked safe, but becomes vulnerable to a fork"
+        )
+    
+    # No king involved - check if fork actually wins material
+    # A fork wins if at least one target is:
+    # 1. Undefended, OR
+    # 2. Worth more than the attacker (profitable exchange)
+    
+    vulnerable_pieces = []
+    for target in attacked_pieces:
+        if not target['is_defended']:
+            # Undefended - will be lost
+            vulnerable_pieces.append(target)
+        elif target['value'] > responder_value:
+            # Defended but worth more than attacker - exchange still wins
+            vulnerable_pieces.append(target)
+        elif target['is_defended'] and target['min_defender_value'] > responder_value:
+            # Defended only by more valuable pieces - might still lose
+            vulnerable_pieces.append(target)
+    
+    if len(vulnerable_pieces) < 1:
+        # Fork doesn't actually win anything - all targets are safely defended
+        return None
+    
+    # At least one piece is vulnerable
+    if len(vulnerable_pieces) == 1:
+        # Only one piece is really threatened
+        target = vulnerable_pieces[0]
+        if not target['is_defended']:
             return CounterfactualFailure(
                 failure_type="fork",
-                description=f"If you don't play this move, the {responder_name} forks your king and {non_king['name']}. The king must move, losing the {non_king['name']}.",
-                severity=2,
-                misconception=f"the {non_king['name']} looked safe, but becomes vulnerable to a fork"
+                description=f"If you don't play this move, the {responder_name} attacks your {target['name']}, which is undefended.",
+                severity=2 if target['value'] >= 3 else 3,
+                misconception=f"the {target['name']} seemed safe"
             )
         else:
             return CounterfactualFailure(
                 failure_type="fork",
-                description=f"If you don't play this move, the {responder_name} forks the {target1['name']} and {target2['name']}. One will be lost.",
-                severity=2,
-                misconception="both pieces seemed safe"
+                description=f"If you don't play this move, the {responder_name} attacks your {target['name']}. Although defended, the {responder_name} is worth less, so the exchange favors your opponent.",
+                severity=2 if target['value'] >= 3 else 3,
+                misconception=f"the {target['name']} seemed safely defended"
             )
     
-    return None
+    # Multiple pieces vulnerable - true fork
+    target1, target2 = vulnerable_pieces[0], vulnerable_pieces[1]
+    
+    # Build description based on defense status
+    if not target1['is_defended'] and not target2['is_defended']:
+        desc = f"If you don't play this move, the {responder_name} forks the {target1['name']} and {target2['name']}. Both are undefended, so one will be lost."
+    elif not target1['is_defended'] or not target2['is_defended']:
+        undefended = target1 if not target1['is_defended'] else target2
+        defended = target2 if not target1['is_defended'] else target1
+        desc = f"If you don't play this move, the {responder_name} forks the {target1['name']} and {target2['name']}. The {undefended['name']} is undefended and will be captured."
+    else:
+        # Both defended but fork still works due to value difference
+        desc = f"If you don't play this move, the {responder_name} forks the {target1['name']} and {target2['name']}. You cannot save both."
+    
+    return CounterfactualFailure(
+        failure_type="fork",
+        description=desc,
+        severity=2,
+        misconception="both pieces seemed safe"
+    )
+
+
+def _analyze_piece_defense(board: chess.Board, sq: int, piece: chess.Piece) -> dict:
+    """
+    Analyze how a piece is defended.
+    
+    Returns:
+        dict with:
+        - is_defended: bool
+        - defender_count: int
+        - defenders: list of piece types defending
+        - min_defender_value: lowest value defender (for exchange calc)
+        - defense_description: human-readable description
+    """
+    defenders = board.attackers(piece.color, sq)
+    defender_count = len(defenders)
+    
+    if defender_count == 0:
+        return {
+            'is_defended': False,
+            'defender_count': 0,
+            'defenders': [],
+            'min_defender_value': 0,
+            'defense_description': 'undefended'
+        }
+    
+    # Get details about each defender
+    defender_pieces = []
+    for def_sq in defenders:
+        def_piece = board.piece_at(def_sq)
+        if def_piece:
+            defender_pieces.append({
+                'piece_type': def_piece.piece_type,
+                'name': PIECE_NAMES[def_piece.piece_type],
+                'value': PIECE_POINTS[def_piece.piece_type],
+                'square': def_sq
+            })
+    
+    # Sort by value (lowest first - these would recapture first)
+    defender_pieces.sort(key=lambda x: x['value'])
+    
+    min_defender_value = defender_pieces[0]['value'] if defender_pieces else 0
+    
+    # Build description
+    if defender_count == 1:
+        defense_description = f"defended by {defender_pieces[0]['name']}"
+    else:
+        defender_names = [d['name'] for d in defender_pieces[:3]]
+        if defender_count > 3:
+            defense_description = f"defended by {', '.join(defender_names)} and {defender_count - 3} more"
+        else:
+            defense_description = f"defended by {' and '.join(defender_names)}"
+    
+    return {
+        'is_defended': True,
+        'defender_count': defender_count,
+        'defenders': defender_pieces,
+        'min_defender_value': min_defender_value,
+        'defense_description': defense_description
+    }
 
 
 def _detect_discovery_in_response(board: chess.Board, response: chess.Move) -> Optional[CounterfactualFailure]:
@@ -1191,7 +1309,7 @@ def _detect_tactical_opportunity(board: chess.Board,
 
 def _detect_fork_with_full_causality(board: chess.Board, move: chess.Move,
                                       gives_check: bool) -> Optional[Dict]:
-    """Detect fork and explain WHY it works (the human misconception)."""
+    """Detect fork and explain WHY it works, with proper defense analysis."""
     board_after = board.copy()
     board_after.push(move)
     
@@ -1200,6 +1318,7 @@ def _detect_fork_with_full_causality(board: chess.Board, move: chess.Move,
         return None
     
     moving_name = PIECE_NAMES[moving_piece.piece_type]
+    moving_value = PIECE_POINTS[moving_piece.piece_type]
     
     # Find pieces attacked by the moved piece
     attacked = []
@@ -1208,24 +1327,26 @@ def _detect_fork_with_full_causality(board: chess.Board, move: chess.Move,
         if piece and piece.color != moving_piece.color:
             attackers = board_after.attackers(moving_piece.color, sq)
             if move.to_square in attackers:
+                # Get detailed defense information
+                defense_info = _analyze_piece_defense(board_after, sq, piece)
                 attacked.append({
                     'piece': piece,
                     'square': sq,
                     'name': PIECE_NAMES[piece.piece_type],
                     'value': PIECE_POINTS[piece.piece_type],
-                    'defended': board_after.is_attacked_by(not moving_piece.color, sq)
+                    **defense_info
                 })
     
     if len(attacked) < 2:
         return None
     
-    # Sort by value
+    # Sort by value (highest first)
     attacked.sort(key=lambda x: -x['value'])
     
     has_king = any(a['piece'].piece_type == chess.KING for a in attacked)
     
     if has_king:
-        # Find the piece that will be lost
+        # Fork with king - the non-king piece will be lost regardless of defense
         for target in attacked:
             if target['piece'].piece_type != chess.KING:
                 piece_name = target['name']
@@ -1247,14 +1368,63 @@ def _detect_fork_with_full_causality(board: chess.Board, move: chess.Move,
                     'misconception': f"the {piece_name} looked safe"
                 }
     else:
-        # No king - find what's lost
-        target1, target2 = attacked[0], attacked[1]
+        # No king involved - check if fork actually wins material
+        # A piece is vulnerable if:
+        # 1. Undefended, OR
+        # 2. Worth more than the attacker (profitable exchange), OR
+        # 3. Defended only by more valuable pieces
         
-        desc = f"This forks the {target1['name']} and {target2['name']}. One must be lost."
+        vulnerable_pieces = []
+        safe_pieces = []
+        
+        for target in attacked:
+            if not target['is_defended']:
+                vulnerable_pieces.append(target)
+            elif target['value'] > moving_value:
+                # Worth more than attacker - exchange still wins
+                vulnerable_pieces.append(target)
+            elif target['min_defender_value'] > moving_value:
+                # Defended only by more valuable pieces
+                vulnerable_pieces.append(target)
+            else:
+                safe_pieces.append(target)
+        
+        if len(vulnerable_pieces) < 1:
+            # Fork doesn't actually win anything - all targets are safely defended
+            return None
+        
+        if len(vulnerable_pieces) == 1:
+            # Only one piece is really threatened - not a true fork
+            target = vulnerable_pieces[0]
+            if not target['is_defended']:
+                desc = f"This attacks the {target['name']} on {chess.square_name(target['square'])}, which is undefended."
+            else:
+                desc = f"This attacks the {target['name']}. Although {target['defense_description']}, the exchange favors you."
+            return {
+                'description': desc,
+                'misconception': f"the {target['name']} seemed safe"
+            }
+        
+        # Multiple pieces vulnerable - true fork
+        target1, target2 = vulnerable_pieces[0], vulnerable_pieces[1]
+        
+        # Build description based on defense status
+        if not target1['is_defended'] and not target2['is_defended']:
+            desc = f"This forks the {target1['name']} and {target2['name']}. Both are undefended, so one will be lost."
+            misconception = "both pieces seemed safe"
+        elif not target1['is_defended'] or not target2['is_defended']:
+            undefended = target1 if not target1['is_defended'] else target2
+            defended = target2 if not target1['is_defended'] else target1
+            desc = f"This forks the {target1['name']} and {target2['name']}. The {undefended['name']} is undefended and will be captured."
+            misconception = f"the {undefended['name']} seemed protected"
+        else:
+            # Both defended but fork still works
+            desc = f"This forks the {target1['name']} ({target1['defense_description']}) and {target2['name']} ({target2['defense_description']}). You cannot save both, and the {moving_name} is worth less than either target."
+            misconception = "both pieces seemed safely defended"
         
         return {
             'description': desc,
-            'misconception': "both pieces seemed safe"
+            'misconception': misconception
         }
     
     return None
