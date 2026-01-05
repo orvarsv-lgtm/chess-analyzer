@@ -1392,6 +1392,7 @@ def main() -> None:
             st.session_state["analysis_result"] = aggregated
 
     else:
+        st.caption(f"Build: {_get_build_id()}")
         uploaded_files = st.file_uploader(
             "Upload PGN file(s)",
             type=["pgn"],
