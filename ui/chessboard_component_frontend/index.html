@@ -491,6 +491,15 @@
               const draggable = pieceColor === sideToMove;
               pieceEl.draggable = draggable;
 
+              // Some browsers can swallow click events on draggable images.
+              // Forward piece clicks to the square click handler so click-to-move
+              // works reliably (including captures).
+              pieceEl.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                sqEl.click();
+              });
+
               pieceEl.addEventListener("dragstart", (e) => {
                 if (!draggable) {
                   e.preventDefault();
