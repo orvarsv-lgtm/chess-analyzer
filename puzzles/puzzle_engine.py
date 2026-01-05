@@ -769,17 +769,29 @@ def generate_puzzles_from_games(
         min_eval_loss: Minimum centipawn loss to create puzzle
     
     Returns:
-        List of Puzzle objects, sorted by game index and move number
+        List of Puzzle objects.
+
+        Note: When `max_puzzles` is set, puzzles are prioritized so that severe
+        inaccuracies (>= 300cp loss) appear first and are more likely to be
+        included under the cap, while still allowing puzzles from smaller
+        mistakes when severe ones are scarce.
     """
     generator = PuzzleGenerator(min_eval_loss=min_eval_loss)
     all_puzzles: List[Puzzle] = []
+
+    def _priority_key(p: Puzzle) -> tuple:
+        """Sort key: severe mistakes first, then larger eval loss.
+
+        Tie-breakers keep output deterministic.
+        """
+        severe = p.eval_loss_cp >= BLUNDER_EVAL_LOSS
+        # severe first (0), then higher loss first, then stable game/move order
+        return (0 if severe else 1, -int(p.eval_loss_cp), int(p.source_game_index), int(p.move_number), str(p.puzzle_id))
 
     # Reuse a single engine instance across games to avoid repeated process startup.
     shared_engine = _open_stockfish_engine()
     try:
         for game in analyzed_games:
-            if max_puzzles is not None and len(all_puzzles) >= max_puzzles:
-                break
 
             game_index = game.get("index", 0)
             moves_table = game.get("moves_table") or []
@@ -797,23 +809,19 @@ def generate_puzzles_from_games(
                 engine_depth=engine_depth,
             )
 
-            if max_puzzles is not None and game_puzzles:
-                remaining = max_puzzles - len(all_puzzles)
-                if remaining <= 0:
-                    break
-                all_puzzles.extend(game_puzzles[:remaining])
-            else:
-                all_puzzles.extend(game_puzzles)
+            all_puzzles.extend(game_puzzles)
     finally:
         if shared_engine is not None:
             try:
                 shared_engine.quit()
             except Exception:
                 pass
-    
-    # Sort by game index, then move number
-    all_puzzles.sort(key=lambda p: (p.source_game_index, p.move_number))
-    
+
+    # Prioritize severe inaccuracies while still keeping smaller mistakes available.
+    all_puzzles.sort(key=_priority_key)
+
+    if max_puzzles is not None:
+        return all_puzzles[:max_puzzles]
     return all_puzzles
 
 
