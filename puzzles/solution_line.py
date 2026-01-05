@@ -86,7 +86,32 @@ def compute_solution_line(
         print(f"Warning: Stockfish not found at {STOCKFISH_PATH} or in PATH. Puzzle continuation disabled.")
         return solution
 
+    # If the first move already wins decisive material (after best defense), treat puzzle as complete.
+    # This avoids awkward "cleanup" continuations after a straightforward win.
+    def _material_points(b: chess.Board, color: chess.Color) -> int:
+        values = {
+            chess.PAWN: 1,
+            chess.KNIGHT: 3,
+            chess.BISHOP: 3,
+            chess.ROOK: 5,
+            chess.QUEEN: 9,
+        }
+        return sum(len(b.pieces(pt, color)) * v for pt, v in values.items())
+
     try:
+        try:
+            pov = not board.turn  # side that played first_move
+            before_pts = _material_points(chess.Board(fen), pov)
+            reply = engine.play(board, chess.engine.Limit(depth=10)).move
+            after = board.copy()
+            if reply is not None and reply in after.legal_moves:
+                after.push(reply)
+            after_pts = _material_points(after, pov)
+            if (after_pts - before_pts) >= 3:
+                return solution
+        except Exception:
+            pass
+
         # Check if continuation is needed
         continuation = _find_forcing_continuation(board, player_color, max_depth - 1, engine)
         

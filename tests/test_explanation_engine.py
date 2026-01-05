@@ -344,6 +344,16 @@ class TestMaterialAnalysis(unittest.TestCase):
         outcome = analyze_material_outcome(board, move)
         
         self.assertIn("win", outcome.lower()) if outcome else None
+
+    def test_defended_queen_capture_still_material_win(self):
+        """Capturing a defended queen should be explained as winning material when net gain is positive."""
+        # White rook can capture black queen; queen is defended by the h3 pawn.
+        board = chess.Board("4k3/8/8/8/8/7p/6q1/4K1R1 w - - 0 1")
+        move = chess.Move.from_uci("g1g2")  # RxQ
+        result = analyze_material_outcome(board, move)
+        # Should not claim merely 'hanging rook' style defense; it is primarily a material win.
+        self.assertIn("Queen", result)
+        self.assertIn("net +", result)
     
     def test_exchange_capture(self):
         """Test analysis of exchange (rook for bishop)."""

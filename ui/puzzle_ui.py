@@ -4,10 +4,19 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import chess
+import chess.engine
+import os
 import streamlit as st
 
 from puzzles.puzzle_store import PuzzleDefinition
+from puzzles.solution_line import compute_solution_line
 from ui.chessboard_component import render_chessboard
+
+# Stockfish path (shared with the main analyzer when available)
+try:
+    from src.engine_analysis import STOCKFISH_PATH
+except Exception:
+    STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 
 
 @dataclass
@@ -21,6 +30,8 @@ class PuzzleProgress:
     # Multi-move puzzle tracking
     solution_move_index: int = 0  # Which player move we're on (0, 2, 4, ...)
     opponent_just_moved: bool = False  # True if we just auto-played opponent's move
+    # Dynamic solution line (allows alternate-but-viable moves)
+    active_solution_moves: Optional[List[str]] = None
 
 
 _STATE_KEY = "puzzle_progress_v2"
@@ -45,6 +56,69 @@ def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
     progress.current_fen = puzzle_fen
     progress.solution_move_index = 0
     progress.opponent_just_moved = False
+    progress.active_solution_moves = None
+
+
+def _open_stockfish_engine() -> chess.engine.SimpleEngine:
+    """Open Stockfish (required for puzzle validation)."""
+    if os.path.exists(STOCKFISH_PATH):
+        return chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+    return chess.engine.SimpleEngine.popen_uci("stockfish")
+
+
+def _score_to_cp(score: chess.engine.PovScore) -> int:
+    """Convert a score to centipawns; mate is mapped to a large value."""
+    try:
+        cp = score.score(mate_score=100000)
+        return int(cp) if cp is not None else 0
+    except Exception:
+        return 0
+
+
+def _get_viable_moves_uci(
+    board: chess.Board,
+    threshold_cp: int = 30,
+    depth: int = 12,
+    multipv: int = 6,
+) -> List[str]:
+    """Return UCI moves considered viable (CPL <= threshold_cp) by Stockfish."""
+    engine = _open_stockfish_engine()
+    try:
+        infos = engine.analyse(board, chess.engine.Limit(depth=depth), multipv=multipv)
+        if not isinstance(infos, list):
+            infos = [infos]
+
+        scored: List[tuple[str, int]] = []
+        for info in infos:
+            pv = info.get("pv")
+            if not pv:
+                continue
+            mv = pv[0]
+            uci = mv.uci()
+            score = info.get("score")
+            if score is None:
+                continue
+            cp = _score_to_cp(score.pov(board.turn))
+            scored.append((uci, cp))
+
+        if not scored:
+            best = engine.play(board, chess.engine.Limit(depth=depth)).move
+            return [best.uci()] if best else []
+
+        best_cp = max(cp for _, cp in scored)
+        # Viable = within threshold of the best for the side to move.
+        viable = [uci for uci, cp in scored if (best_cp - cp) <= threshold_cp]
+        # Deterministic order: keep by score desc, then uci.
+        viable_sorted = sorted(
+            viable,
+            key=lambda u: (-next(cp for uu, cp in scored if uu == u), u),
+        )
+        return viable_sorted
+    finally:
+        try:
+            engine.quit()
+        except Exception:
+            pass
 
 
 def _get_player_move_indices(solution_moves: List[str]) -> List[int]:
@@ -101,9 +175,12 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         progress.current_index = len(puzzles) - 1
 
     puzzle = puzzles[progress.current_index]
+
+    # Use dynamic solution line (if player chose an alternate viable move)
+    solution_moves = progress.active_solution_moves or puzzle.solution_moves
     
     # Calculate total player moves in this puzzle
-    player_move_indices = _get_player_move_indices(puzzle.solution_moves)
+    player_move_indices = _get_player_move_indices(solution_moves)
     total_player_moves = len(player_move_indices)
     current_player_move_num = (progress.solution_move_index // 2) + 1
 
@@ -111,6 +188,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     if progress.active_puzzle_index != progress.current_index:
         progress.active_puzzle_index = progress.current_index
         _reset_puzzle_progress(progress, puzzle.fen)
+        solution_moves = puzzle.solution_moves
 
     board_fen = progress.current_fen or puzzle.fen
     board = chess.Board(board_fen)
@@ -201,20 +279,38 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 st.rerun()
 
             # Check against expected move at current solution index
-            expected = puzzle.solution_moves[progress.solution_move_index]
-            if uci == expected:
+            expected = solution_moves[progress.solution_move_index] if progress.solution_move_index < len(solution_moves) else None
+            viable_moves = []
+            try:
+                viable_moves = _get_viable_moves_uci(board, threshold_cp=30)
+            except Exception:
+                # Stockfish is required for proper validation; fall back to strict expected.
+                viable_moves = [expected] if expected else []
+
+            is_viable = (uci == expected) or (uci in viable_moves)
+
+            if is_viable:
                 # Correct move!
+                # Recompute the solution line from this position so continuations follow Stockfish,
+                # even if the player chose an alternate-but-viable move.
+                try:
+                    progress.active_solution_moves = compute_solution_line(board_fen, uci)
+                    solution_moves = progress.active_solution_moves or solution_moves
+                    progress.solution_move_index = 0
+                except Exception:
+                    pass
+
                 board.push(move)
                 
                 # Check if there's a continuation (opponent response + more player moves)
                 next_player_idx = _get_next_player_move_index(
-                    progress.solution_move_index, puzzle.solution_moves
+                    progress.solution_move_index, solution_moves
                 )
                 
                 if next_player_idx is not None:
                     # Apply opponent's response
                     opponent_uci = _apply_opponent_response(
-                        board, puzzle.solution_moves, progress.solution_move_index
+                        board, solution_moves, progress.solution_move_index
                     )
                     
                     if opponent_uci:

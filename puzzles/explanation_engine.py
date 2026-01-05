@@ -17,6 +17,24 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Set, Tuple
 import chess
+import chess.engine
+import os
+
+# Stockfish integration (required for highest-quality puzzle reasoning).
+try:
+    from src.engine_analysis import STOCKFISH_PATH
+except Exception:
+    STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
+
+
+def _open_stockfish_engine() -> Optional[chess.engine.SimpleEngine]:
+    """Open a Stockfish engine instance if available; otherwise return None."""
+    try:
+        if os.path.exists(STOCKFISH_PATH):
+            return chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+        return chess.engine.SimpleEngine.popen_uci("stockfish")
+    except Exception:
+        return None
 
 
 # =============================================================================
@@ -57,6 +75,16 @@ PIECE_VALUES = {
     chess.QUEEN: 900,
     chess.KING: 20000,
 }
+
+
+def _material_points(board: chess.Board, color: chess.Color) -> float:
+    """Material count in points (pawn=1, knight/bishop=3, rook=5, queen=9)."""
+    total = 0
+    for pt, cp in PIECE_VALUES.items():
+        if pt == chess.KING:
+            continue
+        total += len(board.pieces(pt, color)) * cp
+    return total / 100.0
 
 
 # =============================================================================
@@ -749,7 +777,11 @@ def analyze_threats_created(board: chess.Board, move: chess.Move) -> List[str]:
 # =============================================================================
 
 
-def analyze_material_outcome(board: chess.Board, move: chess.Move) -> str:
+def analyze_material_outcome(
+    board: chess.Board,
+    move: chess.Move,
+    engine: Optional[chess.engine.SimpleEngine] = None,
+) -> str:
     """Analyze the material outcome of the move."""
     captured = board.piece_at(move.to_square)
     moving_piece = board.piece_at(move.from_square)
@@ -766,25 +798,56 @@ def analyze_material_outcome(board: chess.Board, move: chess.Move) -> str:
     
     board_after = board.copy()
     board_after.push(move)
-    
+
     captured_name = chess.piece_name(captured.piece_type).title()
+    moving_name = chess.piece_name(moving_piece.piece_type).title()
     captured_value = PIECE_VALUES.get(captured.piece_type, 0)
     moving_value = PIECE_VALUES.get(moving_piece.piece_type, 0)
-    
-    # Check if capture is safe
-    is_recapturable = board_after.is_attacked_by(board_after.turn, move.to_square)
-    
-    if not is_recapturable:
+
+    # Prefer Stockfish-backed material delta when available: play best defense move,
+    # then measure material swing (in points) for the side that played `move`.
+    if engine is not None:
+        try:
+            pov = not board_after.turn  # side that just played `move`
+            before_pts = _material_points(board, pov)
+            reply = engine.play(board_after, chess.engine.Limit(depth=10)).move
+            after_line = board_after.copy()
+            if reply is not None and reply in after_line.legal_moves:
+                after_line.push(reply)
+            after_pts = _material_points(after_line, pov)
+            net_pts = round(after_pts - before_pts, 1)
+            if net_pts > 0:
+                if captured.piece_type == chess.QUEEN:
+                    return f"Wins the Queen (net +{net_pts})"
+                return f"Wins material by capturing the {captured_name} (net +{net_pts})"
+        except Exception:
+            # Fall back to deterministic (non-engine) reasoning.
+            pass
+
+    # Deterministic fallback: if opponent can legally recapture on the destination square,
+    # approximate the net as captured_value - moving_value.
+    recapture_exists = False
+    try:
+        target = move.to_square
+        for reply in board_after.legal_moves:
+            if reply.to_square == target and board_after.is_capture(reply):
+                recapture_exists = True
+                break
+    except Exception:
+        recapture_exists = board_after.is_attacked_by(board_after.turn, move.to_square)
+
+    if not recapture_exists:
         return f"Wins the {captured_name}"
-    else:
-        moving_name = chess.piece_name(moving_piece.piece_type).title()
-        if captured_value > moving_value:
-            diff = (captured_value - moving_value) // 100
-            return f"Wins the exchange ({captured_name} for {moving_name})"
-        elif captured_value == moving_value:
-            return f"Trades {moving_name} for {captured_name}"
-        else:
-            return ""
+
+    net_cp = captured_value - moving_value
+    if net_cp > 0:
+        net_pts = round(net_cp / 100.0, 1)
+        if captured.piece_type == chess.QUEEN:
+            return f"Wins the Queen (net +{net_pts})"
+        return f"Wins material ({captured_name} for {moving_name}, net +{net_pts})"
+    if net_cp == 0:
+        return f"Trades {moving_name} for {captured_name}"
+    return ""
 
 
 # =============================================================================
@@ -1031,8 +1094,16 @@ def generate_puzzle_explanation_v2(
     # =========================================================================
     # MATERIAL ANALYSIS
     # =========================================================================
-    
-    material_desc = analyze_material_outcome(board, best_move)
+
+    engine = _open_stockfish_engine()
+    try:
+        material_desc = analyze_material_outcome(board, best_move, engine=engine)
+    finally:
+        if engine:
+            try:
+                engine.quit()
+            except Exception:
+                pass
     if material_desc:
         explanation.material_outcome = material_desc
         if not descriptions:
@@ -1059,8 +1130,12 @@ def generate_puzzle_explanation_v2(
     # Add threat context if relevant and not redundant
     if opponent_threats and len(summary_parts) == 1:
         threat_context = opponent_threats[0]
-        if "checkmate" in threat_context.lower() or "hanging" in threat_context.lower():
+        material_wins = bool(material_desc) and ("wins the" in material_desc.lower() or "wins material" in material_desc.lower())
+        if ("checkmate" in threat_context.lower()) or ("hanging" in threat_context.lower() and not material_wins):
             summary_parts.append(f"Before this move, {threat_context.lower()}, making this the critical response.")
+        elif "hanging" in threat_context.lower() and material_wins:
+            # Don't let "hanging piece" messaging replace the real reason (usually a material win).
+            summary_parts.append(f"This also resolves the immediate threat: {threat_context.lower()}.")
     
     # Add phase guidance if space permits
     if phase_guidance and len(summary_parts) < 3:
