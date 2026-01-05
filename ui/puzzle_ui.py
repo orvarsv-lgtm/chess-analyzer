@@ -362,6 +362,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     # This is intentionally stable across reruns while staying unique per puzzle.
     st.session_state.puzzle_index = int(progress.current_index)
 
+    debug_board = bool(st.session_state.get("puzzle_debug_board", False))
+
     puzzle = puzzles[progress.current_index]
 
     # Lazily compute the full solution line for the active puzzle only.
@@ -485,7 +487,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             or f"index_{progress.current_index}"
         )
 
-        st.write("DEBUG: rendering board", puzzle_id)
+        if debug_board:
+            st.write("DEBUG: rendering board", puzzle_id)
         move = render_chessboard(
             fen=board_fen,
             legal_moves=legal_moves,
@@ -495,7 +498,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             hint=hint,
             key=f"puzzle_board_{st.session_state.puzzle_index}",
         )
-        st.write("DEBUG: board rendered")
+        if debug_board:
+            st.write("DEBUG: board rendered")
 
         uci = move
 
@@ -593,6 +597,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         
         st.write(f"Progress: **{progress.current_index + 1} / {len(puzzles)}**")
         st.write(f"Solved: **{progress.solved}**")
+
+        st.checkbox("Debug", key="puzzle_debug_board")
 
         show_explanation = st.checkbox("📖 Show explanation", key="puzzle_show_explanation_v2")
 
