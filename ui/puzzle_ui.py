@@ -40,6 +40,7 @@ class PuzzleProgress:
 
 
 _STATE_KEY = "puzzle_progress_v2"
+_SOLUTION_CACHE_KEY = "puzzle_solution_line_cache_v1"
 
 
 def _get_progress() -> PuzzleProgress:
@@ -52,6 +53,14 @@ def _get_progress() -> PuzzleProgress:
 
 def _reset_progress() -> None:
     st.session_state[_STATE_KEY] = PuzzleProgress()
+
+
+def _get_solution_cache() -> dict[tuple[str, str], List[str]]:
+    cache = st.session_state.get(_SOLUTION_CACHE_KEY)
+    if not isinstance(cache, dict):
+        cache = {}
+        st.session_state[_SOLUTION_CACHE_KEY] = cache
+    return cache
 
 
 def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
@@ -83,16 +92,22 @@ def _score_to_cp(score: chess.engine.PovScore) -> int:
         return 0
 
 
-def _get_viable_moves_uci(
+def _get_acceptable_moves_uci(
     board: chess.Board,
-    threshold_cp: int = 30,
+    second_best_max_loss_cp: int = 50,
     depth: int = 12,
-    multipv: int = 6,
 ) -> List[str]:
-    """Return UCI moves considered viable (CPL <= threshold_cp) by Stockfish."""
+    """Return acceptable UCI moves using best + (maybe) second-best.
+
+    Stockfish supports MultiPV output (multiple principal variations). We request
+    `multipv=2` and accept the 2nd-best move only if it's within
+    `second_best_max_loss_cp` centipawns of the best move for the side to move.
+
+    Note: "0.5" is interpreted as 0.5 pawn = 50 centipawns.
+    """
     engine = _open_stockfish_engine()
     try:
-        infos = engine.analyse(board, chess.engine.Limit(depth=depth), multipv=multipv)
+        infos = engine.analyse(board, chess.engine.Limit(depth=depth), multipv=2)
         if not isinstance(infos, list):
             infos = [infos]
 
@@ -102,26 +117,37 @@ def _get_viable_moves_uci(
             if not pv:
                 continue
             mv = pv[0]
-            uci = mv.uci()
             score = info.get("score")
             if score is None:
                 continue
+            uci = mv.uci()
             cp = _score_to_cp(score.pov(board.turn))
             scored.append((uci, cp))
 
-        if not scored:
+        # Ensure deterministic + unique ordering by score desc, then uci.
+        scored_sorted = sorted(scored, key=lambda t: (-t[1], t[0]))
+        unique: List[tuple[str, int]] = []
+        seen: set[str] = set()
+        for uci, cp in scored_sorted:
+            if uci in seen:
+                continue
+            seen.add(uci)
+            unique.append((uci, cp))
+            if len(unique) >= 2:
+                break
+
+        if not unique:
             best = engine.play(board, chess.engine.Limit(depth=depth)).move
             return [best.uci()] if best else []
 
-        best_cp = max(cp for _, cp in scored)
-        # Viable = within threshold of the best for the side to move.
-        viable = [uci for uci, cp in scored if (best_cp - cp) <= threshold_cp]
-        # Deterministic order: keep by score desc, then uci.
-        viable_sorted = sorted(
-            viable,
-            key=lambda u: (-next(cp for uu, cp in scored if uu == u), u),
-        )
-        return viable_sorted
+        best_uci, best_cp = unique[0]
+        if len(unique) == 1:
+            return [best_uci]
+
+        second_uci, second_cp = unique[1]
+        if (best_cp - second_cp) <= second_best_max_loss_cp:
+            return [best_uci, second_uci]
+        return [best_uci]
     finally:
         try:
             engine.quit()
@@ -191,6 +217,20 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
     puzzle = puzzles[progress.current_index]
 
+    # Lazily compute the full solution line for the active puzzle only.
+    # This avoids computing Stockfish continuations for every puzzle up-front.
+    cache = _get_solution_cache()
+    first_uci = (getattr(puzzle, "first_move_uci", "") or "").strip() or (
+        (puzzle.solution_moves[0] if puzzle.solution_moves else "").strip()
+    )
+    cache_key = (puzzle.fen, first_uci)
+    if first_uci and cache_key not in cache:
+        with st.spinner("Preparing puzzle..."):
+            try:
+                cache[cache_key] = compute_solution_line(puzzle.fen, first_uci)
+            except Exception:
+                cache[cache_key] = [first_uci]
+
     # Show source game metadata (if present)
     if getattr(puzzle, "source_game_index", None):
         white = (getattr(puzzle, "white", "") or "").strip() or "Unknown"
@@ -204,7 +244,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         )
 
     # Use dynamic solution line (if player chose an alternate viable move)
-    solution_moves = progress.active_solution_moves or puzzle.solution_moves
+    solution_moves = progress.active_solution_moves or cache.get(cache_key) or puzzle.solution_moves
     
     # Calculate total player moves in this puzzle
     player_move_indices = _get_player_move_indices(solution_moves)
@@ -215,7 +255,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     if progress.active_puzzle_index != progress.current_index:
         progress.active_puzzle_index = progress.current_index
         _reset_puzzle_progress(progress, puzzle.fen)
-        solution_moves = puzzle.solution_moves
+        # Seed the solution line for this puzzle from cache
+        solution_moves = cache.get(cache_key) or puzzle.solution_moves
 
     board_fen = progress.current_fen or puzzle.fen
     board = chess.Board(board_fen)
@@ -307,14 +348,14 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             # Check against expected move at current solution index
             expected = solution_moves[progress.solution_move_index] if progress.solution_move_index < len(solution_moves) else None
-            viable_moves = []
+            acceptable_moves: List[str] = []
             try:
-                viable_moves = _get_viable_moves_uci(board, threshold_cp=30)
+                acceptable_moves = _get_acceptable_moves_uci(board, second_best_max_loss_cp=50)
             except Exception:
                 # Stockfish is required for proper validation; fall back to strict expected.
-                viable_moves = [expected] if expected else []
+                acceptable_moves = [expected] if expected else []
 
-            is_viable = (uci == expected) or (uci in viable_moves)
+            is_viable = (uci == expected) or (uci in acceptable_moves)
 
             if is_viable:
                 # Correct move!
