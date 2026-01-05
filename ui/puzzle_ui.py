@@ -42,6 +42,7 @@ class PuzzleProgress:
     # Multi-move puzzle tracking
     solution_move_index: int = 0  # Which player move we're on (0, 2, 4, ...)
     opponent_just_moved: bool = False  # True if we just auto-played opponent's move
+    opponent_last_uci: Optional[str] = None  # Track opponent's last move for highlighting
     # Dynamic solution line (allows alternate-but-viable moves)
     active_solution_moves: Optional[List[str]] = None
 
@@ -83,6 +84,7 @@ def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
     """Reset progress for a new puzzle."""
     progress.last_result = None
     progress.last_uci = None
+    progress.opponent_last_uci = None
     progress.current_fen = puzzle_fen
     progress.solution_move_index = 0
     progress.opponent_just_moved = False
@@ -90,6 +92,7 @@ def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
     progress.reveal_answer = False
     progress.reveal_puzzle_index = None
     progress.reveal_solution_move_index = None
+    progress.board_nonce = 0
 
 
 def _open_stockfish_engine() -> chess.engine.SimpleEngine:
@@ -457,9 +460,9 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             pass
 
     # Highlight opponent's last move if they just moved
-    if progress.opponent_just_moved and progress.last_uci:
+    if progress.opponent_just_moved and progress.opponent_last_uci:
         try:
-            mv = chess.Move.from_uci(progress.last_uci)
+            mv = chess.Move.from_uci(progress.opponent_last_uci)
             # Use a neutral highlight for opponent moves (we'll show it as "correct" color)
             highlights["correct_squares"] = [
                 chess.square_name(mv.from_square),
@@ -496,7 +499,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             side_to_move=side_to_move,
             highlights=highlights,
             hint=hint,
-            key=f"puzzle_board_{st.session_state.puzzle_index}",
+            key=f"puzzle_board_{st.session_state.puzzle_index}_{progress.board_nonce}",
         )
         if debug_board:
             st.write("DEBUG: board rendered")
@@ -565,9 +568,11 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                         # Update state for continuation
                         progress.current_fen = board.fen()
                         progress.solution_move_index = next_player_idx
-                        progress.last_uci = opponent_uci  # Store opponent's move for highlighting
+                        progress.last_uci = None  # Clear last move to prevent stale component output being reprocessed
+                        progress.opponent_last_uci = opponent_uci  # Store for highlighting
                         progress.last_result = None  # Not complete yet
                         progress.opponent_just_moved = True
+                        progress.board_nonce += 1  # Force chessboard remount
                     else:
                         # No valid opponent response, puzzle complete
                         progress.current_fen = board.fen()
