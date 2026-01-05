@@ -1082,10 +1082,11 @@ def generate_puzzle_explanation_v2(
     
     # Threats stopped (what opponent was threatening)
     opponent_threats = analyze_opponent_threats(board)
+    threat_stop_sentence = ""
     if opponent_threats:
         explanation.threats_stopped = opponent_threats
         if not descriptions:
-            descriptions.append(f"This stops {opponent_threats[0].lower()}.")
+            threat_stop_sentence = f"This stops {opponent_threats[0].lower()}."
     
     # Threats created
     new_threats = analyze_threats_created(board, best_move)
@@ -1106,8 +1107,16 @@ def generate_puzzle_explanation_v2(
                 pass
     if material_desc:
         explanation.material_outcome = material_desc
-        if not descriptions:
-            descriptions.append(material_desc + ".")
+        # If Stockfish (or deterministic fallback) indicates a net material win,
+        # that should usually be the primary explanation.
+        material_wins = "wins" in material_desc.lower() and "trade" not in material_desc.lower()
+        if material_wins:
+            if not descriptions:
+                descriptions.insert(0, material_desc + ".")
+            else:
+                first = descriptions[0].lower()
+                if first.startswith("this stops ") or ("wins" not in first and "winning" not in first):
+                    descriptions.insert(0, material_desc + ".")
     
     # =========================================================================
     # PHASE-SPECIFIC GUIDANCE
@@ -1128,17 +1137,15 @@ def generate_puzzle_explanation_v2(
         summary_parts.append(descriptions[0])
     
     # Add threat context if relevant and not redundant
-    if opponent_threats and len(summary_parts) == 1:
-        threat_context = opponent_threats[0]
-        material_wins = bool(material_desc) and ("wins the" in material_desc.lower() or "wins material" in material_desc.lower())
-        if ("checkmate" in threat_context.lower()) or ("hanging" in threat_context.lower() and not material_wins):
-            summary_parts.append(f"Before this move, {threat_context.lower()}, making this the critical response.")
-        elif "hanging" in threat_context.lower() and material_wins:
-            # Don't let "hanging piece" messaging replace the real reason (usually a material win).
-            summary_parts.append(f"This also resolves the immediate threat: {threat_context.lower()}.")
+    material_wins = bool(material_desc) and ("wins" in material_desc.lower())
+    if threat_stop_sentence and (not material_wins):
+        # Only mention "hanging" threats when we're not already explaining a clear material win.
+        if (not summary_parts) or (summary_parts[0].lower() != threat_stop_sentence.lower()):
+            summary_parts.append(threat_stop_sentence)
     
     # Add phase guidance if space permits
-    if phase_guidance and len(summary_parts) < 3:
+    # Avoid generic phase advice when the move is clearly tactical/material.
+    if phase_guidance and (not material_wins) and (not motifs_found) and len(summary_parts) < 3:
         summary_parts.append(phase_guidance)
     
     # Fallback if nothing detected

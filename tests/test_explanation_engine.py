@@ -354,6 +354,20 @@ class TestMaterialAnalysis(unittest.TestCase):
         # Should not claim merely 'hanging rook' style defense; it is primarily a material win.
         self.assertIn("Queen", result)
         self.assertIn("net +", result)
+
+    def test_summary_prioritizes_material_over_hanging_and_phase(self):
+        """If the best move wins decisive material, the summary should lead with that (not 'hanging rook' or generic endgame advice)."""
+        # Same defended queen capture, but run through the full explanation generator.
+        board = chess.Board("4k3/8/8/8/8/7p/6q1/4K1R1 w - - 0 1")
+        move = chess.Move.from_uci("g1g2")
+
+        explanation = generate_puzzle_explanation_v2(board, move, phase="endgame")
+        summary = explanation.human_readable_summary.lower()
+
+        self.assertIn("wins", summary)
+        self.assertIn("queen", summary)
+        self.assertNotIn("hanging", summary)
+        self.assertNotIn("active rooks", summary)
     
     def test_exchange_capture(self):
         """Test analysis of exchange (rook for bishop)."""
