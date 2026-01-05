@@ -455,7 +455,7 @@
               if (!uci) return;
               // Clear selection BEFORE emitting to prevent stale state on rerender
               selectedSquare = null;
-              setComponentValue({ uci });
+              setComponentValue(uci);
             });
 
             // Click-to-move
@@ -469,7 +469,7 @@
                 const uci = uciFromSquares(selectedSquare, sq, legalMoves);
                 if (uci) {
                   selectedSquare = null;
-                  setComponentValue({ uci });
+                  setComponentValue(uci);
                   return;
                 }
 

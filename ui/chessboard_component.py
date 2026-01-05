@@ -56,6 +56,12 @@ def render_chessboard(
 
     value = _chessboard_component(**payload, key=key, default=None)
 
+    # Support both formats:
+    # - legacy: {"uci": "e2e4"}
+    # - current: "e2e4"
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+
     if isinstance(value, dict):
         uci = value.get("uci")
         if isinstance(uci, str) and uci.strip():
