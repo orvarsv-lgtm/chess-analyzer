@@ -1392,7 +1392,17 @@ def main() -> None:
             st.session_state["analysis_result"] = aggregated
 
     else:
-        uploaded_files = st.file_uploader("Upload PGN", type=["pgn"], accept_multiple_files=True)
+        uploaded_files = st.file_uploader(
+            "Upload PGN file(s)",
+            type=["pgn"],
+            accept_multiple_files=True,
+            key="upload_pgn_files_v2",
+            help="Select multiple files with Shift/Cmd-click in the file picker, or drag-and-drop several files at once.",
+        )
+        if uploaded_files:
+            st.caption(
+                "Selected: " + ", ".join(getattr(f, "name", "(unnamed)") for f in uploaded_files)
+            )
         if st.button("Run analysis"):
             if not uploaded_files:
                 st.error("Please upload at least one PGN file.")
