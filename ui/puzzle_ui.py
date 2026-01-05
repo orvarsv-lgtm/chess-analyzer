@@ -354,7 +354,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             expected = solution_moves[progress.solution_move_index] if progress.solution_move_index < len(solution_moves) else None
             acceptable_moves: List[str] = []
             try:
-                acceptable_moves = _get_acceptable_moves_uci(board, second_best_max_loss_cp=50)
+                acceptable_moves = _get_acceptable_moves_uci(board, second_best_max_loss_cp=30)
             except Exception:
                 # Stockfish is required for proper validation; fall back to strict expected.
                 acceptable_moves = [expected] if expected else []

@@ -28,6 +28,13 @@ from .explanation_engine import (
     TacticalMotif,
 )
 
+# Import the new Stockfish-based explainer
+try:
+    from .stockfish_explainer import generate_puzzle_explanation_enhanced
+    USE_STOCKFISH_EXPLAINER = True
+except ImportError:
+    USE_STOCKFISH_EXPLAINER = False
+
 
 # =============================================================================
 # PUZZLE TRIGGER THRESHOLDS
@@ -261,10 +268,13 @@ def generate_puzzle_explanation(
     """
     Generate a deterministic explanation of why the best move is correct.
     
-    This delegates to the comprehensive explanation engine which analyzes
-    the position and move to create a coach-quality explanation.
+    Uses Stockfish-based analysis to understand WHY the move is best:
+    - Material wins (primary reason for most tactics)
+    - Piece protection analysis
+    - Mate threats
+    - Tactical motifs
     
-    No AI/LLM is used - purely rule-based tactical analysis.
+    No AI/LLM is used - purely engine-based tactical analysis.
     
     Args:
         board: Position before the move
@@ -276,7 +286,21 @@ def generate_puzzle_explanation(
     Returns:
         A descriptive explanation string
     """
-    # Use the new comprehensive explanation engine
+    # Try the new Stockfish-based explainer first (better quality)
+    if USE_STOCKFISH_EXPLAINER:
+        try:
+            explanation = generate_puzzle_explanation_enhanced(
+                board=board,
+                best_move=best_move,
+                eval_loss_cp=eval_loss_cp,
+                phase=phase,
+            )
+            if explanation and explanation.strip():
+                return explanation
+        except Exception:
+            pass  # Fall back to legacy explanation engine
+    
+    # Fallback to the legacy explanation engine
     return generate_explanation_string(
         board=board,
         best_move=best_move,

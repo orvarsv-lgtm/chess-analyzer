@@ -442,6 +442,8 @@
               if (!selectedSquare) return;
               const uci = uciFromSquares(selectedSquare, sq, legalMoves);
               if (!uci) return;
+              // Clear selection BEFORE emitting to prevent stale state on rerender
+              selectedSquare = null;
               setComponentValue({ uci });
             });
 
@@ -455,7 +457,10 @@
                 if (legalDestinations.has(sq)) {
                   const uci = uciFromSquares(selectedSquare, sq, legalMoves);
                   if (uci) {
+                    // Clear selection BEFORE emitting to prevent stale state on rerender
+                    selectedSquare = null;
                     setComponentValue({ uci });
+                    // No render() - Streamlit will rerender with new position
                   }
                   return;
                 }
@@ -547,15 +552,22 @@
         setFrameHeight(document.body.scrollHeight);
       }
 
+      let lastFen = "";
+      
       window.addEventListener("message", (event) => {
         const data = event.data;
         if (!data || data.type !== "streamlit:render") return;
 
-        args = data.args || args;
-        // Reset selection if the underlying position changed (prevents stale selections)
-        if (typeof args.fen === "string") {
-          // keep selection; selection is recalculated against legal_moves
+        const newArgs = data.args || args;
+        
+        // Clear selection if the FEN (position) changed - this means the move was accepted
+        // and we're seeing a new board state
+        if (typeof newArgs.fen === "string" && newArgs.fen !== lastFen) {
+          selectedSquare = null;
+          lastFen = newArgs.fen;
         }
+        
+        args = newArgs;
         render();
       });
 
