@@ -244,6 +244,13 @@ class PeerBenchmark:
     strongest_vs_peers: str = ""  # phase or area
     weakest_vs_peers: str = ""
 
+    # Phase CPL ratio feature (endgame relative to opening/middlegame)
+    endgame_vs_openmid_ratio: float = 0.0
+    endgame_vs_openmid_ratio_percentile: int = 0  # lower ratio is better
+    endgame_vs_openmid_ratio_vs_peers_pct: int = 0  # +10% means worse than peers
+    population_endgame_vs_openmid_ratio_mean: float = 0.0
+    population_endgame_vs_openmid_ratio_sample_size: int = 0
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "player_rating": self.player_rating,
@@ -260,6 +267,15 @@ class PeerBenchmark:
             "blunder_rate_vs_peers": f"{'+' if self.blunder_rate_vs_peers_pct >= 0 else ''}{self.blunder_rate_vs_peers_pct}%",
             "strongest_vs_peers": self.strongest_vs_peers,
             "weakest_vs_peers": self.weakest_vs_peers,
+            "phase_ratios": {
+                "endgame_vs_openmid": {
+                    "player": round(self.endgame_vs_openmid_ratio, 2) if self.endgame_vs_openmid_ratio else 0.0,
+                    "percentile": self.endgame_vs_openmid_ratio_percentile,
+                    "vs_peers": f"{'+' if self.endgame_vs_openmid_ratio_vs_peers_pct >= 0 else ''}{self.endgame_vs_openmid_ratio_vs_peers_pct}%",
+                    "population_mean": round(self.population_endgame_vs_openmid_ratio_mean, 2) if self.population_endgame_vs_openmid_ratio_mean else 0.0,
+                    "population_sample_size": self.population_endgame_vs_openmid_ratio_sample_size,
+                }
+            },
         }
 
 

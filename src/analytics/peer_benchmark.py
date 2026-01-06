@@ -14,10 +14,18 @@ come from a population database of aggregated player statistics by rating.
 
 from __future__ import annotations
 
+from pathlib import Path
+import json
+import os
 import math
 from typing import TYPE_CHECKING
 
 from .schemas import PeerBenchmark
+from .population_store import (
+    compute_baselines_by_bracket,
+    default_population_path,
+    get_rating_bracket as _get_rating_bracket_local,
+)
 
 if TYPE_CHECKING:
     from typing import Any
@@ -106,21 +114,87 @@ SAMPLE_SIZES = {
 BRACKET_SIZE = 300
 BRACKET_CEILING = 2400
 
+# Dynamic population baselines (from local JSONL store)
+MIN_DYNAMIC_SAMPLES = 30
+_BASELINE_CACHE: dict[str, object] = {"mtime": None, "baselines": None}
+
 
 def _get_rating_bracket(rating: int) -> str:
     """Map rating into a 300-point bracket label."""
+    # Delegate to shared helper to keep bracket naming consistent.
+    return _get_rating_bracket_local(rating)
+
+
+def _population_path() -> Path:
+    env = os.getenv("CHESS_ANALYZER_POPULATION_PATH", "").strip()
+    if env:
+        return Path(env)
+    return default_population_path()
+
+
+def _load_dynamic_baselines() -> dict[str, dict[str, tuple[float, float, int]]]:
+    """Load and cache dynamic baselines derived from the local population store."""
+    path = _population_path()
+    if not path.exists():
+        return {}
+
     try:
-        rating_val = int(rating)
+        mtime = path.stat().st_mtime
     except Exception:
-        rating_val = 0
+        return {}
 
-    rating_val = max(0, rating_val)
-    if rating_val >= BRACKET_CEILING:
-        return f"{BRACKET_CEILING}+"
+    if _BASELINE_CACHE.get("mtime") == mtime and isinstance(_BASELINE_CACHE.get("baselines"), dict):
+        return _BASELINE_CACHE["baselines"]  # type: ignore[return-value]
 
-    lower = (rating_val // BRACKET_SIZE) * BRACKET_SIZE
-    upper = lower + BRACKET_SIZE - 1
-    return f"{lower}-{upper}"
+    records: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return {}
+
+    baselines = compute_baselines_by_bracket(records)
+    _BASELINE_CACHE["mtime"] = mtime
+    _BASELINE_CACHE["baselines"] = baselines
+    return baselines
+
+
+def _get_metric_baseline(
+    bracket: str,
+    metric: str,
+    fallback_mean: float,
+    fallback_std: float,
+) -> tuple[float, float, int]:
+    """Return (mean, std, sample_size) for a metric in a bracket.
+
+    Uses dynamic baselines if available with sufficient sample size.
+    Otherwise falls back to the static placeholder baselines.
+    """
+    dyn = _load_dynamic_baselines()
+    if bracket in dyn and metric in dyn[bracket]:
+        mean, std, n = dyn[bracket][metric]
+        if n >= MIN_DYNAMIC_SAMPLES and mean > 0:
+            # Guard std from collapsing to 0 (would break percentile calc)
+            std = std if std > 0 else max(1.0, mean * 0.15)
+            return float(mean), float(std), int(n)
+    return float(fallback_mean), float(fallback_std), 0
+
+
+def _endgame_vs_openmid_ratio(opening_cpl: float, middlegame_cpl: float, endgame_cpl: float) -> float:
+    denom_parts = [v for v in (opening_cpl, middlegame_cpl) if v and v > 0]
+    if not denom_parts or not endgame_cpl or endgame_cpl <= 0:
+        return 0.0
+    denom = sum(denom_parts) / len(denom_parts)
+    if denom <= 0:
+        return 0.0
+    return float(endgame_cpl) / float(denom)
 
 
 def _compute_percentile(value: float, mean: float, std: float, lower_is_better: bool = True) -> int:
@@ -181,38 +255,69 @@ def compute_peer_benchmark(
         PeerBenchmark with percentiles and comparisons.
     """
     bracket = _get_rating_bracket(player_rating)
-    baselines = PEER_BASELINES.get(bracket, PEER_BASELINES["1200-1499"])
+    static = PEER_BASELINES.get(bracket, PEER_BASELINES["1200-1499"])
+
+    # Pull metric baselines, preferring dynamic population data.
+    overall_mu, overall_sd, n_overall = _get_metric_baseline(bracket, "overall_cpl", *static["overall_cpl"])
+    opening_mu, opening_sd, n_opening = _get_metric_baseline(bracket, "opening_cpl", *static["opening_cpl"])
+    middle_mu, middle_sd, n_middle = _get_metric_baseline(bracket, "middlegame_cpl", *static["middlegame_cpl"])
+    end_mu, end_sd, n_end = _get_metric_baseline(bracket, "endgame_cpl", *static["endgame_cpl"])
+    blunder_mu, blunder_sd, n_blunder = _get_metric_baseline(bracket, "blunder_rate", *static["blunder_rate"])
+
+    # Ratio baselines: if dynamic exists, use it; otherwise derive from static means.
+    ratio_static = _endgame_vs_openmid_ratio(opening_mu, middle_mu, end_mu)
+    ratio_mu, ratio_sd, n_ratio = _get_metric_baseline(
+        bracket,
+        "endgame_vs_openmid_ratio",
+        ratio_static,
+        max(0.1, ratio_static * 0.15),
+    )
 
     result = PeerBenchmark()
     result.player_rating = player_rating
     result.rating_bracket = bracket
-    result.sample_size = SAMPLE_SIZES.get(bracket, 10000)
+    # Prefer dynamic sample sizes when available.
+    dynamic_n = max(n_overall, n_opening, n_middle, n_end, n_blunder, n_ratio)
+    result.sample_size = dynamic_n if dynamic_n > 0 else SAMPLE_SIZES.get(bracket, 10000)
 
     # Compute percentiles (lower CPL is better)
     result.overall_cpl_percentile = _compute_percentile(
-        overall_cpl, baselines["overall_cpl"][0], baselines["overall_cpl"][1], lower_is_better=True
+        overall_cpl, overall_mu, overall_sd, lower_is_better=True
     )
     result.opening_cpl_percentile = _compute_percentile(
-        opening_cpl, baselines["opening_cpl"][0], baselines["opening_cpl"][1], lower_is_better=True
+        opening_cpl, opening_mu, opening_sd, lower_is_better=True
     )
     result.middlegame_cpl_percentile = _compute_percentile(
-        middlegame_cpl, baselines["middlegame_cpl"][0], baselines["middlegame_cpl"][1], lower_is_better=True
+        middlegame_cpl, middle_mu, middle_sd, lower_is_better=True
     )
     result.endgame_cpl_percentile = _compute_percentile(
-        endgame_cpl, baselines["endgame_cpl"][0], baselines["endgame_cpl"][1], lower_is_better=True
+        endgame_cpl, end_mu, end_sd, lower_is_better=True
     )
 
     # Blunder rate percentile (lower is better)
     result.blunder_rate_percentile = _compute_percentile(
-        blunder_rate, baselines["blunder_rate"][0], baselines["blunder_rate"][1], lower_is_better=True
+        blunder_rate, blunder_mu, blunder_sd, lower_is_better=True
     )
 
     # Blunder rate vs peers (positive = worse than peers)
-    peer_blunder_mean = baselines["blunder_rate"][0]
+    peer_blunder_mean = blunder_mu
     if peer_blunder_mean > 0:
         result.blunder_rate_vs_peers_pct = _ceil_int(((blunder_rate / peer_blunder_mean) - 1) * 100)
     else:
         result.blunder_rate_vs_peers_pct = 0
+
+    # Phase ratio feature (lower is better)
+    player_ratio = _endgame_vs_openmid_ratio(opening_cpl, middlegame_cpl, endgame_cpl)
+    result.endgame_vs_openmid_ratio = player_ratio
+    result.population_endgame_vs_openmid_ratio_mean = ratio_mu
+    result.population_endgame_vs_openmid_ratio_sample_size = n_ratio if n_ratio > 0 else 0
+    result.endgame_vs_openmid_ratio_percentile = _compute_percentile(
+        player_ratio, ratio_mu, ratio_sd, lower_is_better=True
+    ) if player_ratio > 0 and ratio_mu > 0 else 0
+    if ratio_mu > 0 and player_ratio > 0:
+        result.endgame_vs_openmid_ratio_vs_peers_pct = _ceil_int(((player_ratio / ratio_mu) - 1) * 100)
+    else:
+        result.endgame_vs_openmid_ratio_vs_peers_pct = 0
 
     # Tactics accuracy (if provided, higher is better)
     if tactics_accuracy > 0:

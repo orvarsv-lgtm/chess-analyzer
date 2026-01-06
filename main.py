@@ -31,6 +31,9 @@ from src.performance_metrics import (
 )
 from src.phase2 import analyze_phase2
 
+from src.analytics.peer_benchmark import benchmark_from_games_data
+from src.analytics.population_store import append_population_record
+
 
 def _choose_primary_issue(overall: dict, phase_stats: dict) -> str:
     """Deterministic priority for coaching focus to avoid contradictions.
@@ -265,6 +268,9 @@ def run_phase1_for_user(username, csv_file, max_games=15):
                         "opening_name": row.get("opening_name"),
                         "time_control": row.get("time_control"),
                         "elo": row.get("elo"),
+                        "rating": row.get("elo"),
+                        "player_rating": row.get("elo"),
+                        "platform": row.get("platform"),
                     },
                     "move_evals": move_evals,
                 })
@@ -528,7 +534,10 @@ def run_phase2_for_user(username, max_games=15, games_data=None):
                         'opening_name': row.get('opening_name'),
                         'time_control': row.get('time_control'),
                         'elo': row.get('elo'),
+                        'rating': row.get('elo'),
+                        'player_rating': row.get('elo'),
                         'color': row.get('color'),
+                        'platform': row.get('platform'),
                     },
                     'move_evals': move_evals,
                 })
@@ -543,6 +552,16 @@ def run_phase2_for_user(username, max_games=15, games_data=None):
         
     overall = compute_overall_cpl(games_data)
     phase_stats = aggregate_cpl_by_phase(games_data)
+
+    # Peer comparison (uses local population baselines when available)
+    peer = benchmark_from_games_data(games_data)
+
+    # Append this run to the local population store to improve future baselines
+    try:
+        append_population_record(games_data, username=username, source='cli')
+    except Exception:
+        # Non-critical: analysis output should still succeed even if persistence fails
+        pass
 
     # Strengths & weaknesses (V3 Step 3)
     sw = compute_strengths_weaknesses(games_data)
@@ -587,6 +606,22 @@ def run_phase2_for_user(username, max_games=15, games_data=None):
         fh.write(f"Best piece:                {overall.get('best_piece', 'N/A'):>7}\n")
         fh.write(f"Worst piece:               {overall.get('worst_piece', 'N/A'):>7}\n\n")
         fh.write(f"Mate misses / forced mates: missed {overall.get('mate_missed_count', 0)} | forced-loss states {overall.get('forced_loss_count', 0)}\n\n")
+
+        # Phase ratio feature (endgame relative to opening/middlegame)
+        ratio_info = (peer.to_dict().get('phase_ratios', {}) or {}).get('endgame_vs_openmid', {}) or {}
+        player_ratio = float(ratio_info.get('player') or 0.0)
+        pop_ratio = float(ratio_info.get('population_mean') or 0.0)
+        vs_peers = ratio_info.get('vs_peers')
+        if player_ratio > 0 and pop_ratio > 0:
+            fh.write("CPL PHASE RATIOS (Endgame vs Opening+Middlegame)\n")
+            fh.write("-"*70 + "\n")
+            fh.write(f"Your endgame CPL ratio: {player_ratio:.2f}x (endgame vs avg(opening,middlegame))\n")
+            fh.write(f"Peers average ratio ({peer.rating_bracket}, n={ratio_info.get('population_sample_size', 0)}): {pop_ratio:.2f}x\n")
+            fh.write(f"Vs peers: {vs_peers} | Ratio percentile: {ratio_info.get('percentile', 0)}\n")
+            if player_ratio < pop_ratio:
+                fh.write("Interpretation: Your endgames are less disproportionately error-prone than peers (relative endgame strength).\n\n")
+            else:
+                fh.write("Interpretation: Your endgames drop off more than peers relative to your earlier phases (relative endgame weakness).\n\n")
         conv = overall.get('conversion_difficulty', {}) or {}
         fh.write("CONVERSION DIFFICULTY\n")
         fh.write("-"*70 + "\n")
