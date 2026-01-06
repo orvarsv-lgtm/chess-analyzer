@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any
 
 import chess
 
+from .opening_style import get_opening_style, opening_style_to_percent
+
 if TYPE_CHECKING:
     pass
 
@@ -119,6 +121,10 @@ class PlaystyleProfile:
 BLUNDER_CP = 300
 MISTAKE_CP = 100
 EXCELLENT_MOVE_THRESHOLD = 5  # cp_loss <= 5 is excellent
+
+# Opening-style is a *small* factor in playstyle (should not dominate).
+OPENING_STYLE_WEIGHT = 0.08
+OPENING_STYLE_PRIOR_GAMES = 4  # smoothing toward neutral for small samples
 
 
 def _piece_type_name(piece_type: int) -> str:
@@ -436,6 +442,42 @@ def analyze_playstyle(games_data: list[dict[str, Any]]) -> PlaystyleProfile:
     profile.defensive_score = _calculate_defensive_score(
         avg_cpl, total_blunders, total_moves, total_castles, len(games_data)
     )
+
+    # ---------------------------------------------------------------------
+    # Small opening-style factor
+    # ---------------------------------------------------------------------
+    if games_data:
+        opening_counts: dict[str, int] = {}
+        for g in games_data:
+            gi = g.get("game_info", {}) or {}
+            opening = str(gi.get("opening_name") or "Unknown").strip() or "Unknown"
+            opening_counts[opening] = opening_counts.get(opening, 0) + 1
+
+        total_games = sum(opening_counts.values())
+        if total_games > 0:
+            # Weighted mean on 1..10 scale, smoothed toward neutral.
+            # This prevents a single opening from swinging the profile.
+            neutral = get_opening_style("Unknown")
+            prior = OPENING_STYLE_PRIOR_GAMES
+
+            def _mean_axis(axis: str) -> float:
+                weighted = 0.0
+                for name, n in opening_counts.items():
+                    style = get_opening_style(name)
+                    weighted += float(getattr(style, axis)) * n
+                weighted += float(getattr(neutral, axis)) * prior
+                return weighted / float(total_games + prior)
+
+            open_def = opening_style_to_percent(_mean_axis("defensive"))
+            open_agg = opening_style_to_percent(_mean_axis("aggressive"))
+            open_pos = opening_style_to_percent(_mean_axis("positional"))
+            open_tac = opening_style_to_percent(_mean_axis("tactical"))
+
+            w = OPENING_STYLE_WEIGHT
+            profile.defensive_score = int(round((1 - w) * profile.defensive_score + w * open_def))
+            profile.aggressive_score = int(round((1 - w) * profile.aggressive_score + w * open_agg))
+            profile.positional_score = int(round((1 - w) * profile.positional_score + w * open_pos))
+            profile.tactical_score = int(round((1 - w) * profile.tactical_score + w * open_tac))
     
     # Determine primary and secondary styles
     styles = [
@@ -472,6 +514,21 @@ def analyze_playstyle(games_data: list[dict[str, Any]]) -> PlaystyleProfile:
         indicators.append("Pawn-structure focused")
     if profile.castle_rate_pct >= 80:
         indicators.append("Always castles")
+
+    # Opening-style note if it’s meaningfully non-neutral.
+    # Keep it subtle and short; it’s only a small contributing factor.
+    if games_data and total_games >= 3:
+        # Compare to neutral=50% on 0..100 scale
+        deltas = {
+            "Aggressive": profile.aggressive_score - 50,
+            "Defensive": profile.defensive_score - 50,
+            "Tactical": profile.tactical_score - 50,
+            "Positional": profile.positional_score - 50,
+        }
+        strongest = max(deltas.items(), key=lambda kv: abs(kv[1]))
+        if abs(strongest[1]) >= 12:
+            direction = "leans" if strongest[1] > 0 else "avoids"
+            indicators.append(f"Opening choices {direction} {strongest[0].lower()} play")
     profile.style_indicators = indicators[:6]
     
     # Determine strongest and weakest pieces (excluding King)
