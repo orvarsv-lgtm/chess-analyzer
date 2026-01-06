@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional
+import concurrent.futures
 
 import chess
 import chess.engine
@@ -57,7 +58,12 @@ class PuzzleProgress:
 
 
 _STATE_KEY = "puzzle_progress_v2"
-_SOLUTION_CACHE_KEY = "puzzle_solution_line_cache_v1"
+_SOLUTION_CACHE_KEY = "puzzle_solution_line_cache_v2"
+_SOLUTION_FUTURES_KEY = "puzzle_solution_line_futures_v1"
+_SOLUTION_EXECUTOR_KEY = "puzzle_solution_line_executor_v1"
+
+# Keep puzzle analysis depth high for accuracy, but compute solution lines asynchronously.
+PUZZLE_SOLUTION_ANALYSIS_DEPTH = 20
 
 
 def _get_progress() -> PuzzleProgress:
@@ -72,12 +78,84 @@ def _reset_progress() -> None:
     st.session_state[_STATE_KEY] = PuzzleProgress()
 
 
-def _get_solution_cache() -> dict[tuple[str, str], List[str]]:
+def _get_solution_cache() -> dict[tuple[str, str, int], List[str]]:
     cache = st.session_state.get(_SOLUTION_CACHE_KEY)
     if not isinstance(cache, dict):
         cache = {}
         st.session_state[_SOLUTION_CACHE_KEY] = cache
     return cache
+
+
+def _get_solution_futures() -> dict[tuple[str, str, int], concurrent.futures.Future]:
+    futs = st.session_state.get(_SOLUTION_FUTURES_KEY)
+    if not isinstance(futs, dict):
+        futs = {}
+        st.session_state[_SOLUTION_FUTURES_KEY] = futs
+    return futs
+
+
+def _get_solution_executor() -> concurrent.futures.ThreadPoolExecutor:
+    ex = st.session_state.get(_SOLUTION_EXECUTOR_KEY)
+    if not isinstance(ex, concurrent.futures.ThreadPoolExecutor):
+        # One worker: Stockfish is CPU-heavy; keep UI responsive.
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        st.session_state[_SOLUTION_EXECUTOR_KEY] = ex
+    return ex
+
+
+def _schedule_solution_line(fen: str, first_uci: str, *, depth: int) -> None:
+    """Schedule solution-line computation in background if not cached."""
+    if not fen or not first_uci:
+        return
+
+    cache = _get_solution_cache()
+    futs = _get_solution_futures()
+    key = (fen, first_uci, int(depth))
+
+    # Already computed
+    if key in cache:
+        return
+
+    # Already running
+    fut = futs.get(key)
+    if isinstance(fut, concurrent.futures.Future) and not fut.done():
+        return
+
+    # Schedule
+    ex = _get_solution_executor()
+    futs[key] = ex.submit(
+        compute_solution_line,
+        fen,
+        first_uci,
+        6,
+        int(depth),
+    )
+
+
+def _harvest_solution_line(fen: str, first_uci: str, *, depth: int) -> None:
+    """Move completed background computation into the in-memory cache."""
+    if not fen or not first_uci:
+        return
+
+    cache = _get_solution_cache()
+    futs = _get_solution_futures()
+    key = (fen, first_uci, int(depth))
+    if key in cache:
+        return
+
+    fut = futs.get(key)
+    if not isinstance(fut, concurrent.futures.Future) or not fut.done():
+        return
+
+    try:
+        cache[key] = fut.result()
+    except Exception:
+        cache[key] = [first_uci]
+    finally:
+        try:
+            del futs[key]
+        except Exception:
+            pass
 
 
 def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
@@ -369,19 +447,29 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
     puzzle = puzzles[progress.current_index]
 
-    # Lazily compute the full solution line for the active puzzle only.
-    # This avoids computing Stockfish continuations for every puzzle up-front.
+    # Compute solution lines asynchronously so puzzle load is instant.
+    # We'll prefetch the active puzzle + the next puzzle in the background.
     cache = _get_solution_cache()
     first_uci = (getattr(puzzle, "first_move_uci", "") or "").strip() or (
         (puzzle.solution_moves[0] if puzzle.solution_moves else "").strip()
     )
-    cache_key = (puzzle.fen, first_uci)
-    if first_uci and cache_key not in cache:
-        with st.spinner("Preparing puzzle..."):
-            try:
-                cache[cache_key] = compute_solution_line(puzzle.fen, first_uci)
-            except Exception:
-                cache[cache_key] = [first_uci]
+    depth = int(PUZZLE_SOLUTION_ANALYSIS_DEPTH)
+    cache_key = (puzzle.fen, first_uci, depth)
+
+    # Schedule active puzzle line in background and harvest if already computed.
+    _schedule_solution_line(puzzle.fen, first_uci, depth=depth)
+    _harvest_solution_line(puzzle.fen, first_uci, depth=depth)
+
+    # Prefetch next puzzle while the user is solving this one.
+    next_idx = progress.current_index + 1
+    if 0 <= next_idx < len(puzzles):
+        nxt = puzzles[next_idx]
+        nxt_first = (getattr(nxt, "first_move_uci", "") or "").strip() or (
+            (nxt.solution_moves[0] if nxt.solution_moves else "").strip()
+        )
+        if nxt_first:
+            _schedule_solution_line(nxt.fen, nxt_first, depth=depth)
+            _harvest_solution_line(nxt.fen, nxt_first, depth=depth)
 
     # Show source game metadata (if present)
     if getattr(puzzle, "source_game_index", None):
@@ -545,7 +633,11 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 # Recompute the solution line from this position so continuations follow Stockfish,
                 # even if the player chose an alternate-but-viable move.
                 try:
-                    progress.active_solution_moves = compute_solution_line(board_fen, uci)
+                    progress.active_solution_moves = compute_solution_line(
+                        board_fen,
+                        uci,
+                        analysis_depth=depth,
+                    )
                     solution_moves = progress.active_solution_moves or solution_moves
                     progress.solution_move_index = 0
                 except Exception:

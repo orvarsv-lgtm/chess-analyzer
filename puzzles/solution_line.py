@@ -56,6 +56,7 @@ def compute_solution_line(
     fen: str,
     first_move_uci: str,
     max_depth: int = 6,
+    analysis_depth: int = 20,
 ) -> List[str]:
     """
     Compute the full solution line for a puzzle starting from first_move.
@@ -98,6 +99,14 @@ def compute_solution_line(
     if board.is_game_over():
         return solution
     
+    # Normalize depth for determinism and safety
+    try:
+        analysis_depth = int(analysis_depth)
+    except Exception:
+        analysis_depth = 20
+    if analysis_depth < 1:
+        analysis_depth = 1
+
     # Initialize engine for analysis
     engine = None
     try:
@@ -130,7 +139,7 @@ def compute_solution_line(
         try:
             pov = not board.turn  # side that played first_move
             before_pts = _material_points(chess.Board(fen), pov)
-            reply = engine.play(board, chess.engine.Limit(depth=20)).move
+            reply = engine.play(board, chess.engine.Limit(depth=analysis_depth)).move
             after = board.copy()
             if reply is not None and reply in after.legal_moves:
                 after.push(reply)
@@ -141,7 +150,13 @@ def compute_solution_line(
             pass
 
         # Check if continuation is needed
-        continuation = _find_forcing_continuation(board, player_color, max_depth - 1, engine)
+        continuation = _find_forcing_continuation(
+            board,
+            player_color,
+            max_depth - 1,
+            engine,
+            analysis_depth,
+        )
         
         if continuation:
             solution.extend(continuation)
@@ -157,6 +172,7 @@ def _find_forcing_continuation(
     player_color: chess.Color,
     remaining_depth: int,
     engine: chess.engine.SimpleEngine,
+    analysis_depth: int,
 ) -> List[str]:
     """
     Find the forcing continuation after a move.
@@ -169,7 +185,7 @@ def _find_forcing_continuation(
         return []
     
     # It's opponent's turn - find their best response
-    opponent_response = _find_best_opponent_response(board, engine)
+    opponent_response = _find_best_opponent_response(board, engine, analysis_depth)
     
     if opponent_response is None:
         return []
@@ -183,7 +199,7 @@ def _find_forcing_continuation(
         return [opponent_response.uci()]
     
     # Now it's player's turn again - find their forcing continuation
-    player_continuation = _find_player_forcing_move(board_after_response, player_color, engine)
+    player_continuation = _find_player_forcing_move(board_after_response, player_color, engine, analysis_depth)
     
     if player_continuation is None:
         # No clear continuation - puzzle ends here
@@ -200,7 +216,13 @@ def _find_forcing_continuation(
         return result
     
     # Recurse for more continuation
-    further = _find_forcing_continuation(board_after_player, player_color, remaining_depth - 2, engine)
+    further = _find_forcing_continuation(
+        board_after_player,
+        player_color,
+        remaining_depth - 2,
+        engine,
+        analysis_depth,
+    )
     result.extend(further)
     
     return result
@@ -208,7 +230,8 @@ def _find_forcing_continuation(
 
 def _find_best_opponent_response(
     board: chess.Board, 
-    engine: chess.engine.SimpleEngine
+    engine: chess.engine.SimpleEngine,
+    analysis_depth: int,
 ) -> Optional[chess.Move]:
     """
     Find the opponent's best response to a forcing move using Stockfish.
@@ -224,7 +247,7 @@ def _find_best_opponent_response(
     
     try:
         # Use depth for determinism across runs/environments.
-        result = engine.play(board, chess.engine.Limit(depth=20))
+        result = engine.play(board, chess.engine.Limit(depth=int(analysis_depth)))
         return result.move
     except Exception:
         return None
@@ -233,7 +256,8 @@ def _find_best_opponent_response(
 def _find_player_forcing_move(
     board: chess.Board, 
     player_color: chess.Color,
-    engine: chess.engine.SimpleEngine
+    engine: chess.engine.SimpleEngine,
+    analysis_depth: int,
 ) -> Optional[chess.Move]:
     """
     Find the player's forcing continuation move using Stockfish.
@@ -245,7 +269,7 @@ def _find_player_forcing_move(
     
     try:
         # Get best move
-        result = engine.play(board, chess.engine.Limit(depth=20))
+        result = engine.play(board, chess.engine.Limit(depth=int(analysis_depth)))
         best_move = result.move
         
         if not best_move:
