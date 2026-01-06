@@ -50,7 +50,7 @@ def run_phase1(max_games=10):
                 continue
                 
             try:
-                move_evals = analyze_game_detailed(moves_pgn)
+                move_evals = analyze_game_detailed(moves_pgn, depth=20)
                 games_data.append({
                     "game_info": {
                         "score": row.get("score"),

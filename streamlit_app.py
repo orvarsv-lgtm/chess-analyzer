@@ -715,7 +715,7 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-def _post_to_engine(pgn_text: str, max_games: int, *, retries: int = 2) -> dict:
+def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 20, retries: int = 2) -> dict:
     url, api_key = _get_engine_endpoint()
     if not url:
         raise RuntimeError("Engine endpoint not configured")
@@ -728,6 +728,14 @@ def _post_to_engine(pgn_text: str, max_games: int, *, retries: int = 2) -> dict:
     endpoint = f"{base}{ANALYZE_ROUTE}"
     if endpoint.count("/analyze_game") != 1:
         raise RuntimeError(f"Invalid engine endpoint: {endpoint}")
+
+    # Pass depth as a query parameter (keeps JSON payload contract unchanged).
+    try:
+        depth_val = int(depth)
+    except Exception:
+        depth_val = 20
+    depth_val = max(10, min(30, depth_val))
+    endpoint = f"{endpoint}?depth={depth_val}"
     headers = {"x-api-key": api_key} if api_key else {}
     payload = {"pgn": pgn_text, "max_games": max_games}
 
@@ -1335,6 +1343,15 @@ def main() -> None:
     source = st.radio("Source", ["Lichess username", "Chess.com PGN file"], horizontal=True)
     max_games = st.slider("Max games", min_value=1, max_value=200, value=10, step=1)
 
+    analysis_depth = st.slider(
+        "Engine depth (recommended 20)",
+        min_value=10,
+        max_value=30,
+        value=20,
+        step=1,
+        help="Higher depth is slower but more accurate. Recommended: 20.",
+    )
+
     pgn_text: str = ""  # single canonical analysis input
     focus_player: str | None = None
 
@@ -1371,7 +1388,7 @@ def main() -> None:
             for i, gi in enumerate(games_inputs[:games_to_analyze], start=1):
                 status.info(f"Analyzing {i} of {games_to_analyze} games...")
                 try:
-                    resp = _post_to_engine(gi.pgn, max_games=1)
+                    resp = _post_to_engine(gi.pgn, max_games=1, depth=int(analysis_depth))
                     valid = _validate_engine_response(resp)
                 except Exception as e:
                     if "failed_games" not in st.session_state:
@@ -1497,7 +1514,7 @@ def main() -> None:
             for i, gi in enumerate(games_inputs[:games_to_analyze], start=1):
                 status.info(f"Analyzing {i} of {games_to_analyze} games...")
                 try:
-                    resp = _post_to_engine(gi.pgn, max_games=1)
+                    resp = _post_to_engine(gi.pgn, max_games=1, depth=int(analysis_depth))
                     valid = _validate_engine_response(resp)
                 except Exception as e:
                     if "failed_games" not in st.session_state:

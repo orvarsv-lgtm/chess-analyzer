@@ -391,7 +391,7 @@ PHASE_THRESHOLDS = {
 }
 
 
-def _analyze_game_detailed_local(moves_pgn_str):
+def _analyze_game_detailed_local(moves_pgn_str: str, *, depth: int | None = None):
     """
     Analyze a game using Stockfish and return structured move-by-move data.
     
@@ -412,6 +412,13 @@ def _analyze_game_detailed_local(moves_pgn_str):
     if not moves:
         return []
     
+    # Normalize depth (recommended default is 20; allow callers to override).
+    try:
+        depth_val = int(depth) if depth is not None else int(ANALYSIS_DEPTH)
+    except Exception:
+        depth_val = int(ANALYSIS_DEPTH)
+    depth_val = max(1, depth_val)
+
     # Start Stockfish engine
     try:
         engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
@@ -452,7 +459,7 @@ def _analyze_game_detailed_local(moves_pgn_str):
         for move_index, move_san in enumerate(moves):
             try:
                 # eval before the move
-                info_before = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH))
+                info_before = engine.analyse(board, chess.engine.Limit(depth=depth_val))
                 eval_before, is_mate_before = _score_to_cp(info_before)
 
                 # Keep board snapshot for heuristics (no extra engine calls)
@@ -484,7 +491,7 @@ def _analyze_game_detailed_local(moves_pgn_str):
 
                 # eval after the move
                 try:
-                    info_after = engine.analyse(board, chess.engine.Limit(depth=ANALYSIS_DEPTH))
+                    info_after = engine.analyse(board, chess.engine.Limit(depth=depth_val))
                 except Exception:
                     break
 
@@ -596,15 +603,22 @@ def _analyze_game_detailed_local(moves_pgn_str):
         engine.quit()
 
 
-def analyze_game_detailed(moves_pgn_str):
-    """Analyze a game; uses local Stockfish when available, otherwise falls back to VPS."""
+def analyze_game_detailed(moves_pgn_str: str, *, depth: int | None = None):
+    """Analyze a game.
+
+    Uses local Stockfish when available; otherwise falls back to VPS.
+
+    Args:
+        moves_pgn_str: space-separated SAN moves
+        depth: Stockfish depth for local analysis (ignored for VPS fallback)
+    """
     global _ENGINE_AVAIL_CACHE
     if _ENGINE_AVAIL_CACHE is None:
         _ENGINE_AVAIL_CACHE = detect_engine_availability()
 
     engine_ok, _reason = _ENGINE_AVAIL_CACHE
     if engine_ok:
-        return _analyze_game_detailed_local(moves_pgn_str)
+        return _analyze_game_detailed_local(moves_pgn_str, depth=depth)
 
     # VPS fallback (minimal PGN wrapper around SAN string)
     pgn_text = _san_moves_to_minimal_pgn(str(moves_pgn_str or ""))

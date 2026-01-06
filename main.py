@@ -226,7 +226,7 @@ def fetch_user_games(username, max_games=15):
         return None, 0
 
 
-def run_phase1_for_user(username, csv_file, max_games=15):
+def run_phase1_for_user(username, csv_file, max_games=15, *, analysis_depth: int = 20):
     # Invariant: max_blunder_phase always defined
     max_blunder_phase = ('none', 0)
     """Execute Phase 1: engine analysis for user's games."""
@@ -261,7 +261,7 @@ def run_phase1_for_user(username, csv_file, max_games=15):
                 continue
                 
             try:
-                move_evals = analyze_game_detailed(moves_pgn)
+                move_evals = analyze_game_detailed(moves_pgn, depth=analysis_depth)
                 games_data.append({
                     "game_info": {
                         "score": row.get("score"),
@@ -446,7 +446,7 @@ def run_phase1_for_user(username, csv_file, max_games=15):
         return None
 
 
-def run_phase2_for_user(username, max_games=15, games_data=None):
+def run_phase2_for_user(username, max_games=15, games_data=None, *, analysis_depth: int = 20):
     """Execute Phase 2: aggregation and reporting."""
     print("\n\n" + "="*70)
     print("📊 PHASE 2: AGGREGATION & REPORTING")
@@ -524,7 +524,7 @@ def run_phase2_for_user(username, max_games=15, games_data=None):
                 if not moves or (isinstance(moves, float) and pd.isna(moves)):
                     continue
                 
-                move_evals = analyze_game_detailed(moves)
+                move_evals = analyze_game_detailed(moves, depth=analysis_depth)
                 if not move_evals:
                     continue
                 
@@ -925,6 +925,14 @@ def main():
         if confirm not in {"y", "yes"}:
             max_games = 20
             print("ℹ️  Limiting to 20 games. Re-run with a smaller number or confirm to analyze more.")
+
+    # Stockfish depth (local analysis). Recommended: 20.
+    try:
+        depth_in = input("🔧 Stockfish depth (10-30, recommended 20) [20]: ").strip()
+        analysis_depth = int(depth_in) if depth_in else 20
+    except Exception:
+        analysis_depth = 20
+    analysis_depth = max(10, min(30, int(analysis_depth)))
     
     print("\n" + "="*70)
     print(f"🚀 FETCHING & ANALYZING: {username}")
@@ -948,7 +956,7 @@ def main():
         
         # Phase 1
         t0 = time.time()
-        phase1_result = run_phase1_for_user(username, csv_file, max_games=max_games)
+        phase1_result = run_phase1_for_user(username, csv_file, max_games=max_games, analysis_depth=analysis_depth)
         phase1_time = time.time() - t0
         
         if not phase1_result:
@@ -961,6 +969,7 @@ def main():
             username,
             max_games=max_games,
             games_data=phase1_result.get("games_data"),
+            analysis_depth=analysis_depth,
         )
         phase2_time = time.time() - t0
         

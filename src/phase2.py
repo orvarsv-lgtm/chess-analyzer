@@ -15,7 +15,13 @@ from .performance_metrics import (
 )
 
 
-def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', output_openings_csv='phase2_openings.csv'):
+def analyze_phase2(
+    max_games_per_player=10,
+    output_txt='phase2_results.txt',
+    output_openings_csv='phase2_openings.csv',
+    *,
+    analysis_depth: int = 20,
+):
     """Run Phase 2 analysis across player files and save summary outputs.
 
     Args:
@@ -46,7 +52,7 @@ def analyze_phase2(max_games_per_player=10, output_txt='phase2_results.txt', out
             if not moves or (isinstance(moves, float) and pd.isna(moves)):
                 continue
 
-            move_evals = analyze_game_detailed(moves)
+            move_evals = analyze_game_detailed(moves, depth=analysis_depth)
             if not move_evals:
                 continue
 
