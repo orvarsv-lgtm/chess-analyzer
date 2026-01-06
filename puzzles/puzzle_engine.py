@@ -35,6 +35,13 @@ try:
 except ImportError:
     USE_STOCKFISH_EXPLAINER = False
 
+# Import opponent mistake analyzer
+try:
+    from .opponent_mistake import analyze_opponent_mistake
+    USE_OPPONENT_MISTAKE_ANALYZER = True
+except ImportError:
+    USE_OPPONENT_MISTAKE_ANALYZER = False
+
 
 # =============================================================================
 # PUZZLE TRIGGER THRESHOLDS
@@ -417,7 +424,7 @@ def _open_stockfish_engine() -> chess.engine.SimpleEngine | None:
         return None
 
 
-def _best_move_from_engine(board: chess.Board, engine: chess.engine.SimpleEngine, depth: int = 12) -> chess.Move | None:
+def _best_move_from_engine(board: chess.Board, engine: chess.engine.SimpleEngine, depth: int = 20) -> chess.Move | None:
     try:
         result = engine.play(board, chess.engine.Limit(depth=int(depth)))
         return result.move
@@ -475,7 +482,7 @@ class PuzzleGenerator:
         move_evals: List[dict],
         focus_color: Optional[str] = None,
         engine: chess.engine.SimpleEngine | None = None,
-        engine_depth: int = 8,
+        engine_depth: int = 20,
     ) -> List[Puzzle]:
         """
         Generate puzzles from a single analyzed game.
@@ -493,6 +500,11 @@ class PuzzleGenerator:
         
         # Track board state as we replay the game
         board = chess.Board()
+        
+        # Track previous move info for opponent mistake analysis
+        prev_fen = None  # FEN before the previous move
+        prev_move_uci = None  # Previous move in UCI format
+        prev_move_san = None  # Previous move in SAN format
 
         # Best-effort engine for best-move selection when analysis data doesn't include it.
         # For performance, callers can pass a shared engine instance.
@@ -509,12 +521,18 @@ class PuzzleGenerator:
                 move_num = int(move_eval.get("move_num") or ((idx // 2) + 1))
                 eval_before = move_eval.get("eval_before")
                 eval_after = move_eval.get("eval_after")
+                
+                # Capture current FEN before the move (for next iteration's prev tracking)
+                current_fen = board.fen()
 
                 # Skip if doesn't meet threshold
                 if cp_loss < self.min_eval_loss:
                     # Push move and continue
                     try:
                         move = board.parse_san(san)
+                        prev_fen = current_fen
+                        prev_move_uci = move.uci()
+                        prev_move_san = san
                         board.push(move)
                     except Exception:
                         pass
@@ -619,6 +637,27 @@ class PuzzleGenerator:
                     )
                 except Exception:
                     explanation = "Find the best move in this position."
+                
+                # Analyze opponent's previous move to explain how this opportunity arose
+                opponent_mistake_explanation = None
+                opponent_move_san_out = None
+                opponent_best_move_san = None
+                fen_before_opponent = None
+                
+                if USE_OPPONENT_MISTAKE_ANALYZER and prev_fen and prev_move_uci:
+                    try:
+                        opp_mistake = analyze_opponent_mistake(
+                            fen_before_opponent_move=prev_fen,
+                            opponent_move_uci=prev_move_uci,
+                            depth=engine_depth,
+                        )
+                        if opp_mistake:
+                            opponent_mistake_explanation = opp_mistake.explanation
+                            opponent_move_san_out = opp_mistake.opponent_move_san
+                            opponent_best_move_san = opp_mistake.best_move_san
+                            fen_before_opponent = prev_fen
+                    except Exception:
+                        pass
 
                 # Generate puzzle ID
                 puzzle_id = f"{game_index}_{move_num}_{side_to_move}"
@@ -640,12 +679,19 @@ class PuzzleGenerator:
                     eval_after=eval_after if isinstance(eval_after, int) else None,
                     best_move_uci=best_move_uci,
                     explanation=explanation,
+                    opponent_mistake_explanation=opponent_mistake_explanation,
+                    opponent_move_san=opponent_move_san_out,
+                    opponent_best_move_san=opponent_best_move_san,
+                    fen_before_opponent=fen_before_opponent,
                 )
 
                 puzzles.append(puzzle)
 
-                # Push the played move to continue
+                # Push the played move and update prev tracking
                 try:
+                    prev_fen = fen_before
+                    prev_move_uci = played_move.uci()
+                    prev_move_san = san
                     board.push(played_move)
                 except Exception:
                     pass

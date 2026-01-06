@@ -90,6 +90,14 @@ class Puzzle:
     # Deterministic explanation of why the move is correct (generated from position)
     explanation: Optional[str] = None
     
+    # Opponent mistake analysis: what did opponent do wrong to create this opportunity?
+    opponent_mistake_explanation: Optional[str] = None
+    opponent_move_san: Optional[str] = None  # The opponent's preceding move
+    opponent_best_move_san: Optional[str] = None  # What opponent should have played
+    
+    # FEN before opponent's move (for context)
+    fen_before_opponent: Optional[str] = None
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -108,6 +116,10 @@ class Puzzle:
             "eval_after": self.eval_after,
             "best_move_uci": self.best_move_uci,
             "explanation": self.explanation,
+            "opponent_mistake_explanation": self.opponent_mistake_explanation,
+            "opponent_move_san": self.opponent_move_san,
+            "opponent_best_move_san": self.opponent_best_move_san,
+            "fen_before_opponent": self.fen_before_opponent,
         }
     
     @classmethod
@@ -129,6 +141,10 @@ class Puzzle:
             eval_after=data.get("eval_after"),
             best_move_uci=data.get("best_move_uci"),
             explanation=data.get("explanation"),
+            opponent_mistake_explanation=data.get("opponent_mistake_explanation"),
+            opponent_move_san=data.get("opponent_move_san"),
+            opponent_best_move_san=data.get("opponent_best_move_san"),
+            fen_before_opponent=data.get("fen_before_opponent"),
         )
     
     def to_json(self) -> str:

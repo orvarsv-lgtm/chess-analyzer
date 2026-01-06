@@ -130,7 +130,7 @@ def compute_solution_line(
         try:
             pov = not board.turn  # side that played first_move
             before_pts = _material_points(chess.Board(fen), pov)
-            reply = engine.play(board, chess.engine.Limit(depth=10)).move
+            reply = engine.play(board, chess.engine.Limit(depth=20)).move
             after = board.copy()
             if reply is not None and reply in after.legal_moves:
                 after.push(reply)
@@ -224,7 +224,7 @@ def _find_best_opponent_response(
     
     try:
         # Use depth for determinism across runs/environments.
-        result = engine.play(board, chess.engine.Limit(depth=10))
+        result = engine.play(board, chess.engine.Limit(depth=20))
         return result.move
     except Exception:
         return None
@@ -245,7 +245,7 @@ def _find_player_forcing_move(
     
     try:
         # Get best move
-        result = engine.play(board, chess.engine.Limit(depth=10))
+        result = engine.play(board, chess.engine.Limit(depth=20))
         best_move = result.move
         
         if not best_move:

@@ -222,8 +222,8 @@ def _analyze_position_urgency(board: chess.Board,
     # Get Stockfish's view of the position
     try:
         # Analyze with multipv to see what happens with wrong moves
-        # Use depth=8 for speed - we need patterns, not perfect eval
-        infos = engine.analyse(board, chess.engine.Limit(depth=8), multipv=3)
+        # Use depth=20 for accurate analysis
+        infos = engine.analyse(board, chess.engine.Limit(depth=20), multipv=3)
         if not isinstance(infos, list):
             infos = [infos]
         
@@ -352,7 +352,7 @@ def _detect_mate_threat(board: chess.Board,
 
         test_board = _opponent_to_move_board(board)
         
-        info = engine.analyse(test_board, chess.engine.Limit(depth=6))
+        info = engine.analyse(test_board, chess.engine.Limit(depth=20))
         score = info.get("score")
         pv = info.get("pv", [])
         
@@ -405,7 +405,7 @@ def _detect_tactical_threat(board: chess.Board,
         if not board.is_check():
             try:
                 test_board = _opponent_to_move_board(board)
-                info = engine.analyse(test_board, chess.engine.Limit(depth=6))
+                info = engine.analyse(test_board, chess.engine.Limit(depth=20))
                 pv = info.get("pv", [])
                 if pv:
                     threat = pv[0]
@@ -461,7 +461,7 @@ def _analyze_counterfactual_failure(
     """
     try:
         # Get position eval with best move
-        best_info = engine.analyse(board, chess.engine.Limit(depth=10), multipv=1)
+        best_info = engine.analyse(board, chess.engine.Limit(depth=20), multipv=1)
         best_score = best_info.get("score")
         if not best_score:
             return None
@@ -479,7 +479,7 @@ def _analyze_counterfactual_failure(
         board_after_wrong.push(wrong_move)
         
         # Get opponent's best response and the resulting position
-        opp_info = engine.analyse(board_after_wrong, chess.engine.Limit(depth=10))
+        opp_info = engine.analyse(board_after_wrong, chess.engine.Limit(depth=20))
         opp_pv = opp_info.get("pv", [])
         opp_score = opp_info.get("score")
         
@@ -542,7 +542,7 @@ def _find_instructive_wrong_move(
                 return move
         
         # Third: use engine's second-best
-        infos = engine.analyse(board, chess.engine.Limit(depth=8), multipv=2)
+        infos = engine.analyse(board, chess.engine.Limit(depth=20), multipv=2)
         if isinstance(infos, list) and len(infos) >= 2:
             alt_pv = infos[1].get("pv", [])
             if alt_pv and alt_pv[0] != best_move:
@@ -585,7 +585,7 @@ def _identify_failure_mechanism(
     # Check for forced mate
     opp_mate = None
     for info_key in ["score"]:
-        score = engine.analyse(board_after_wrong, chess.engine.Limit(depth=8)).get("score")
+        score = engine.analyse(board_after_wrong, chess.engine.Limit(depth=20)).get("score")
         if score:
             mate = score.pov(board_after_wrong.turn).mate()
             if mate is not None and mate < 0:
@@ -1121,7 +1121,7 @@ def _detect_king_danger_inevitable(board: chess.Board,
             if not board.is_check():
                 try:
                     test_board = _opponent_to_move_board(board)
-                    info = engine.analyse(test_board, chess.engine.Limit(depth=6))
+                    info = engine.analyse(test_board, chess.engine.Limit(depth=20))
                     pv = info.get("pv", [])
                     if pv:
                         threat = pv[0]
@@ -1256,8 +1256,8 @@ def _detect_endgame_critical(board: chess.Board,
     Name the square, the pawn, the tempo - not generic concepts.
     """
     try:
-        # Get the best move - use depth=8 for speed
-        info = engine.analyse(board, chess.engine.Limit(depth=8))
+        # Get the best move - use depth=20 for accuracy
+        info = engine.analyse(board, chess.engine.Limit(depth=20))
         pv = info.get("pv", [])
         if not pv:
             return None
@@ -1886,7 +1886,7 @@ def _calculate_exchange_result(board: chess.Board, move: chess.Move,
         for _ in range(4):
             if test.is_game_over():
                 break
-            result = engine.play(test, chess.engine.Limit(depth=4))
+            result = engine.play(test, chess.engine.Limit(depth=18))
             if result.move:
                 test.push(result.move)
         
@@ -2160,7 +2160,7 @@ def is_move_viable(board: chess.Board, move: chess.Move,
         return True, 0, None
     
     try:
-        # Use depth=8 and multipv=3 for speed - good enough for viable detection
+        # Use depth=20 and multipv=3 for accurate viable detection
         infos = engine.analyse(board, chess.engine.Limit(depth=depth), multipv=3)
         if not isinstance(infos, list):
             infos = [infos]
@@ -2198,10 +2198,10 @@ def is_move_viable(board: chess.Board, move: chess.Move,
                     
                     return False, max(0, cpl), None
         
-        # Move not in top 3 - analyze specifically (use depth 6 for speed)
+        # Move not in top 3 - analyze specifically
         board_after = board.copy()
         board_after.push(move)
-        info = engine.analyse(board_after, chess.engine.Limit(depth=6))
+        info = engine.analyse(board_after, chess.engine.Limit(depth=20))
         score = info.get("score")
         if score:
             move_cp = -score.pov(board_after.turn).score(mate_score=10000) or 0

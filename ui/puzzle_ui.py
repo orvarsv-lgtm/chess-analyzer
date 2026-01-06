@@ -118,7 +118,7 @@ VIABLE_CPL_THRESHOLD = 50  # 50 centipawns = 0.5 pawns
 def _get_acceptable_moves_uci(
     board: chess.Board,
     second_best_max_loss_cp: int = 50,
-    depth: int = 12,
+    depth: int = 20,
 ) -> List[str]:
     """Return acceptable UCI moves using best + (maybe) second-best.
 
@@ -182,7 +182,7 @@ def _classify_move(
     board: chess.Board,
     move_uci: str,
     expected_uci: Optional[str],
-    depth: int = 12,
+    depth: int = 20,
 ) -> tuple[str, int, Optional[str]]:
     """
     Classify a move as 'correct', 'viable', or 'incorrect'.
@@ -606,6 +606,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         st.checkbox("Debug", key="puzzle_debug_board")
 
         show_explanation = st.checkbox("📖 Show explanation", key="puzzle_show_explanation_v2")
+        show_opponent_mistake = st.checkbox("🔍 What did opponent do wrong?", key="puzzle_show_opponent_mistake")
 
         # Reveal answer (next required move) without advancing the puzzle.
         reveal_cols = st.columns(1)
@@ -659,6 +660,24 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
         if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
             st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
+        
+        # Show opponent mistake analysis
+        if show_opponent_mistake:
+            opp_explanation = getattr(puzzle, 'opponent_mistake_explanation', None)
+            opp_move = getattr(puzzle, 'opponent_move_san', None)
+            opp_best = getattr(puzzle, 'opponent_best_move_san', None)
+            
+            if opp_explanation:
+                st.markdown("---")
+                st.markdown("**🎯 Why this opportunity exists:**")
+                if opp_move:
+                    st.write(f"Opponent played: **{opp_move}**")
+                st.write(f"🔴 {opp_explanation}")
+                if opp_best:
+                    st.write(f"Better was: **{opp_best}**")
+            else:
+                st.markdown("---")
+                st.info("No significant opponent mistake detected - this may be a typical tactical position.")
 
         nav1, nav2, nav3 = st.columns(3)
         with nav1:

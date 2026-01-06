@@ -810,7 +810,7 @@ def analyze_material_outcome(
         try:
             pov = not board_after.turn  # side that just played `move`
             before_pts = _material_points(board, pov)
-            reply = engine.play(board_after, chess.engine.Limit(depth=10)).move
+            reply = engine.play(board_after, chess.engine.Limit(depth=20)).move
             after_line = board_after.copy()
             if reply is not None and reply in after_line.legal_moves:
                 after_line.push(reply)
