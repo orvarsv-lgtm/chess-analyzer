@@ -15,12 +15,6 @@ from puzzles.puzzle_engine import generate_puzzle_explanation
 class PuzzleDefinition:
     """Puzzle schema required by the JS board UI."""
 
-    # Stable identifiers
-    # - puzzle_id: original per-source id (may collide across users)
-    # - puzzle_key: stable cross-user id derived from (fen, first_move_uci)
-    puzzle_id: str = ""
-    puzzle_key: str = ""
-
     fen: str
     # First (required) best move in UCI. Full solution line is computed lazily in the UI.
     first_move_uci: str
@@ -32,6 +26,9 @@ class PuzzleDefinition:
     source_game_index: int | None = None
     white: str = ""
     black: str = ""
+    # Stable identifiers (must come last, with defaults)
+    puzzle_id: str = ""
+    puzzle_key: str = ""
 
 
 def _difficulty_to_int(d: Difficulty) -> int:
