@@ -192,7 +192,18 @@ def load_global_puzzles(*, exclude_source_user: str | None = None) -> list[Puzzl
             continue
 
         try:
-            puzzles.append((key, Puzzle.from_dict(p)))
+            puzzle = Puzzle.from_dict(p)
+            # Validate that the puzzle is valid before adding it
+            # This catches issues like invalid FEN or SAN that would cause crashes later
+            try:
+                board = chess.Board(puzzle.fen)
+                # Verify best_move_san is legal in this position
+                if not puzzle.best_move_uci:
+                    board.parse_san(puzzle.best_move_san)
+            except Exception:
+                # Skip invalid puzzles silently
+                continue
+            puzzles.append((key, puzzle))
             seen.add(key)
         except Exception:
             continue

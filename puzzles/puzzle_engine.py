@@ -764,7 +764,7 @@ def generate_puzzles_from_games(
     focus_player: Optional[str] = None,
     min_eval_loss: int = MIN_PUZZLE_EVAL_LOSS,
     max_puzzles: int | None = 200,
-    engine_depth: int = 8,
+    engine_depth: int = 6,
     progress_callback=None,
 ) -> List[Puzzle]:
     """

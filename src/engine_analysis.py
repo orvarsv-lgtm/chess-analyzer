@@ -412,14 +412,14 @@ def _analyze_game_detailed_local(moves_pgn_str: str, *, depth: int | None = None
     if not moves:
         return []
     
-    # Normalize depth (recommended default is 20; allow callers to override).
+    # Normalize depth (recommended default is 15; allow callers to override).
     try:
         depth_val = int(depth) if depth is not None else int(ANALYSIS_DEPTH)
-        # Hard cap for performance/safety: never exceed 20.
-        depth_val = max(1, min(20, depth_val))
+        # Hard cap for performance/safety: never exceed 18.
+        depth_val = max(1, min(18, depth_val))
     except Exception:
         depth_val = int(ANALYSIS_DEPTH)
-        depth_val = max(1, min(20, depth_val))
+        depth_val = max(1, min(18, depth_val))
     depth_val = max(1, depth_val)
 
     # Start Stockfish engine

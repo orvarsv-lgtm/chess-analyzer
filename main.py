@@ -928,11 +928,11 @@ def main():
 
     # Stockfish depth (local analysis). Recommended: 15.
     try:
-        depth_in = input("🔧 Stockfish depth (10-20, recommended 15) [15]: ").strip()
+        depth_in = input("🔧 Stockfish depth (10-18, recommended 15) [15]: ").strip()
         analysis_depth = int(depth_in) if depth_in else 15
     except Exception:
         analysis_depth = 15
-    analysis_depth = max(10, min(20, int(analysis_depth)))
+    analysis_depth = max(10, min(18, int(analysis_depth)))
     
     print("\n" + "="*70)
     print(f"🚀 FETCHING & ANALYZING: {username}")

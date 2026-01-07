@@ -57,7 +57,11 @@ def from_legacy_puzzle(
     if p.best_move_uci:
         uci = p.best_move_uci
     else:
-        uci = _san_to_uci_cached(p.fen, p.best_move_san)
+        try:
+            uci = _san_to_uci_cached(p.fen, p.best_move_san)
+        except Exception:
+            # If SAN conversion fails, this puzzle is corrupt. Raise to skip it.
+            raise ValueError(f"Invalid puzzle: cannot parse {p.best_move_san} in {p.fen}")
 
     puzzle_key = hashlib.sha1(f"{p.fen}|{uci}".encode("utf-8")).hexdigest()[:16]
 
@@ -66,32 +70,10 @@ def from_legacy_puzzle(
     # We compute the full solution line lazily for the currently active puzzle in the UI.
     solution_moves = [uci]
 
-    # Guarantee explanation presence (generate lazily if not already present).
-    explanation = getattr(p, "explanation", None)
-    if not explanation:
-        try:
-            board = chess.Board(p.fen)
-            try:
-                best_move = board.parse_san(p.best_move_san)
-            except Exception:
-                best_move = chess.Move.from_uci(uci)
-
-            puzzle_type = getattr(p, "puzzle_type", None)
-            if isinstance(puzzle_type, str):
-                # Defensive: old serialized puzzles might store enum as string
-                from puzzles.puzzle_types import PuzzleType
-
-                puzzle_type = PuzzleType(puzzle_type)
-
-            explanation = generate_puzzle_explanation(
-                board=board,
-                best_move=best_move,
-                eval_loss_cp=int(getattr(p, "eval_loss_cp", 0) or 0),
-                puzzle_type=puzzle_type,
-                phase=str(getattr(p, "phase", "middlegame") or "middlegame"),
-            )
-        except Exception:
-            explanation = "Find the best move in this position."
+    # PERFORMANCE: Skip explanation generation entirely here.
+    # Explanations are generated on-demand in the UI when a puzzle is displayed.
+    # This makes puzzle loading instant even for large puzzle sets.
+    explanation = getattr(p, "explanation", None) or ""
 
     return PuzzleDefinition(
         puzzle_id=str(getattr(p, "puzzle_id", "") or ""),
@@ -113,4 +95,11 @@ def from_legacy_puzzles(
     *,
     game_players: dict[int, tuple[str, str]] | None = None,
 ) -> List[PuzzleDefinition]:
-    return [from_legacy_puzzle(p, game_players=game_players) for p in puzzles]
+    result = []
+    for p in puzzles:
+        try:
+            result.append(from_legacy_puzzle(p, game_players=game_players))
+        except Exception:
+            # Skip invalid puzzles silently
+            continue
+    return result
