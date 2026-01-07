@@ -754,8 +754,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         # Rating (after each completed puzzle)
         if progress.last_result in ("correct", "viable"):
             st.markdown("---")
-            st.write("<span style='font-size:1.2rem;font-weight:600;'>Rate this puzzle:</span>", unsafe_allow_html=True)
-
+            
             puzzle_key = (
                 getattr(puzzle, "puzzle_key", None)
                 or getattr(puzzle, "puzzle_id", None)
@@ -773,54 +772,52 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 st.session_state["puzzle_last_rating"] = last_rating_map
 
             already = puzzle_key in rated
+            
+            # Custom CSS for better-looking rating buttons
+            st.markdown("""
+<style>
+div[data-testid="column"] button[kind="secondary"] {
+    font-size: 1.1rem;
+    padding: 0.6rem 1.2rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+</style>
+""", unsafe_allow_html=True)
+            
             if already:
                 prev = last_rating_map.get(puzzle_key)
                 if prev:
-                    st.caption(f"Your rating: {prev}")
+                    st.success(f"✓ You rated this puzzle: **{prev}**")
+            else:
+                st.write("**How was this puzzle?**")
 
             rater = (st.session_state.get("puzzle_rater") or "").strip() or None
 
-            # Use HTML for larger, colored buttons
-            st.markdown("""
-<style>
-.puzzle-rate-btn {
-  font-size: 1.5rem !important;
-  font-weight: 700;
-  padding: 0.7em 2em;
-  margin: 0.2em 0.5em;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-}
-.puzzle-rate-dislike { background: #f87171; color: #fff; }
-.puzzle-rate-meh { background: #fbbf24; color: #222; }
-.puzzle-rate-like { background: #4ade80; color: #222; }
-.puzzle-rate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-</style>
-""", unsafe_allow_html=True)
-
-            col1, col2, col3 = st.columns([1,1,1])
+            col1, col2, col3 = st.columns(3, gap="small")
             with col1:
-                if st.button("👎 Dislike", disabled=already, key=f"rate_dislike_{puzzle_key}"):
+                if st.button("👎 Dislike", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}"):
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="dislike", rater=rater)
                     rated.add(puzzle_key)
-                    last_rating_map[puzzle_key] = "Dislike"
+                    last_rating_map[puzzle_key] = "👎 Dislike"
                     st.rerun()
-                st.markdown("<button class='puzzle-rate-btn puzzle-rate-dislike' disabled style='width:100%;'>👎 Dislike</button>", unsafe_allow_html=True)
             with col2:
-                if st.button("😐 Meh", disabled=already, key=f"rate_meh_{puzzle_key}"):
+                if st.button("😐 Meh", type="secondary", disabled=already, use_container_width=True, key=f"rate_meh_{puzzle_key}"):
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="meh", rater=rater)
                     rated.add(puzzle_key)
-                    last_rating_map[puzzle_key] = "Meh"
+                    last_rating_map[puzzle_key] = "😐 Meh"
                     st.rerun()
-                st.markdown("<button class='puzzle-rate-btn puzzle-rate-meh' disabled style='width:100%;'>😐 Meh</button>", unsafe_allow_html=True)
             with col3:
-                if st.button("👍 Like", disabled=already, key=f"rate_like_{puzzle_key}"):
+                if st.button("👍 Like", type="secondary", disabled=already, use_container_width=True, key=f"rate_like_{puzzle_key}"):
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="like", rater=rater)
                     rated.add(puzzle_key)
-                    last_rating_map[puzzle_key] = "Like"
+                    last_rating_map[puzzle_key] = "👍 Like"
                     st.rerun()
-                st.markdown("<button class='puzzle-rate-btn puzzle-rate-like' disabled style='width:100%;'>👍 Like</button>", unsafe_allow_html=True)
 
         if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
             st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
