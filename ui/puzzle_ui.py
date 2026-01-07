@@ -701,14 +701,13 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         show_explanation = st.checkbox("📖 Show explanation", key="puzzle_show_explanation_v2")
         show_opponent_mistake = st.checkbox("🔍 What did opponent do wrong?", key="puzzle_show_opponent_mistake")
 
-        # Reveal answer (next required move) without advancing the puzzle.
+        # Reveal answer (for the current move in the sequence)
         reveal_cols = st.columns(1)
         with reveal_cols[0]:
-            if st.button("Reveal answer", width="stretch"):
+            if st.button("Reveal answer", use_container_width=True):
                 progress.reveal_answer = True
                 progress.reveal_puzzle_index = progress.current_index
                 progress.reveal_solution_move_index = progress.solution_move_index
-                # Clear the last move so we don't treat the revealed state as an input.
                 progress.last_uci = None
 
         if (
@@ -717,6 +716,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             and progress.reveal_solution_move_index == progress.solution_move_index
             and progress.last_result not in ("correct", "viable")
         ):
+            # Show the answer for the current move in the solution sequence
             expected_uci = (
                 solution_moves[progress.solution_move_index]
                 if progress.solution_move_index < len(solution_moves)
@@ -729,7 +729,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                     expected_san = b.san(mv) if mv in b.legal_moves else expected_uci
                 except Exception:
                     expected_san = expected_uci
-                st.info(f"Answer: **{expected_san}** ({expected_uci})")
+                st.info(f"Answer for this move: **{expected_san}** ({expected_uci})")
 
         if progress.last_result == "correct":
             st.success("Correct!" if total_player_moves == 1 else f"Correct! ({total_player_moves} moves)")
@@ -754,7 +754,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         # Rating (after each completed puzzle)
         if progress.last_result in ("correct", "viable"):
             st.markdown("---")
-            st.write("Rate this puzzle:")
+            st.write("<span style='font-size:1.2rem;font-weight:600;'>Rate this puzzle:</span>", unsafe_allow_html=True)
 
             puzzle_key = (
                 getattr(puzzle, "puzzle_key", None)
@@ -780,25 +780,47 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             rater = (st.session_state.get("puzzle_rater") or "").strip() or None
 
-            r1, r2, r3 = st.columns(3)
-            with r1:
-                if st.button("👎 Dislike", width="stretch", disabled=already, key=f"rate_dislike_{puzzle_key}"):
+            # Use HTML for larger, colored buttons
+            st.markdown("""
+<style>
+.puzzle-rate-btn {
+  font-size: 1.5rem !important;
+  font-weight: 700;
+  padding: 0.7em 2em;
+  margin: 0.2em 0.5em;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
+.puzzle-rate-dislike { background: #f87171; color: #fff; }
+.puzzle-rate-meh { background: #fbbf24; color: #222; }
+.puzzle-rate-like { background: #4ade80; color: #222; }
+.puzzle-rate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+""", unsafe_allow_html=True)
+
+            col1, col2, col3 = st.columns([1,1,1])
+            with col1:
+                if st.button("👎 Dislike", disabled=already, key=f"rate_dislike_{puzzle_key}"):
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="dislike", rater=rater)
                     rated.add(puzzle_key)
                     last_rating_map[puzzle_key] = "Dislike"
                     st.rerun()
-            with r2:
-                if st.button("😐 Meh", width="stretch", disabled=already, key=f"rate_meh_{puzzle_key}"):
+                st.markdown("<button class='puzzle-rate-btn puzzle-rate-dislike' disabled style='width:100%;'>👎 Dislike</button>", unsafe_allow_html=True)
+            with col2:
+                if st.button("😐 Meh", disabled=already, key=f"rate_meh_{puzzle_key}"):
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="meh", rater=rater)
                     rated.add(puzzle_key)
                     last_rating_map[puzzle_key] = "Meh"
                     st.rerun()
-            with r3:
-                if st.button("👍 Like", width="stretch", disabled=already, key=f"rate_like_{puzzle_key}"):
+                st.markdown("<button class='puzzle-rate-btn puzzle-rate-meh' disabled style='width:100%;'>😐 Meh</button>", unsafe_allow_html=True)
+            with col3:
+                if st.button("👍 Like", disabled=already, key=f"rate_like_{puzzle_key}"):
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="like", rater=rater)
                     rated.add(puzzle_key)
                     last_rating_map[puzzle_key] = "Like"
                     st.rerun()
+                st.markdown("<button class='puzzle-rate-btn puzzle-rate-like' disabled style='width:100%;'>👍 Like</button>", unsafe_allow_html=True)
 
         if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
             st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
