@@ -32,6 +32,9 @@ from puzzles import (
 from puzzles.puzzle_store import from_legacy_puzzles
 from ui.puzzle_ui import render_puzzle_trainer
 
+# Cross-user shared puzzle bank + ratings
+from puzzles.global_puzzle_store import load_global_puzzles, save_puzzles_to_global_bank
+
 BASE_DIR = os.path.dirname(__file__)
 OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
 
@@ -1659,6 +1662,9 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     st.caption(f"Build: {_get_build_id()}")
     
     games = aggregated.get("games", [])
+    focus_player = (aggregated.get("focus_player") or "").strip()
+    # Used by the puzzle trainer UI for rating attribution.
+    st.session_state["puzzle_rater"] = focus_player
     
     if not games:
         st.info("No games analyzed yet. Run an analysis to generate puzzles!")
@@ -1698,29 +1704,45 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         st.session_state.pop("generated_puzzles", None)
         st.session_state.pop("puzzle_progress_v2", None)
         st.session_state.pop("puzzle_solution_line_cache_v1", None)
+
+    source_mode = st.radio(
+        "Puzzle source",
+        options=["My games", "Other users"],
+        horizontal=True,
+        key="puzzle_source_mode",
+    )
     
-    # Generate puzzles from analyzed games
-    if "generated_puzzles" not in st.session_state:
-        with st.spinner("Generating puzzles from your games..."):
-            puzzles = generate_puzzles_from_games(
-                analyzed_games=games,
-                min_eval_loss=100,  # Minimum 100cp loss to be a puzzle
-                max_puzzles=200,     # Cap for performance on large imports
-                engine_depth=10,     # Slightly lower depth for faster puzzle extraction
-            )
-            st.session_state["generated_puzzles"] = puzzles
+    if source_mode == "My games":
+        # Generate puzzles from analyzed games
+        if "generated_puzzles" not in st.session_state:
+            with st.spinner("Generating puzzles from your games..."):
+                puzzles = generate_puzzles_from_games(
+                    analyzed_games=games,
+                    min_eval_loss=100,  # Minimum 100cp loss to be a puzzle
+                    max_puzzles=200,     # Cap for performance on large imports
+                    engine_depth=10,     # Slightly lower depth for faster puzzle extraction
+                )
+                st.session_state["generated_puzzles"] = puzzles
+        else:
+            puzzles = st.session_state["generated_puzzles"]
     else:
-        puzzles = st.session_state["generated_puzzles"]
+        puzzles = load_global_puzzles(exclude_source_user=focus_player)
 
     if len(games) > 120 and len(puzzles) >= 200:
         st.caption("Note: showing up to 200 puzzles for performance.")
     
     if not puzzles:
-        st.warning(
-            "No puzzles generated from your games. "
-            "Puzzles are created when you make mistakes (≥100cp loss). "
-            "Try analyzing more games or games with more tactical complexity."
-        )
+        if source_mode == "My games":
+            st.warning(
+                "No puzzles generated from your games. "
+                "Puzzles are created when you make mistakes (≥100cp loss). "
+                "Try analyzing more games or games with more tactical complexity."
+            )
+        else:
+            st.info(
+                "No shared puzzles yet. Generate puzzles from your games first "
+                "(or wait for other users to generate puzzles)."
+            )
         return
     
     # Puzzle stats overview
@@ -1806,6 +1828,14 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         for g in games
         if int(g.get("index") or 0) > 0
     }
+
+    # Save user's generated puzzles into the global bank (deduped).
+    if source_mode == "My games":
+        try:
+            save_puzzles_to_global_bank(puzzles, source_user=focus_player)
+        except Exception:
+            pass
+
     puzzle_defs = from_legacy_puzzles(filtered_puzzles, game_players=game_players)
     render_puzzle_trainer(puzzle_defs)
 

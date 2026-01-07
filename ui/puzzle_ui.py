@@ -11,6 +11,7 @@ import streamlit as st
 
 from puzzles.puzzle_store import PuzzleDefinition
 from puzzles.solution_line import compute_solution_line
+from puzzles.global_puzzle_store import record_puzzle_rating
 from ui.chessboard_component import render_chessboard
 
 # Stockfish path (shared with the main analyzer when available)
@@ -749,6 +750,55 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
         elif progress.opponent_just_moved:
             st.info("Opponent played. Find the next best move!")
+
+        # Rating (after each completed puzzle)
+        if progress.last_result in ("correct", "viable"):
+            st.markdown("---")
+            st.write("Rate this puzzle:")
+
+            puzzle_key = (
+                getattr(puzzle, "puzzle_key", None)
+                or getattr(puzzle, "puzzle_id", None)
+                or f"index_{progress.current_index}"
+            )
+
+            rated = st.session_state.get("puzzle_rated_keys")
+            if not isinstance(rated, set):
+                rated = set(rated) if isinstance(rated, list) else set()
+                st.session_state["puzzle_rated_keys"] = rated
+
+            last_rating_map = st.session_state.get("puzzle_last_rating")
+            if not isinstance(last_rating_map, dict):
+                last_rating_map = {}
+                st.session_state["puzzle_last_rating"] = last_rating_map
+
+            already = puzzle_key in rated
+            if already:
+                prev = last_rating_map.get(puzzle_key)
+                if prev:
+                    st.caption(f"Your rating: {prev}")
+
+            rater = (st.session_state.get("puzzle_rater") or "").strip() or None
+
+            r1, r2, r3 = st.columns(3)
+            with r1:
+                if st.button("👎 Dislike", width="stretch", disabled=already, key=f"rate_dislike_{puzzle_key}"):
+                    record_puzzle_rating(puzzle_key=str(puzzle_key), rating="dislike", rater=rater)
+                    rated.add(puzzle_key)
+                    last_rating_map[puzzle_key] = "Dislike"
+                    st.rerun()
+            with r2:
+                if st.button("😐 Meh", width="stretch", disabled=already, key=f"rate_meh_{puzzle_key}"):
+                    record_puzzle_rating(puzzle_key=str(puzzle_key), rating="meh", rater=rater)
+                    rated.add(puzzle_key)
+                    last_rating_map[puzzle_key] = "Meh"
+                    st.rerun()
+            with r3:
+                if st.button("👍 Like", width="stretch", disabled=already, key=f"rate_like_{puzzle_key}"):
+                    record_puzzle_rating(puzzle_key=str(puzzle_key), rating="like", rater=rater)
+                    rated.add(puzzle_key)
+                    last_rating_map[puzzle_key] = "Like"
+                    st.rerun()
 
         if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
             st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")

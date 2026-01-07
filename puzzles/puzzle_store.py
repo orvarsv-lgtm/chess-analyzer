@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import hashlib
 from typing import List
 
 import chess
@@ -13,6 +14,12 @@ from puzzles.puzzle_engine import generate_puzzle_explanation
 @dataclass(frozen=True)
 class PuzzleDefinition:
     """Puzzle schema required by the JS board UI."""
+
+    # Stable identifiers
+    # - puzzle_id: original per-source id (may collide across users)
+    # - puzzle_key: stable cross-user id derived from (fen, first_move_uci)
+    puzzle_id: str = ""
+    puzzle_key: str = ""
 
     fen: str
     # First (required) best move in UCI. Full solution line is computed lazily in the UI.
@@ -55,6 +62,8 @@ def from_legacy_puzzle(
     else:
         uci = _san_to_uci_cached(p.fen, p.best_move_san)
 
+    puzzle_key = hashlib.sha1(f"{p.fen}|{uci}".encode("utf-8")).hexdigest()[:16]
+
     # IMPORTANT (performance): do NOT compute Stockfish continuation lines here.
     # That can be very expensive when converting many puzzles (e.g., 64+).
     # We compute the full solution line lazily for the currently active puzzle in the UI.
@@ -88,6 +97,8 @@ def from_legacy_puzzle(
             explanation = "Explanation unavailable for this puzzle."
 
     return PuzzleDefinition(
+        puzzle_id=str(getattr(p, "puzzle_id", "") or ""),
+        puzzle_key=puzzle_key,
         fen=p.fen,
         first_move_uci=uci,
         solution_moves=solution_moves,
