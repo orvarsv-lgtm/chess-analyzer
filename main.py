@@ -226,7 +226,7 @@ def fetch_user_games(username, max_games=15):
         return None, 0
 
 
-def run_phase1_for_user(username, csv_file, max_games=15, *, analysis_depth: int = 20):
+def run_phase1_for_user(username, csv_file, max_games=15, *, analysis_depth: int = 15):
     # Invariant: max_blunder_phase always defined
     max_blunder_phase = ('none', 0)
     """Execute Phase 1: engine analysis for user's games."""
@@ -446,7 +446,7 @@ def run_phase1_for_user(username, csv_file, max_games=15, *, analysis_depth: int
         return None
 
 
-def run_phase2_for_user(username, max_games=15, games_data=None, *, analysis_depth: int = 20):
+def run_phase2_for_user(username, max_games=15, games_data=None, *, analysis_depth: int = 15):
     """Execute Phase 2: aggregation and reporting."""
     print("\n\n" + "="*70)
     print("📊 PHASE 2: AGGREGATION & REPORTING")
@@ -926,13 +926,13 @@ def main():
             max_games = 20
             print("ℹ️  Limiting to 20 games. Re-run with a smaller number or confirm to analyze more.")
 
-    # Stockfish depth (local analysis). Recommended: 20.
+    # Stockfish depth (local analysis). Recommended: 15.
     try:
-        depth_in = input("🔧 Stockfish depth (10-30, recommended 20) [20]: ").strip()
-        analysis_depth = int(depth_in) if depth_in else 20
+        depth_in = input("🔧 Stockfish depth (10-20, recommended 15) [15]: ").strip()
+        analysis_depth = int(depth_in) if depth_in else 15
     except Exception:
-        analysis_depth = 20
-    analysis_depth = max(10, min(30, int(analysis_depth)))
+        analysis_depth = 15
+    analysis_depth = max(10, min(20, int(analysis_depth)))
     
     print("\n" + "="*70)
     print(f"🚀 FETCHING & ANALYZING: {username}")

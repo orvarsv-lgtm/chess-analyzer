@@ -1,12 +1,9 @@
 """Phase 1: Multi-Player Game Analysis with Engine Evaluation"""
-import sys
-sys.path.insert(0, 'src')
-
 import pandas as pd
 import os
 import glob
-from engine_analysis import analyze_game_detailed
-from performance_metrics import compute_overall_cpl, aggregate_cpl_by_phase
+from src.engine_analysis import analyze_game_detailed
+from src.performance_metrics import compute_overall_cpl, aggregate_cpl_by_phase
 
 def analyze_player(csv_file, max_games=25):
     """Analyze games from a single player file"""
@@ -85,57 +82,61 @@ def analyze_player(csv_file, max_games=25):
         print(f"❌ Error analyzing {csv_file}: {e}")
         return None
 
-# Main execution
-try:
-    print("\n" + "="*70)
-    print("🔍 PHASE 1: MULTI-PLAYER GAME ANALYSIS WITH ENGINE EVALUATION")
-    print("="*70)
-    
-    # Find all player game files
-    player_files = sorted(glob.glob('games_*.csv'))
-    if not player_files:
-        print("❌ No player game files found")
-        sys.exit(1)
-    
-    print(f"📁 Found {len(player_files)} player files\n")
-    
-    # Analyze each player
-    results = []
-    for csv_file in player_files:
-        result = analyze_player(csv_file, max_games=25)
-        if result:
-            results.append(result)
-    
-    # Summary comparison
-    if results:
-        print(f"\n\n{'='*70}")
-        print("📋 RANKING & COMPARATIVE SUMMARY")
-        print(f"{'='*70}")
-        print(f"{'Rank':<5} {'Player':<15} {'Games':>7} {'CPL':>8} {'Rec':>7} {'Blund':>6} {'Mist':>6}")
-        print("-" * 70)
+if __name__ == "__main__":
+    # Main execution (script mode only; avoid running during pytest collection)
+    try:
+        print("\n" + "="*70)
+        print("🔍 PHASE 1: MULTI-PLAYER GAME ANALYSIS WITH ENGINE EVALUATION")
+        print("="*70)
+
+        # Find all player game files
+        player_files = sorted(glob.glob("games_*.csv"))
+        if not player_files:
+            print("❌ No player game files found")
+            raise SystemExit(1)
+
+        print(f"📁 Found {len(player_files)} player files\n")
+
+        # Analyze each player
+        results = []
+        for csv_file in player_files:
+            result = analyze_player(csv_file, max_games=25)
+            if result:
+                results.append(result)
+
+        # Summary comparison
+        if results:
+            print(f"\n\n{'='*70}")
+            print("📋 RANKING & COMPARATIVE SUMMARY")
+            print(f"{'='*70}")
+            print(f"{'Rank':<5} {'Player':<15} {'Games':>7} {'CPL':>8} {'Rec':>7} {'Blund':>6} {'Mist':>6}")
+            print("-" * 70)
+
+            sorted_results = sorted(results, key=lambda x: x["overall_cpl"])
+            for rank, r in enumerate(sorted_results, 1):
+                medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "  "
+                print(
+                    f"{medal} #{rank:<2} {r['player']:<15} {r['games_analyzed']:>7} {r['overall_cpl']:>8.1f} {r['recent_cpl']:>7.1f} {r['total_blunders']:>6} {r['total_mistakes']:>6}"
+                )
         
-        sorted_results = sorted(results, key=lambda x: x['overall_cpl'])
-        for rank, r in enumerate(sorted_results, 1):
-            medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "  "
-            print(f"{medal} #{rank:<2} {r['player']:<15} {r['games_analyzed']:>7} {r['overall_cpl']:>8.1f} {r['recent_cpl']:>7.1f} {r['total_blunders']:>6} {r['total_mistakes']:>6}")
-        
-        # Stats summary
-        avg_cpl = sum(r['overall_cpl'] for r in results) / len(results)
-        best_cpl = min(r['overall_cpl'] for r in results)
-        worst_cpl = max(r['overall_cpl'] for r in results)
-        total_games = sum(r['games_analyzed'] for r in results)
-        
-        print(f"\n📊 AGGREGATE STATS:")
-        print(f"   Total games analyzed: {total_games}")
-        print(f"   Average CPL: {avg_cpl:.1f} cp")
-        print(f"   CPL Range: {best_cpl:.1f} - {worst_cpl:.1f} cp")
-        print(f"\n✅ Phase 1 analysis complete! Analyzed {len(results)} players")
-    else:
-        print("❌ No valid results generated")
-        
-except KeyboardInterrupt:
-    print("\n⏸️  Analysis interrupted by user")
-except Exception as e:
-    print(f"❌ Fatal error: {e}")
-    import traceback
-    traceback.print_exc()
+            # Stats summary
+            avg_cpl = sum(r["overall_cpl"] for r in results) / len(results)
+            best_cpl = min(r["overall_cpl"] for r in results)
+            worst_cpl = max(r["overall_cpl"] for r in results)
+            total_games = sum(r["games_analyzed"] for r in results)
+
+            print("\n📊 AGGREGATE STATS:")
+            print(f"   Total games analyzed: {total_games}")
+            print(f"   Average CPL: {avg_cpl:.1f} cp")
+            print(f"   CPL Range: {best_cpl:.1f} - {worst_cpl:.1f} cp")
+            print(f"\n✅ Phase 1 analysis complete! Analyzed {len(results)} players")
+        else:
+            print("❌ No valid results generated")
+
+    except KeyboardInterrupt:
+        print("\n⏸️  Analysis interrupted by user")
+    except Exception as e:
+        print(f"❌ Fatal error: {e}")
+        import traceback
+
+        traceback.print_exc()

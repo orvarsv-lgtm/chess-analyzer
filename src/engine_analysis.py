@@ -106,7 +106,7 @@ DEBUG_ENGINE = False
 
 # Stockfish configuration
 STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
-ANALYSIS_DEPTH = 20
+ANALYSIS_DEPTH = 15
 
 # Optional remote engine (for Streamlit Cloud / environments without a Stockfish binary)
 VPS_ANALYSIS_URL = "http://72.60.185.247:8000/analyze_game"
@@ -415,8 +415,11 @@ def _analyze_game_detailed_local(moves_pgn_str: str, *, depth: int | None = None
     # Normalize depth (recommended default is 20; allow callers to override).
     try:
         depth_val = int(depth) if depth is not None else int(ANALYSIS_DEPTH)
+        # Hard cap for performance/safety: never exceed 20.
+        depth_val = max(1, min(20, depth_val))
     except Exception:
         depth_val = int(ANALYSIS_DEPTH)
+        depth_val = max(1, min(20, depth_val))
     depth_val = max(1, depth_val)
 
     # Start Stockfish engine

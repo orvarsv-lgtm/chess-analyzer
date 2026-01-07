@@ -20,7 +20,7 @@ def analyze_phase2(
     output_txt='phase2_results.txt',
     output_openings_csv='phase2_openings.csv',
     *,
-    analysis_depth: int = 20,
+    analysis_depth: int = 15,
 ):
     """Run Phase 2 analysis across player files and save summary outputs.
 

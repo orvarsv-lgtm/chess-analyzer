@@ -715,7 +715,7 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 20, retries: int = 2) -> dict:
+def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 15, retries: int = 2) -> dict:
     url, api_key = _get_engine_endpoint()
     if not url:
         raise RuntimeError("Engine endpoint not configured")
@@ -733,8 +733,8 @@ def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 20, retries: 
     try:
         depth_val = int(depth)
     except Exception:
-        depth_val = 20
-    depth_val = max(10, min(30, depth_val))
+        depth_val = 15
+    depth_val = max(10, min(20, depth_val))
     endpoint = f"{endpoint}?depth={depth_val}"
     headers = {"x-api-key": api_key} if api_key else {}
     payload = {"pgn": pgn_text, "max_games": max_games}
@@ -1344,12 +1344,12 @@ def main() -> None:
     max_games = st.slider("Max games", min_value=1, max_value=200, value=10, step=1)
 
     analysis_depth = st.slider(
-        "Engine depth (recommended 20)",
+        "Engine depth (recommended 15)",
         min_value=10,
-        max_value=30,
-        value=20,
+        max_value=20,
+        value=15,
         step=1,
-        help="Higher depth is slower but more accurate. Recommended: 20.",
+        help="Higher depth is slower but more accurate. Recommended: 15.",
     )
 
     pgn_text: str = ""  # single canonical analysis input
