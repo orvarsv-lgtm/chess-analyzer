@@ -35,6 +35,9 @@ from ui.puzzle_ui import render_puzzle_trainer
 # Cross-user shared puzzle bank + ratings
 from puzzles.global_puzzle_store import load_global_puzzles, save_puzzles_to_global_bank
 
+# Puzzle disk cache
+from puzzles.puzzle_cache import load_cached_puzzles, save_cached_puzzles
+
 BASE_DIR = os.path.dirname(__file__)
 OPENING_DATA_PATH = os.path.join(BASE_DIR, "src", "Chess_opening_data")
 
@@ -1715,14 +1718,44 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     if source_mode == "My games":
         # Generate puzzles from analyzed games
         if "generated_puzzles" not in st.session_state:
-            with st.spinner("Generating puzzles from your games..."):
+            # Try loading from disk cache first
+            cached_puzzles = load_cached_puzzles(games, max_age_hours=24)
+            
+            if cached_puzzles:
+                st.session_state["generated_puzzles"] = cached_puzzles
+                st.success(f"✓ Loaded {len(cached_puzzles)} puzzles from cache")
+            else:
+                # Generate fresh puzzles with progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                def update_progress(completed, total):
+                    progress = int((completed / total) * 100)
+                    progress_bar.progress(progress)
+                    status_text.text(f"Analyzing batch {completed}/{total}...")
+                
+                status_text.text("Generating puzzles from your games...")
+                
                 puzzles = generate_puzzles_from_games(
                     analyzed_games=games,
-                    min_eval_loss=100,  # Minimum 100cp loss to be a puzzle
-                    max_puzzles=200,     # Cap for performance on large imports
-                    engine_depth=10,     # Slightly lower depth for faster puzzle extraction
+                    min_eval_loss=100,
+                    max_puzzles=200,
+                    engine_depth=8,  # Reduced from 10 for faster generation
+                    progress_callback=update_progress,
                 )
+                
+                progress_bar.progress(100)
+                status_text.text("✓ Puzzle generation complete!")
+                
+                # Save to cache for next time
+                save_cached_puzzles(games, puzzles)
+                
                 st.session_state["generated_puzzles"] = puzzles
+                
+                # Clear progress indicators after a moment
+                time.sleep(0.5)
+                progress_bar.empty()
+                status_text.empty()
         else:
             puzzles = st.session_state["generated_puzzles"]
     else:

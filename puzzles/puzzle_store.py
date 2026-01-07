@@ -66,7 +66,7 @@ def from_legacy_puzzle(
     # We compute the full solution line lazily for the currently active puzzle in the UI.
     solution_moves = [uci]
 
-    # Guarantee explanation presence (backward compatible with legacy puzzles).
+    # Guarantee explanation presence (generate lazily if not already present).
     explanation = getattr(p, "explanation", None)
     if not explanation:
         try:
@@ -91,7 +91,7 @@ def from_legacy_puzzle(
                 phase=str(getattr(p, "phase", "middlegame") or "middlegame"),
             )
         except Exception:
-            explanation = "Explanation unavailable for this puzzle."
+            explanation = "Find the best move in this position."
 
     return PuzzleDefinition(
         puzzle_id=str(getattr(p, "puzzle_id", "") or ""),

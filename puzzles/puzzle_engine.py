@@ -35,12 +35,7 @@ try:
 except ImportError:
     USE_STOCKFISH_EXPLAINER = False
 
-# Import opponent mistake analyzer
-try:
-    from .opponent_mistake import analyze_opponent_mistake
-    USE_OPPONENT_MISTAKE_ANALYZER = True
-except ImportError:
-    USE_OPPONENT_MISTAKE_ANALYZER = False
+# Opponent mistake analysis removed for performance
 
 
 # =============================================================================
@@ -55,6 +50,18 @@ BLUNDER_EVAL_LOSS = 300
 
 # Opening move threshold (for opening_error detection)
 OPENING_MOVE_THRESHOLD = 10
+
+# Max puzzles per game (prioritize best ones)
+MAX_PUZZLES_PER_GAME = 3
+
+# Pre-filter threshold: skip positions with very small losses
+PREFILTER_MIN_LOSS = 80
+
+# Max puzzles per game (prioritize best ones)
+MAX_PUZZLES_PER_GAME = 3
+
+# Pre-filter threshold: skip positions with very small losses
+PREFILTER_MIN_LOSS = 80
 
 
 # =============================================================================
@@ -626,38 +633,8 @@ class PuzzleGenerator:
                     phase=phase,
                 )
 
-                # Generate puzzle explanation (deterministic, based on position analysis)
-                try:
-                    explanation = generate_puzzle_explanation(
-                        board=board,
-                        best_move=best_move_obj,
-                        eval_loss_cp=cp_loss,
-                        puzzle_type=puzzle_type,
-                        phase=phase,
-                    )
-                except Exception:
-                    explanation = "Find the best move in this position."
-                
-                # Analyze opponent's previous move to explain how this opportunity arose
-                opponent_mistake_explanation = None
-                opponent_move_san_out = None
-                opponent_best_move_san = None
-                fen_before_opponent = None
-                
-                if USE_OPPONENT_MISTAKE_ANALYZER and prev_fen and prev_move_uci:
-                    try:
-                        opp_mistake = analyze_opponent_mistake(
-                            fen_before_opponent_move=prev_fen,
-                            opponent_move_uci=prev_move_uci,
-                            depth=engine_depth,
-                        )
-                        if opp_mistake:
-                            opponent_mistake_explanation = opp_mistake.explanation
-                            opponent_move_san_out = opp_mistake.opponent_move_san
-                            opponent_best_move_san = opp_mistake.best_move_san
-                            fen_before_opponent = prev_fen
-                    except Exception:
-                        pass
+                # Lazy explanation generation: generate on-demand in UI, not here
+                explanation = None
 
                 # Generate puzzle ID
                 puzzle_id = f"{game_index}_{move_num}_{side_to_move}"
@@ -679,10 +656,10 @@ class PuzzleGenerator:
                     eval_after=eval_after if isinstance(eval_after, int) else None,
                     best_move_uci=best_move_uci,
                     explanation=explanation,
-                    opponent_mistake_explanation=opponent_mistake_explanation,
-                    opponent_move_san=opponent_move_san_out,
-                    opponent_best_move_san=opponent_best_move_san,
-                    fen_before_opponent=fen_before_opponent,
+                    opponent_mistake_explanation=None,
+                    opponent_move_san=None,
+                    opponent_best_move_san=None,
+                    fen_before_opponent=None,
                 )
 
                 puzzles.append(puzzle)
@@ -788,6 +765,7 @@ def generate_puzzles_from_games(
     min_eval_loss: int = MIN_PUZZLE_EVAL_LOSS,
     max_puzzles: int | None = 200,
     engine_depth: int = 8,
+    progress_callback=None,
 ) -> List[Puzzle]:
     """
     Generate puzzles from multiple analyzed games.
@@ -834,34 +812,61 @@ def generate_puzzles_from_games(
         # severe first (0), then higher loss first, then stable game/move order
         return (0 if severe else 1, -int(p.eval_loss_cp), int(p.source_game_index), int(p.move_number), str(p.puzzle_id))
 
-    # Reuse a single engine instance across games to avoid repeated process startup.
-    shared_engine = _open_stockfish_engine()
-    try:
-        for game in analyzed_games:
-
-            game_index = game.get("index", 0)
-            moves_table = game.get("moves_table") or []
-            focus_color = game.get("focus_color")
-
-            # Convert moves_table format to move_evals format
-            move_evals = _convert_moves_table_to_evals(moves_table, focus_color)
-
-            # Generate puzzles for this game
-            game_puzzles = generator.generate_from_game(
-                game_index=game_index,
-                move_evals=move_evals,
-                focus_color=focus_color,
-                engine=shared_engine,
-                engine_depth=engine_depth,
-            )
-
-            all_puzzles.extend(game_puzzles)
-    finally:
-        if shared_engine is not None:
-            try:
-                shared_engine.quit()
-            except Exception:
-                pass
+    # Parallel processing with batching for efficiency
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import os
+    
+    num_workers = min(4, os.cpu_count() or 2)
+    total_games = len(analyzed_games)
+    
+    def process_game_batch(game_batch):
+        """Process a batch of games with a dedicated engine instance."""
+        batch_puzzles = []
+        engine = _open_stockfish_engine()
+        try:
+            for game in game_batch:
+                game_index = game.get("index", 0)
+                moves_table = game.get("moves_table") or []
+                focus_color = game.get("focus_color")
+                
+                # Convert moves_table format to move_evals format
+                move_evals = _convert_moves_table_to_evals(moves_table, focus_color)
+                
+                # Generate puzzles for this game
+                game_puzzles = generator.generate_from_game(
+                    game_index=game_index,
+                    move_evals=move_evals,
+                    focus_color=focus_color,
+                    engine=engine,
+                    engine_depth=engine_depth,
+                )
+                
+                # Limit puzzles per game, prioritizing critical positions
+                game_puzzles.sort(key=lambda p: (-p.eval_loss_cp, p.move_number))
+                batch_puzzles.extend(game_puzzles[:MAX_PUZZLES_PER_GAME])
+        finally:
+            if engine is not None:
+                try:
+                    engine.quit()
+                except Exception:
+                    pass
+        return batch_puzzles
+    
+    # Split games into batches for parallel processing
+    batch_size = max(1, len(analyzed_games) // num_workers)
+    game_batches = [analyzed_games[i:i+batch_size] for i in range(0, len(analyzed_games), batch_size)]
+    
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = {executor.submit(process_game_batch, batch): i for i, batch in enumerate(game_batches)}
+        
+        for future in as_completed(futures):
+            batch_puzzles = future.result()
+            all_puzzles.extend(batch_puzzles)
+            
+            # Progress callback
+            if progress_callback:
+                completed = sum(1 for f in futures if f.done())
+                progress_callback(completed, len(game_batches))
 
     # Prioritize severe inaccuracies while still keeping smaller mistakes available.
     all_puzzles.sort(key=_priority_key)

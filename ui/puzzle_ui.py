@@ -699,7 +699,6 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         st.checkbox("Debug", key="puzzle_debug_board")
 
         show_explanation = st.checkbox("📖 Show explanation", key="puzzle_show_explanation_v2")
-        show_opponent_mistake = st.checkbox("🔍 What did opponent do wrong?", key="puzzle_show_opponent_mistake")
 
         # Reveal answer (for the current move in the sequence)
         reveal_cols = st.columns(1)
@@ -821,24 +820,6 @@ div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
 
         if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
             st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
-        
-        # Show opponent mistake analysis
-        if show_opponent_mistake:
-            opp_explanation = getattr(puzzle, 'opponent_mistake_explanation', None)
-            opp_move = getattr(puzzle, 'opponent_move_san', None)
-            opp_best = getattr(puzzle, 'opponent_best_move_san', None)
-            
-            if opp_explanation:
-                st.markdown("---")
-                st.markdown("**🎯 Why this opportunity exists:**")
-                if opp_move:
-                    st.write(f"Opponent played: **{opp_move}**")
-                st.write(f"🔴 {opp_explanation}")
-                if opp_best:
-                    st.write(f"Better was: **{opp_best}**")
-            else:
-                st.markdown("---")
-                st.info("No significant opponent mistake detected - this may be a typical tactical position.")
 
         nav1, nav2, nav3 = st.columns(3)
         with nav1:
