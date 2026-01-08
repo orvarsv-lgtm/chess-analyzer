@@ -391,6 +391,10 @@ def get_square_from_name(name: str) -> Optional[int]:
 
 def render_puzzle_info(puzzle: Puzzle) -> None:
     """Display puzzle metadata."""
+    # Show forcing position indicator prominently if applicable
+    if puzzle.is_forcing:
+        st.success(f"⚡ **FORCING POSITION!** Only one move keeps the advantage (gap: {puzzle.move_gap_cp}cp)")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:

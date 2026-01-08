@@ -439,6 +439,72 @@ def _best_move_from_engine(board: chess.Board, engine: chess.engine.SimpleEngine
         return None
 
 
+def _check_if_only_one_good_move(
+    board: chess.Board,
+    engine: chess.engine.SimpleEngine,
+    depth: int = 15,
+    min_gap_cp: int = 150
+) -> tuple[bool, int]:
+    """
+    Check if this position has only one good move (forcing position).
+    
+    Uses MultiPV analysis to compare best move vs second-best move.
+    If the gap is large (>= min_gap_cp), only one line maintains advantage.
+    
+    Args:
+        board: Position to analyze
+        engine: Stockfish engine instance
+        depth: Analysis depth
+        min_gap_cp: Minimum centipawn gap between best and 2nd best
+    
+    Returns:
+        (is_forcing, gap_cp): Whether position is forcing, and the gap in cp
+    """
+    try:
+        # Analyze with MultiPV=2 to get top 2 moves
+        info = engine.analyse(board, chess.engine.Limit(depth=int(depth)), multipv=2)
+        
+        if len(info) < 2:
+            # Only one legal move or analysis failed
+            return (True, 999)  # Only one move available = forcing
+        
+        # Get evaluations from white's perspective
+        best_score = info[0].get("score")
+        second_score = info[1].get("score")
+        
+        if best_score is None or second_score is None:
+            return (False, 0)
+        
+        # Convert to centipawns (handle mate scores)
+        def score_to_cp(score, color_to_move):
+            if score.is_mate():
+                # Mate scores are very high
+                mate_in = score.mate()
+                if mate_in > 0:
+                    return 10000 - mate_in * 10
+                else:
+                    return -10000 - mate_in * 10
+            else:
+                cp = score.score()
+                # Adjust for side to move
+                return cp if color_to_move == chess.WHITE else -cp
+        
+        color = board.turn
+        best_cp = score_to_cp(best_score.white(), color)
+        second_cp = score_to_cp(second_score.white(), color)
+        
+        # Calculate gap (always positive)
+        gap = abs(best_cp - second_cp)
+        
+        # Position is "forcing" if gap is large
+        is_forcing = gap >= min_gap_cp
+        
+        return (is_forcing, int(gap))
+        
+    except Exception:
+        return (False, 0)
+
+
 def _calculate_best_move_from_analysis(
     move_evals: List[dict],
     game_index: int,
@@ -611,6 +677,19 @@ class PuzzleGenerator:
                     except Exception:
                         best_move_uci = None
 
+                # Check if this is a forcing position (only one good move)
+                is_forcing = False
+                move_gap_cp = 0
+                if engine is not None:
+                    try:
+                        is_forcing, move_gap_cp = _check_if_only_one_good_move(
+                            board, engine, depth=engine_depth, min_gap_cp=150
+                        )
+                    except Exception:
+                        # If forcing check fails, default to non-forcing
+                        is_forcing = False
+                        move_gap_cp = 0
+
                 # Classify puzzle type
                 try:
                     best_move_obj = board.parse_san(best_move_san)
@@ -660,6 +739,8 @@ class PuzzleGenerator:
                     opponent_move_san=None,
                     opponent_best_move_san=None,
                     fen_before_opponent=None,
+                    is_forcing=is_forcing,
+                    move_gap_cp=move_gap_cp,
                 )
 
                 puzzles.append(puzzle)
@@ -804,16 +885,20 @@ def generate_puzzles_from_games(
     all_puzzles: List[Puzzle] = []
 
     def _priority_key(p: Puzzle) -> tuple:
-        """Sort key: prioritize winning positions that were missed, then severe mistakes, then larger eval loss.
+        """Sort key: prioritize forcing positions (only one good move), then winning positions missed, etc.
 
         Priority order:
-        1. Missed wins (eval_before was winning +200cp, significant loss)
-        2. Severe mistakes/blunders (>= 300cp loss)
-        3. Medium mistakes (100-300cp loss)
+        1. Forcing positions (only one move maintains advantage, gap ≥150cp) - highest educational value
+        2. Missed wins (eval_before was winning +200cp, significant loss)
+        3. Severe mistakes/blunders (>= 300cp loss)
+        4. Medium mistakes (100-300cp loss)
         
         Tie-breakers keep output deterministic.
         """
         eval_before = p.eval_before if p.eval_before is not None else 0
+        
+        # Check if this is a forcing position (only one good move)
+        is_forcing = p.is_forcing
         
         # Determine if position was winning before the move
         # For white: eval_before >= +200cp
@@ -824,17 +909,20 @@ def generate_puzzles_from_games(
         elif p.side_to_move == "black" and eval_before <= -200:
             was_winning = True
         
-        # Missed win with significant loss (top priority)
+        # Missed win with significant loss
         is_missed_win = was_winning and p.eval_loss_cp >= 150
         
         # Severe blunder
         is_severe = p.eval_loss_cp >= BLUNDER_EVAL_LOSS
         
         # Priority groups (lower number = higher priority):
+        # -1 = Forcing position (only one good move) - highest priority!
         # 0 = Missed winning position (most valuable to learn from)
         # 1 = Severe blunder in non-winning position
         # 2 = Medium mistake
-        if is_missed_win:
+        if is_forcing:
+            priority_group = -1
+        elif is_missed_win:
             priority_group = 0
         elif is_severe:
             priority_group = 1
@@ -842,8 +930,10 @@ def generate_puzzles_from_games(
             priority_group = 2
         
         # Within each group, sort by eval loss (higher first), then stable order
+        # For forcing positions, also consider the gap (higher gap = more forcing = better)
         return (
             priority_group,
+            -int(p.move_gap_cp),  # For forcing positions, prefer larger gaps
             -int(p.eval_loss_cp),
             int(p.source_game_index),
             int(p.move_number),

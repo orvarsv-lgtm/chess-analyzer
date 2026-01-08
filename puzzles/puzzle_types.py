@@ -98,6 +98,10 @@ class Puzzle:
     # FEN before opponent's move (for context)
     fen_before_opponent: Optional[str] = None
     
+    # Forcing position analysis: is this a "only one good move" situation?
+    is_forcing: bool = False  # True if only one move maintains advantage (gap ≥150cp)
+    move_gap_cp: int = 0  # Gap between best move and second-best move in centipawns
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -120,6 +124,8 @@ class Puzzle:
             "opponent_move_san": self.opponent_move_san,
             "opponent_best_move_san": self.opponent_best_move_san,
             "fen_before_opponent": self.fen_before_opponent,
+            "is_forcing": self.is_forcing,
+            "move_gap_cp": self.move_gap_cp,
         }
     
     @classmethod
@@ -145,6 +151,8 @@ class Puzzle:
             opponent_move_san=data.get("opponent_move_san"),
             opponent_best_move_san=data.get("opponent_best_move_san"),
             fen_before_opponent=data.get("fen_before_opponent"),
+            is_forcing=data.get("is_forcing", False),
+            move_gap_cp=data.get("move_gap_cp", 0),
         )
     
     def to_json(self) -> str:
