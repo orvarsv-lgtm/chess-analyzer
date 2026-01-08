@@ -163,12 +163,14 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
     
     # Show what will be analyzed
     st.info(f"""
-    🎯 **Career Analysis Focus:**
-    - **The Story**: Your ONE main problem, clearly stated
-    - **Primary Improvement Lever**: The single thing that will move your results most
-    - **Why This Happens**: The pattern behind your mistakes (behavior, not statistics)
-    - **The Fix**: One specific action to take
-    - **Controllable Goal**: One measurable target
+    🎯 **Data-Driven Analysis**
+    
+    Every insight is backed by your actual game data:
+    - What's actually deciding your games (eval swings, blunder patterns)
+    - Where you're losing rating points (with specific numbers)
+    - Concrete goals tied to your weaknesses
+    
+    _No generic advice. No "study Capablanca." Just your data._
     """)
     
     # Cache key for career analysis
@@ -211,7 +213,13 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
                     # Cache the result
                     st.session_state[cache_key] = result
                     
-                    st.success(f"✅ Career analysis complete! ({result['tokens_used']} tokens, ~${result['cost_cents']/100:.2f})")
+                    # Note: Now using data-driven analysis (no API cost)
+                    tokens = result.get('tokens_used', 0)
+                    cost = result.get('cost_cents', 0)
+                    if tokens > 0:
+                        st.success(f"✅ Career analysis complete! ({tokens} tokens, ~${cost/100:.2f})")
+                    else:
+                        st.success("✅ Career analysis complete! (Data-driven, no API cost)")
                     _render_career_analysis_result(result)
                     
                 except Exception as e:
@@ -220,12 +228,17 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
 
 
 def _render_career_analysis_result(result: Dict[str, Any]) -> None:
-    """Render the career analysis result - focused on the AI story, not stats."""
+    """Render the career analysis result - focused on data-driven insights."""
     
     stats = result.get('stats', {})
     
-    # Just 3 key metrics - less is more
-    col1, col2, col3 = st.columns(3)
+    # Show primary issue prominently if available
+    primary_issue = result.get('primary_issue', '')
+    if primary_issue and primary_issue != "No dominant weakness identified":
+        st.error(f"**🎯 Primary Issue**: {primary_issue}")
+    
+    # Key metrics row
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Games", stats.get('total_games', 0))
     with col2:
@@ -234,13 +247,25 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     with col3:
         conversion_rate = stats.get('conversion_rate', 0)
         conv_icon = "✅" if conversion_rate >= 70 else "⚠️" if conversion_rate >= 50 else "🔴"
-        st.metric(f"{conv_icon} Conversion", f"{conversion_rate:.0f}%", help="How often you win from winning positions (≥+1.5)")
+        st.metric(f"{conv_icon} Conversion", f"{conversion_rate:.0f}%", help="% of winning positions (≥+1.5) converted to wins")
+    with col4:
+        blunder_rate = stats.get('blunder_rate', 0)
+        br_icon = "✅" if blunder_rate < 4 else "⚠️" if blunder_rate < 7 else "🔴"
+        st.metric(f"{br_icon} Blunders/100", f"{blunder_rate:.1f}")
     
     st.markdown("---")
     
-    # Show the AI analysis first and prominently - this is the main content
-    st.markdown("### 🎯 Your Analysis")
+    # Show the main analysis
+    st.markdown("### 📊 Your Analysis")
     st.markdown(result.get('analysis', 'No analysis available'))
+    
+    # Show data sources used
+    data_sources = result.get('data_sources', [])
+    if data_sources:
+        with st.expander("📋 Data sources used in this analysis", expanded=False):
+            st.caption("Every claim above is derived from these data points:")
+            for ds in data_sources[:10]:
+                st.caption(f"• `{ds}`")
     
     # Put all the detailed stats in a collapsible section
     with st.expander("📊 Detailed Statistics (for reference)", expanded=False):

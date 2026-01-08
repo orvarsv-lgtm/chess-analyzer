@@ -89,7 +89,9 @@ def generate_game_review(
     player_rating: Optional[int] = None,
 ) -> AICoachResponse:
     """
-    Generate comprehensive AI coaching review for a single game.
+    Generate data-driven coaching review for a single game.
+    
+    NO generic advice. Every claim backed by move data.
     
     Args:
         game_data: Analyzed game data with moves, evals, phases
@@ -99,48 +101,81 @@ def generate_game_review(
     Returns:
         AICoachResponse with personalized insights
     """
-    client = _get_openai_client()
+    from src.data_driven_coach import explain_single_game
     
-    # Build context prompt from game data
-    prompt = _build_game_review_prompt(game_data, player_color, player_rating)
+    # Generate data-driven analysis
+    analysis = explain_single_game(game_data, player_color, player_rating)
     
-    # Call GPT-4 Turbo
-    response = client.chat.completions.create(
-        model="gpt-4-turbo-preview",  # or "gpt-4o" for faster/cheaper
-        messages=[
-            {
-                "role": "system",
-                "content": _get_coach_system_prompt()
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.7,  # Slightly creative but not random
-        max_tokens=2000,  # Comprehensive review
-    )
+    # Extract key moments
+    key_moments = []
+    for km in analysis.get('key_moments', []):
+        key_moments.append({
+            'move': km.get('move'),
+            'advice': km.get('explanation', ''),
+        })
     
-    # Parse response
-    content = response.choices[0].message.content
-    tokens_used = response.usage.total_tokens
+    # Build phase-specific advice from data
+    phase_cpl = analysis.get('phase_cpl', {})
+    opening_advice = ""
+    strategic_advice = ""
+    tactical_advice = ""
     
-    # Estimate cost (GPT-4 Turbo: $0.01/1K input, $0.03/1K output)
-    cost_cents = int((tokens_used / 1000) * 2)  # Rough estimate
+    # Opening advice based on actual data
+    opening_cpl = phase_cpl.get('opening', 0)
+    if opening_cpl > 50:
+        opening_advice = (
+            f"Opening CPL was {opening_cpl:.0f}, indicating early mistakes. "
+            f"Review the first 15 moves for where you deviated."
+        )
+    elif opening_cpl < 20:
+        opening_advice = f"Opening play was solid (CPL: {opening_cpl:.0f}). No major issues."
+    else:
+        opening_advice = f"Opening was acceptable (CPL: {opening_cpl:.0f})."
     
-    # Parse structured response
-    parsed = _parse_coach_response(content)
+    # Strategic advice based on conversion
+    if analysis.get('had_winning_position') and analysis.get('result') != '1-0' and player_color == 'white':
+        strategic_advice = (
+            "You had a winning position but failed to convert. "
+            "When ahead, look for simplifying trades that preserve your advantage."
+        )
+    elif analysis.get('had_winning_position') and analysis.get('result') != '0-1' and player_color == 'black':
+        strategic_advice = (
+            "You had a winning position but failed to convert. "
+            "When ahead, look for simplifying trades that preserve your advantage."
+        )
+    
+    # Tactical advice based on blunders
+    biggest_swing = analysis.get('biggest_swing', {})
+    if biggest_swing.get('swing', 0) >= 200:
+        tactical_advice = (
+            f"The critical error was move {biggest_swing.get('move')} "
+            f"({biggest_swing.get('san')}) which lost {biggest_swing.get('swing')}cp. "
+            f"Best was {biggest_swing.get('best')}. Study this position."
+        )
+    elif analysis.get('blunders', 0) == 0:
+        tactical_advice = "No major tactical errors. Good calculation this game."
+    
+    # Training recommendations tied to data
+    training = []
+    if opening_cpl > 50:
+        training.append(f"Review opening: CPL was {opening_cpl:.0f}")
+    if phase_cpl.get('endgame', 0) > 100:
+        training.append(f"Endgame study: CPL was {phase_cpl.get('endgame', 0):.0f}")
+    if biggest_swing.get('swing', 0) >= 200:
+        training.append(f"Analyze move {biggest_swing.get('move')}: {biggest_swing.get('swing')}cp swing")
+    if not training:
+        training.append("Good game - review for patterns to repeat")
     
     return AICoachResponse(
-        game_summary=parsed['summary'],
-        key_moments=parsed['key_moments'],
-        opening_advice=parsed['opening'],
-        strategic_advice=parsed['strategy'],
-        tactical_advice=parsed['tactics'],
-        training_recommendations=parsed['training'],
+        game_summary=analysis.get('summary', 'No analysis available.'),
+        key_moments=key_moments,
+        opening_advice=opening_advice,
+        strategic_advice=strategic_advice or "No strategic issues identified from this game.",
+        tactical_advice=tactical_advice or "Review blunders for tactical patterns.",
+        training_recommendations=training,
         timestamp=datetime.now(),
-        cost_cents=cost_cents,
-        tokens_used=tokens_used,
+        cost_cents=0,  # No API call
+        tokens_used=0,
     )
 
 
@@ -501,105 +536,96 @@ def generate_career_analysis(
     Returns:
         Dict with career analysis sections
     """
-    client = _get_openai_client()
-    
     # Aggregate statistics across all games
     stats = _aggregate_career_stats(all_games)
     
-    # Format data for prompt
-    white_stats = stats.get('white_stats', {})
-    black_stats = stats.get('black_stats', {})
-    ppi = stats.get('ppi', {})
-    blunder_contexts = stats.get('blunder_contexts', {})
-    conversion_stats = stats.get('conversion_stats', {})
-    opening_outcomes = stats.get('opening_outcomes', {})
-    rating_cost = stats.get('biggest_rating_cost', (None, {}))
-    baselines = stats.get('phase_baselines', {})
+    # Use the data-driven coaching engine instead of GPT-4
+    from src.data_driven_coach import generate_data_driven_analysis, format_analysis_for_display
     
-    # Format skill attribution
-    skill_attribution_str = _format_skill_attribution(blunder_contexts, stats.get('total_blunders', 0))
+    # Generate analysis from data (no LLM call)
+    analysis_result = generate_data_driven_analysis(
+        stats=stats,
+        games=all_games,
+        player_name=player_name,
+        player_rating=player_rating,
+    )
     
-    # Format biggest rating cost
-    rating_cost_str = _format_rating_cost(stats.get('rating_cost_factors', {}))
+    # Format for display
+    analysis_text = format_analysis_for_display(analysis_result)
     
-    # Format opening outcomes
-    opening_outcome_str = _format_opening_outcomes(opening_outcomes, stats.get('openings', {}))
+    return {
+        'analysis': analysis_text,
+        'stats': stats,
+        'tokens_used': 0,  # No API call
+        'cost_cents': 0,   # Free!
+        'timestamp': datetime.now(),
+        'primary_issue': analysis_result.get('primary_issue', ''),
+        'data_sources': analysis_result.get('data_sources', []),
+    }
+
+
+def generate_career_analysis_with_llm(
+    all_games: List[Dict[str, Any]],
+    player_name: str,
+    player_rating: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Generate AI analysis using GPT-4 for natural language polish.
     
-    prompt = f"""You are an expert chess coach giving a focused, actionable review. Your job is to tell a SIMPLE STORY with ONE clear enemy and ONE clear mission.
+    This version uses the data-driven analysis as input to GPT-4,
+    which just polishes the prose (not generates new content).
+    
+    Use this for premium users who want more natural-sounding output.
+    """
+    client = _get_openai_client()
+    
+    # First generate the data-driven analysis
+    stats = _aggregate_career_stats(all_games)
+    
+    from src.data_driven_coach import generate_data_driven_analysis
+    data_analysis = generate_data_driven_analysis(
+        stats=stats,
+        games=all_games,
+        player_name=player_name,
+        player_rating=player_rating,
+    )
+    
+    # Now use GPT-4 to polish the prose (NOT generate new content)
+    prompt = f"""You are a chess coach. Below is a DATA-DRIVEN analysis of a player's games.
 
-**Player**: {player_name}
-**Rating**: {player_rating or 'Unknown'}
-**Games Analyzed**: {stats['total_games']} (W:{stats.get('wins', 0)} L:{stats.get('losses', 0)} D:{stats.get('draws', 0)})
+Your job is to REWRITE this analysis in natural, conversational prose.
 
----
-**PHASE CONTEXT** (background only)
-PPI normalizes CPL for phase difficulty. Near 1.0 = average. All phases similar = balanced skill.
-| Phase | PPI |
-|-------|-----|
-| Opening | {ppi.get('opening', 0):.2f} |
-| Middlegame | {ppi.get('middlegame', 0):.2f} |
-| Endgame | {ppi.get('endgame', 0):.2f} |
-
----
-**CONVERSION** (often the real story)
-- Winning positions (eval >= +1.5): {conversion_stats.get('winning_positions', 0)} games
-- Actually converted: {conversion_stats.get('converted_wins', 0)} ({stats.get('conversion_rate', 0):.0f}%)
-
----
-**FAILURE PATTERNS**
-{skill_attribution_str}
-
----
-**RELATIVE IMPACT** (rank order only)
-{rating_cost_str}
-
----
-**OPENING POSITION QUALITY**
-{opening_outcome_str}
+RULES:
+1. DO NOT add any advice that isn't in the data analysis below
+2. DO NOT mention Capablanca, Karpov, "chess is a marathon", or generic tips
+3. DO NOT recommend external resources like Lichess puzzles
+4. EVERY claim must come from the data below
+5. Keep it SHORT - max 400 words total
 
 ---
-**COLOR SPLIT**
-- White: {white_stats.get('games', 0)}g, {white_stats.get('win_rate', 0):.0%} WR
-- Black: {black_stats.get('games', 0)}g, {black_stats.get('win_rate', 0):.0%} WR
+DATA ANALYSIS:
+{data_analysis['analysis']}
 
-===
+PRIMARY ISSUE: {data_analysis.get('primary_issue', 'Unknown')}
 
-Write your analysis using this EXACT structure:
+PLAYER: {player_name}
+RATING: {player_rating or 'Unknown'}
+GAMES: {stats.get('total_games', 0)}
+WIN RATE: {stats.get('win_rate', 0):.0%}
+CONVERSION: {stats.get('conversion_rate', 0):.0f}%
+---
 
-## The Story (2-3 sentences)
-State the ONE main problem clearly. Example: "You get winning positions but fail to convert them. This single issue explains most of your lost results."
-
-## Primary Improvement Lever
-Name the ONE thing to fix. This is the enemy. Everything else is secondary.
-
-## Why This Happens
-Describe the pattern as a behavior, not a statistic. Example: "After forcing captures, you stop checking for counterplay." NOT: "42% of blunders are after captures."
-
-## The Fix
-One specific action. Example: "Before every recapture, ask: what is their best reply? Practice in 10 endgame puzzles daily for 2 weeks."
-
-## Controllable Goal
-One measurable target. Example: "Conversion rate: {stats.get('conversion_rate', 0):.0f}% to 70%"
-
-## Opening Note (only if relevant)
-If openings are NOT the main issue, skip this entirely.
-If they are, split into: (a) openings giving good positions, (b) openings where results collapse despite good positions.
-
-CONSTRAINTS:
-- If all PPI values are within 0.2 of each other, say "phases are balanced" and move on.
-- If conversion is below 70%, that is almost always the primary lever.
-- NEVER cite absolute rating points. Use "largest impact factor" only.
-- NEVER list overlapping statistical categories as separate issues.
-- Keep it SHORT. One enemy, one mission, one fix."""
+Rewrite the above analysis in a natural coaching voice. Start with the most important finding.
+Do NOT add new information. Only rephrase what's there."""
 
     response = client.chat.completions.create(
         model="gpt-4-turbo-preview",
         messages=[
-            {"role": "system", "content": "You are a chess coach who tells simple stories. One enemy. One mission. No hedging."},
+            {"role": "system", "content": "You are a chess coach who only speaks from data. Never add generic advice."},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.7,
-        max_tokens=2000,
+        temperature=0.5,
+        max_tokens=800,
     )
     
     content = response.choices[0].message.content
@@ -612,6 +638,8 @@ CONSTRAINTS:
         'tokens_used': tokens_used,
         'cost_cents': cost_cents,
         'timestamp': datetime.now(),
+        'primary_issue': data_analysis.get('primary_issue', ''),
+        'data_sources': data_analysis.get('data_sources', []),
     }
 
 
