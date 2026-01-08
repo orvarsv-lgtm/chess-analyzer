@@ -16,6 +16,25 @@ import chess.pgn
 from src.lichess_api import fetch_lichess_pgn
 from src.analytics import generate_coaching_report, CoachingSummary
 
+# New feature imports
+from src.database import get_db
+from src.game_replayer import render_game_replayer
+from src.quick_wins import (
+    add_export_button,
+    add_dark_mode_toggle,
+    add_keyboard_shortcuts,
+    create_shareable_link,
+    detect_time_trouble,
+    render_time_trouble_analysis,
+)
+from src.opening_repertoire import render_opening_repertoire_ui
+from src.opponent_strength import render_opponent_strength_analysis
+from src.streak_detection import (
+    detect_current_streaks,
+    render_streak_badges,
+    get_streak_milestones,
+)
+
 # Puzzle module imports
 from puzzles import (
     Puzzle,
@@ -838,6 +857,18 @@ def _render_results(data: dict) -> None:
 def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
     games: list[dict[str, Any]] = aggregated.get("games", []) or []
     all_rows: list[dict[str, Any]] = aggregated.get("analysis", []) or []
+    focus_player = aggregated.get("focus_player", "").strip()
+
+    # Add quick wins to sidebar
+    with st.sidebar:
+        add_dark_mode_toggle()
+        add_keyboard_shortcuts()
+        if focus_player:
+            add_export_button(aggregated, focus_player)
+            share_link = create_shareable_link(aggregated, focus_player)
+            if share_link:
+                st.markdown(f"**Share this analysis:**")
+                st.code(share_link, language="text")
 
     st.subheader("Analysis")
     st.metric("Games analyzed", int(aggregated.get("games_analyzed") or len(games) or 0))
@@ -995,6 +1026,11 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
     """Render the advanced coaching insights section from analytics pipeline."""
     st.header("🎯 Advanced Coaching Insights")
     st.caption("Powered by deterministic analytics engine - no AI/LLM in analysis")
+    
+    # Get games from session state for time trouble analysis
+    games = []
+    if st.session_state.get("analysis_result"):
+        games = st.session_state["analysis_result"].get("games", [])
     
     # --- Playstyle Analysis (NEW) ---
     playstyle = coaching_report.playstyle
@@ -1296,6 +1332,40 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
         with col3:
             if peer.weakest_vs_peers:
                 st.metric("📈 Needs Work", peer.weakest_vs_peers.title())
+    
+    # --- Time Trouble Analysis (NEW) ---
+    st.divider()
+    st.subheader("⏱️ Time Trouble Analysis")
+    
+    # Aggregate all move evaluations from games
+    all_move_evals = []
+    for game in games:
+        moves_table = game.get("moves_table", [])
+        for move in moves_table:
+            all_move_evals.append({
+                "san": move.get("move_san", ""),
+                "cp_loss": move.get("cp_loss", 0),
+                "phase": move.get("phase", ""),
+                "move_num": move.get("ply", 0),
+                "time_remaining": move.get("time_remaining"),  # May not be present yet
+            })
+    
+    # Try to detect time trouble (may not have time data yet)
+    try:
+        # For now, we don't have time control or time remaining in the data
+        # This will be enhanced when Lichess time data is integrated
+        st.info(
+            "⏰ **Time trouble analysis requires time remaining data from Lichess API.**\n\n"
+            "This feature will detect blunders made when you're low on time and help you "
+            "improve your time management. Coming soon!"
+        )
+        
+        # Placeholder for future integration
+        # time_trouble_stats = detect_time_trouble(all_move_evals, time_control)
+        # render_time_trouble_analysis(time_trouble_stats)
+        
+    except Exception as e:
+        st.caption(f"Time trouble analysis unavailable: {e}")
         
         # Blunder rate comparison
         if peer.blunder_rate_percentile > 0 or peer.blunder_rate_vs_peers_pct != 0:
@@ -1646,14 +1716,22 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
 
     view = st.radio(
         "Main view",
-        options=["📊 Analysis", "♟️ Puzzles"],
-        horizontal=True,
+        options=["📊 Analysis", "🎮 Game Replayer", "📚 Opening Repertoire", "⚔️ Opponent Analysis", "🏆 Streaks", "♟️ Puzzles"],
+        horizontal=False,
         key="main_view",
         label_visibility="collapsed",
     )
 
     if view == "♟️ Puzzles":
         _render_puzzle_tab(aggregated)
+    elif view == "🎮 Game Replayer":
+        _render_game_replayer_tab(aggregated)
+    elif view == "📚 Opening Repertoire":
+        _render_opening_repertoire_tab(aggregated)
+    elif view == "⚔️ Opponent Analysis":
+        _render_opponent_analysis_tab(aggregated)
+    elif view == "🏆 Streaks":
+        _render_streaks_tab(aggregated)
     else:
         _render_enhanced_ui(aggregated)
 
@@ -1910,6 +1988,136 @@ def _filter_puzzles(
         result = [p for p in result if p.phase == target_phase]
     
     return result
+
+
+def _render_game_replayer_tab(aggregated: dict[str, Any]) -> None:
+    """Render the interactive game replayer tab."""
+    st.header("🎮 Game Replayer")
+    st.caption("Step through your games move by move with evaluation analysis")
+    
+    games = aggregated.get("games", [])
+    if not games:
+        st.info("No games analyzed yet. Run an analysis first!")
+        return
+    
+    # Add quick wins
+    add_dark_mode_toggle()
+    add_keyboard_shortcuts()
+    
+    # Game selector
+    game_options = [
+        f"Game {i+1}: {g.get('white', 'Unknown')} vs {g.get('black', 'Unknown')} ({g.get('date', 'Unknown')})"
+        for i, g in enumerate(games)
+    ]
+    
+    selected_game_idx = st.selectbox(
+        "Select a game to replay",
+        options=range(len(games)),
+        format_func=lambda i: game_options[i],
+        key="replayer_game_select",
+    )
+    
+    if selected_game_idx is not None:
+        game_data = games[selected_game_idx]
+        moves_table = game_data.get("moves_table", [])
+        
+        if not moves_table:
+            st.warning("No move data available for this game.")
+            return
+        
+        # Render the interactive replayer
+        render_game_replayer(game_data, moves_table)
+
+
+def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
+    """Render the opening repertoire analysis tab."""
+    st.header("📚 Opening Repertoire")
+    st.caption("Track your opening performance and identify gaps in your repertoire")
+    
+    focus_player = aggregated.get("focus_player", "").strip()
+    if not focus_player:
+        st.warning("No focus player identified. Please analyze games from a specific player.")
+        return
+    
+    games = aggregated.get("games", [])
+    if not games:
+        st.info("No games analyzed yet. Run an analysis first!")
+        return
+    
+    # Add quick wins
+    add_dark_mode_toggle()
+    add_export_button(aggregated, focus_player)
+    
+    # Render opening repertoire UI
+    render_opening_repertoire_ui(focus_player, games)
+
+
+def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
+    """Render the opponent strength analysis tab."""
+    st.header("⚔️ Opponent Strength Analysis")
+    st.caption("See how you perform against different rating levels")
+    
+    games = aggregated.get("games", [])
+    if not games:
+        st.info("No games analyzed yet. Run an analysis first!")
+        return
+    
+    focus_player = aggregated.get("focus_player", "").strip()
+    focus_player_rating = 0
+    
+    # Try to get player rating from first game
+    if games:
+        first_game = games[0]
+        focus_player_rating = first_game.get("focus_player_rating", 0)
+        if focus_player_rating == 0:
+            focus_color = first_game.get("focus_color")
+            if focus_color == "white":
+                focus_player_rating = first_game.get("white_rating", 0)
+            elif focus_color == "black":
+                focus_player_rating = first_game.get("black_rating", 0)
+    
+    # Add quick wins
+    add_dark_mode_toggle()
+    
+    # Render opponent strength analysis
+    render_opponent_strength_analysis(games, focus_player_rating)
+
+
+def _render_streaks_tab(aggregated: dict[str, Any]) -> None:
+    """Render the streaks and achievements tab."""
+    st.header("🏆 Streaks & Achievements")
+    st.caption("Track your winning streaks and unlock achievements")
+    
+    games = aggregated.get("games", [])
+    focus_player = aggregated.get("focus_player", "").strip()
+    
+    if not games:
+        st.info("No games analyzed yet. Run an analysis first!")
+        return
+    
+    if not focus_player:
+        st.warning("No focus player identified. Please analyze games from a specific player.")
+        return
+    
+    # Add quick wins
+    add_dark_mode_toggle()
+    
+    # Detect current streaks
+    streaks = detect_current_streaks(games, focus_player)
+    
+    # Render streak badges and achievements
+    render_streak_badges(streaks)
+    
+    # Show achievement milestones
+    st.divider()
+    st.subheader("🎯 Achievement Milestones")
+    milestones = get_streak_milestones()
+    
+    milestone_cols = st.columns(3)
+    for i, (name, count) in enumerate(milestones.items()):
+        col = milestone_cols[i % 3]
+        with col:
+            st.metric(name, f"{count} games")
 
 
 # Prevent any accidental local analysis path.

@@ -776,11 +776,13 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             st.markdown("""
 <style>
 div[data-testid="column"] button[kind="secondary"] {
-    font-size: 1.1rem;
-    padding: 0.6rem 1.2rem;
+    font-size: 1.05rem;
+    padding: 0.6rem 0.8rem;
     border-radius: 0.5rem;
     font-weight: 600;
     transition: all 0.2s;
+    white-space: nowrap;
+    min-width: 100px;
 }
 div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
     transform: scale(1.05);
