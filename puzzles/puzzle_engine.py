@@ -804,13 +804,51 @@ def generate_puzzles_from_games(
     all_puzzles: List[Puzzle] = []
 
     def _priority_key(p: Puzzle) -> tuple:
-        """Sort key: severe mistakes first, then larger eval loss.
+        """Sort key: prioritize winning positions that were missed, then severe mistakes, then larger eval loss.
 
+        Priority order:
+        1. Missed wins (eval_before was winning +200cp, significant loss)
+        2. Severe mistakes/blunders (>= 300cp loss)
+        3. Medium mistakes (100-300cp loss)
+        
         Tie-breakers keep output deterministic.
         """
-        severe = p.eval_loss_cp >= BLUNDER_EVAL_LOSS
-        # severe first (0), then higher loss first, then stable game/move order
-        return (0 if severe else 1, -int(p.eval_loss_cp), int(p.source_game_index), int(p.move_number), str(p.puzzle_id))
+        eval_before = p.eval_before if p.eval_before is not None else 0
+        
+        # Determine if position was winning before the move
+        # For white: eval_before >= +200cp
+        # For black: eval_before <= -200cp
+        was_winning = False
+        if p.side_to_move == "white" and eval_before >= 200:
+            was_winning = True
+        elif p.side_to_move == "black" and eval_before <= -200:
+            was_winning = True
+        
+        # Missed win with significant loss (top priority)
+        is_missed_win = was_winning and p.eval_loss_cp >= 150
+        
+        # Severe blunder
+        is_severe = p.eval_loss_cp >= BLUNDER_EVAL_LOSS
+        
+        # Priority groups (lower number = higher priority):
+        # 0 = Missed winning position (most valuable to learn from)
+        # 1 = Severe blunder in non-winning position
+        # 2 = Medium mistake
+        if is_missed_win:
+            priority_group = 0
+        elif is_severe:
+            priority_group = 1
+        else:
+            priority_group = 2
+        
+        # Within each group, sort by eval loss (higher first), then stable order
+        return (
+            priority_group,
+            -int(p.eval_loss_cp),
+            int(p.source_game_index),
+            int(p.move_number),
+            str(p.puzzle_id)
+        )
 
     # Parallel processing with batching for efficiency
     from concurrent.futures import ThreadPoolExecutor, as_completed
