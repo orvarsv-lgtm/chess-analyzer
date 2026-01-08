@@ -22,22 +22,20 @@ from typing import List, Optional, Dict, Any
 
 import streamlit as st
 
+# Load environment variables at module import time
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load .env file immediately
+except ImportError:
+    pass  # python-dotenv not installed, use system env vars only
+
 
 # API client will be initialized lazily
 _openai_client = None
 
 
-def _get_openai_client():
-    """Lazy initialization of OpenAI client."""
-    global _openai_client
-    if _openai_client is None:
-        try:
-            from openai import OpenAI
-            
-            # Try to load from .env file first
+def _get_openaGet API key from environment (already loaded by load_dotenv at module import)
             api_key = os.getenv('OPENAI_API_KEY')
-            
-            if not api_key:
                 # Try loading from .env file using python-dotenv
                 try:
                     from dotenv import load_dotenv
