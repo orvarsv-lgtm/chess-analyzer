@@ -135,8 +135,9 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
             
             with eval_cols[1]:
                 cp_loss = current_eval.get('cp_loss', 0)
-                quality = current_eval.get('move_quality', 'Good')
-                st.metric("CP Loss", f"{cp_loss}cp", delta=f"{quality}")
+                quality = _classify_move_quality(cp_loss)
+                st.metric("CP Loss", f"{cp_loss}cp")
+                st.caption(f"Quality: {quality}")
             
             with eval_cols[2]:
                 eval_after = current_eval.get('eval_after')
@@ -286,6 +287,24 @@ def _get_quality_color(quality: str) -> str:
     return colors.get(quality, '#FFFFFF')
 
 
+def _classify_move_quality(cp_loss: int) -> str:
+    """Classify move quality based on centipawn loss."""
+    if cp_loss is None or cp_loss < 0:
+        return "Unknown"
+    elif cp_loss <= 10:
+        return "Best"
+    elif cp_loss <= 20:
+        return "Excellent"
+    elif cp_loss <= 40:
+        return "Good"
+    elif cp_loss <= 90:
+        return "Inaccuracy"
+    elif cp_loss <= 200:
+        return "Mistake"
+    else:
+        return "Blunder"
+
+
 def _render_eval_graph(move_evals: List[Dict]):
     """Render evaluation graph (CP over moves)."""
     import pandas as pd
@@ -294,14 +313,14 @@ def _render_eval_graph(move_evals: List[Dict]):
         st.info("No evaluation data available")
         return
     
-    # Extract evals
+    # Extract evals - use score_cp field from moves_table
     evals = []
     for i, move_eval in enumerate(move_evals):
-        eval_after = move_eval.get('eval_after')
-        if eval_after is not None and abs(eval_after) < 9000:  # Filter out mate scores
+        score_cp = move_eval.get('score_cp')
+        if score_cp is not None and abs(score_cp) < 9000:  # Filter out mate scores
             evals.append({
                 'Move': i + 1,
-                'Evaluation': eval_after
+                'Evaluation': score_cp
             })
     
     if not evals:
