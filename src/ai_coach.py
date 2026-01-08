@@ -30,6 +30,22 @@ except ImportError:
     pass  # python-dotenv not installed, use system env vars only
 
 
+def _get_api_key():
+    """Get OpenAI API key from various sources."""
+    # 1. Try environment variable (works locally with .env)
+    api_key = os.getenv('OPENAI_API_KEY')
+    
+    # 2. Try Streamlit secrets (works on Streamlit Cloud)
+    if not api_key:
+        try:
+            import streamlit as st
+            api_key = st.secrets.get('OPENAI_API_KEY')
+        except Exception:
+            pass
+    
+    return api_key
+
+
 # API client will be initialized lazily
 _openai_client = None
 
@@ -41,11 +57,11 @@ def _get_openai_client():
         try:
             from openai import OpenAI
             
-            # Get API key from environment (already loaded by load_dotenv at module import)
-            api_key = os.getenv('OPENAI_API_KEY')
+            # Get API key from environment or Streamlit secrets
+            api_key = _get_api_key()
             
             if not api_key:
-                raise ValueError("OPENAI_API_KEY not found in environment or .env file")
+                raise ValueError("OPENAI_API_KEY not found in environment or Streamlit secrets")
             
             _openai_client = OpenAI(api_key=api_key)
         except ImportError:
