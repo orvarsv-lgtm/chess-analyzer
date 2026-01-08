@@ -53,6 +53,10 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
     
     max_ply = len(san_moves)
     
+    # Bounds check current_ply (in case it's from a previous game)
+    if st.session_state.replay_ply > max_ply:
+        st.session_state.replay_ply = 0
+    
     # ======= LAYOUT =======
     col1, col2 = st.columns([2, 1])
     
