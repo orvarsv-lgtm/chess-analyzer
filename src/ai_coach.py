@@ -1220,34 +1220,68 @@ def _format_rating_cost(rating_cost_factors: Dict[str, Any]) -> str:
     return '\n'.join(lines)
 
 
-def _format_opening_outcomes(opening_outcomes: Dict[str, Dict], openings: Dict) -> str:
-    """Format opening outcome analysis (position quality after opening)."""
+def _format_opening_outcomes(opening_outcomes: Dict[str, Any], openings: Dict) -> str:
+    """Format opening outcome analysis (position quality after opening).
+
+    Supports both per-opening dictionaries and aggregate-only structures.
+    """
     if not opening_outcomes:
         return "No opening outcome data available."
-    
+
+    # Detect aggregate-only structure (current aggregator stores global stats)
+    if isinstance(opening_outcomes, dict) and 'games_with_opening_eval' in opening_outcomes:
+        games = opening_outcomes.get('games_with_opening_eval', 0)
+        avg_eval = opening_outcomes.get('avg_eval_after_opening', 0)
+        better = opening_outcomes.get('left_opening_better', 0)
+        worse = opening_outcomes.get('left_opening_worse', 0)
+        avg_transition = opening_outcomes.get('avg_transition_cpl', 0)
+
+        lines = [
+            f"Across all openings: {games} games with eval after move 15 (avg {avg_eval:+.0f}cp)",
+            f"Left opening better in {better} games; worse in {worse} games",
+            f"Transition CPL (moves 10-20): {avg_transition:.0f}",
+        ]
+
+        # If per-opening eval data exists inside openings, surface top openings by eval
+        opening_eval_lines = []
+        for name, data in openings.items():
+            eval_count = data.get('eval_after_opening_count', 0)
+            if eval_count == 0:
+                continue
+            avg_eval_opening = data.get('eval_after_opening_sum', 0) / eval_count
+            opening_eval_lines.append((name, avg_eval_opening, data.get('games', 0)))
+
+        if opening_eval_lines:
+            opening_eval_lines = sorted(opening_eval_lines, key=lambda x: x[1], reverse=True)[:5]
+            lines.append("Top openings by position quality after move 15:")
+            for name, avg_eval_opening, games_played in opening_eval_lines:
+                outcome = '✅ Good positions' if avg_eval_opening > 50 else '⚠️ Difficult positions' if avg_eval_opening < -50 else '➡️ Equal positions'
+                lines.append(f"- {name[:35]}: {outcome} (avg {avg_eval_opening:+.0f}cp over {games_played} games)")
+
+        return '\n'.join(lines)
+
+    # Per-opening structure (future-proof)
     lines = []
-    
+
     for opening_name, data in sorted(opening_outcomes.items(), key=lambda x: x[1].get('games', 0), reverse=True)[:5]:
         games = data.get('games', 0)
         if games == 0:
             continue
-        
+
         avg_eval = data.get('avg_eval_after_opening', 0)
         transition_cpl = data.get('transition_cpl', 0)  # CPL for moves 10-20
-        
-        # Determine outcome quality
+
         if avg_eval > 50:
             outcome = '✅ Good positions'
         elif avg_eval < -50:
             outcome = '⚠️ Difficult positions'
         else:
             outcome = '➡️ Equal positions'
-        
-        # Note if transition CPL is high
+
         transition_note = f" (but {transition_cpl:.0f} CPL in moves 10-20)" if transition_cpl > 80 else ""
-        
+
         lines.append(f"- {opening_name[:35]}: {outcome} (avg eval: {avg_eval:+.0f}cp){transition_note}")
-    
+
     return '\n'.join(lines) if lines else "Not enough opening data."
 
 
