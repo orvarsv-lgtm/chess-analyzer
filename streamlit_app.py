@@ -35,6 +35,9 @@ from src.streak_detection import (
     get_streak_milestones,
 )
 
+# AI Coach imports
+from src.ai_coach_ui import render_ai_coach_tab, render_tier_selector_sidebar
+
 # Puzzle module imports
 from puzzles import (
     Puzzle,
@@ -1719,7 +1722,7 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
 
     view = st.radio(
         "Main view",
-        options=["📊 Analysis", "🎮 Game Replayer", "📚 Opening Repertoire", "⚔️ Opponent Analysis", "🏆 Streaks", "♟️ Puzzles"],
+        options=["📊 Analysis", "🤖 AI Coach", "🎮 Game Replayer", "📚 Opening Repertoire", "⚔️ Opponent Analysis", "🏆 Streaks", "♟️ Puzzles"],
         horizontal=False,
         key="main_view",
         label_visibility="collapsed",
@@ -1727,6 +1730,8 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
 
     if view == "♟️ Puzzles":
         _render_puzzle_tab(aggregated)
+    elif view == "🤖 AI Coach":
+        render_ai_coach_tab(aggregated)
     elif view == "🎮 Game Replayer":
         _render_game_replayer_tab(aggregated)
     elif view == "📚 Opening Repertoire":

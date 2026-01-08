@@ -11,6 +11,11 @@ venv/
 # Test/cache
 .pytest_cache/
 
+# Environment variables (API keys)
+.env
+.env.local
+*.env
+
 # OS
 .DS_Store
 
