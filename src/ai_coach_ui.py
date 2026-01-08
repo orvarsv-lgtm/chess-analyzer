@@ -226,35 +226,78 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     # Show stats summary
     stats = result.get('stats', {})
     
+    # Main metrics row
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Games Analyzed", stats.get('total_games', 0))
     with col2:
-        st.metric("Win Rate", f"{stats.get('win_rate', 0):.1%}")
+        win_rate = stats.get('win_rate', 0)
+        st.metric("Win Rate", f"{win_rate:.1%}")
     with col3:
         st.metric("Best Phase", stats.get('best_phase', 'N/A').title())
     with col4:
         st.metric("Worst Phase", stats.get('worst_phase', 'N/A').title())
     
-    # Show detailed phase CPL
+    # Performance by color
+    st.markdown("#### ♔ Performance by Color")
+    white_stats = stats.get('white_stats', {})
+    black_stats = stats.get('black_stats', {})
+    
+    color_col1, color_col2 = st.columns(2)
+    with color_col1:
+        w_games = white_stats.get('games', 0)
+        w_wr = white_stats.get('win_rate', 0)
+        w_cpl = white_stats.get('avg_cpl', 0)
+        st.markdown(f"""
+        **⬜ As White**: {w_games} games  
+        Win Rate: **{w_wr:.0%}** | Avg CPL: **{w_cpl:.0f}**
+        """)
+    with color_col2:
+        b_games = black_stats.get('games', 0)
+        b_wr = black_stats.get('win_rate', 0)
+        b_cpl = black_stats.get('avg_cpl', 0)
+        st.markdown(f"""
+        **⬛ As Black**: {b_games} games  
+        Win Rate: **{b_wr:.0%}** | Avg CPL: **{b_cpl:.0f}**
+        """)
+    
+    # Show detailed phase CPL with visual indicator
     st.markdown("#### 📊 Phase Performance (Average CPL)")
+    opening_cpl = stats.get('opening_cpl', 0)
+    mid_cpl = stats.get('middlegame_cpl', 0)
+    end_cpl = stats.get('endgame_cpl', 0)
+    
     cpl_col1, cpl_col2, cpl_col3 = st.columns(3)
     with cpl_col1:
-        opening_cpl = stats.get('opening_cpl', 0)
-        st.metric("Opening", f"{opening_cpl:.1f}" if opening_cpl > 0 else "N/A")
+        color = "🟢" if opening_cpl < 50 else "🟡" if opening_cpl < 100 else "🔴"
+        st.metric(f"{color} Opening", f"{opening_cpl:.0f}" if opening_cpl > 0 else "N/A")
     with cpl_col2:
-        mid_cpl = stats.get('middlegame_cpl', 0)
-        st.metric("Middlegame", f"{mid_cpl:.1f}" if mid_cpl > 0 else "N/A")
+        color = "🟢" if mid_cpl < 80 else "🟡" if mid_cpl < 150 else "🔴"
+        st.metric(f"{color} Middlegame", f"{mid_cpl:.0f}" if mid_cpl > 0 else "N/A")
     with cpl_col3:
-        end_cpl = stats.get('endgame_cpl', 0)
-        st.metric("Endgame", f"{end_cpl:.1f}" if end_cpl > 0 else "N/A")
+        color = "🟢" if end_cpl < 80 else "🟡" if end_cpl < 150 else "🔴"
+        st.metric(f"{color} Endgame", f"{end_cpl:.0f}" if end_cpl > 0 else "N/A")
     
-    # Show error rates
-    err_col1, err_col2 = st.columns(2)
+    # Show error rates with context
+    st.markdown("#### ⚠️ Error Analysis")
+    err_col1, err_col2, err_col3 = st.columns(3)
     with err_col1:
-        st.metric("Blunders per 100 moves", f"{stats.get('blunder_rate', 0):.1f}")
+        br = stats.get('blunder_rate', 0)
+        color = "🟢" if br < 5 else "🟡" if br < 10 else "🔴"
+        st.metric(f"{color} Blunders/100 moves", f"{br:.1f}")
     with err_col2:
-        st.metric("Mistakes per 100 moves", f"{stats.get('mistake_rate', 0):.1f}")
+        mr = stats.get('mistake_rate', 0)
+        color = "🟢" if mr < 10 else "🟡" if mr < 15 else "🔴"
+        st.metric(f"{color} Mistakes/100 moves", f"{mr:.1f}")
+    with err_col3:
+        total_b = stats.get('total_blunders', 0)
+        st.metric("Total Blunders", total_b)
+    
+    # Blunder distribution by phase
+    blunder_phases = stats.get('blunder_phases', {})
+    if blunder_phases and stats.get('total_blunders', 0) > 0:
+        total_b = stats.get('total_blunders', 1)
+        st.caption(f"Blunder distribution: Opening {blunder_phases.get('opening', 0)} ({blunder_phases.get('opening', 0)/total_b*100:.0f}%) | Middlegame {blunder_phases.get('middlegame', 0)} ({blunder_phases.get('middlegame', 0)/total_b*100:.0f}%) | Endgame {blunder_phases.get('endgame', 0)} ({blunder_phases.get('endgame', 0)/total_b*100:.0f}%)")
     
     # Show top openings
     openings = stats.get('openings', {})
@@ -269,19 +312,43 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
         for name, data in sorted_openings:
             games = data['games']
             wins = data['wins']
+            losses = data.get('losses', 0)
+            blunders = data.get('blunders', 0)
             total_moves = data.get('total_moves', games * 30)
             win_rate = wins / games if games > 0 else 0
             avg_cpl = data['total_cpl'] / total_moves if total_moves > 0 else 0
             
             col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
             with col1:
-                st.write(f"**{name}**")
+                warning = " ⚠️" if blunders >= 3 else ""
+                st.write(f"**{name}**{warning}")
             with col2:
                 st.write(f"{games} games")
             with col3:
-                st.write(f"{win_rate:.0%} W")
+                wr_color = "🟢" if win_rate >= 0.6 else "🟡" if win_rate >= 0.4 else "🔴"
+                st.write(f"{wr_color} {win_rate:.0%} W")
             with col4:
-                st.write(f"CPL: {avg_cpl:.0f}")
+                cpl_color = "🟢" if avg_cpl < 80 else "🟡" if avg_cpl < 130 else "🔴"
+                st.write(f"{cpl_color} CPL: {avg_cpl:.0f}")
+    
+    # Show best and worst games
+    best_games = stats.get('best_games', [])
+    worst_games = stats.get('worst_games', [])
+    
+    if best_games or worst_games:
+        st.markdown("#### 🎯 Game Highlights")
+        
+        game_col1, game_col2 = st.columns(2)
+        with game_col1:
+            st.markdown("**✅ Best Performed Games**")
+            for g in best_games[:3]:
+                result_emoji = "🏆" if g.get('is_win') else "📊"
+                st.caption(f"{result_emoji} Game {g.get('index', '?')}: {g.get('opening', 'Unknown')[:25]} - CPL: {g.get('avg_cpl', 0):.0f}")
+        with game_col2:
+            st.markdown("**⚠️ Games to Review**")
+            for g in worst_games[:3]:
+                result_emoji = "❌" if not g.get('is_win') else "📊"
+                st.caption(f"{result_emoji} Game {g.get('index', '?')}: {g.get('opening', 'Unknown')[:25]} - CPL: {g.get('avg_cpl', 0):.0f}, {g.get('blunders', 0)} blunders")
     
     st.markdown("---")
     
