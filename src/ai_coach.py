@@ -368,9 +368,6 @@ def _format_performance_for_prompt(perf: Dict[str, Any]) -> str:
 def _parse_coach_response(content: str) -> Dict[str, Any]:
     """Parse GPT-4 response into structured format."""
     
-    # Simple parsing - could be made more robust with regex or structured outputs
-    sections = content.split('\n\n')
-    
     parsed = {
         'summary': '',
         'key_moments': [],
@@ -380,44 +377,341 @@ def _parse_coach_response(content: str) -> Dict[str, Any]:
         'training': [],
     }
     
+    # More robust line-by-line parsing
+    lines = content.split('\n')
     current_section = None
-    for section in sections:
-        section = section.strip()
-        if not section:
-            continue
-        
-        # Detect sections by headers
-        lower = section.lower()
-        if 'game summary' in lower or 'overall' in lower:
-            current_section = 'summary'
-        elif 'key moment' in lower or 'critical' in lower:
-            current_section = 'key_moments'
-        elif 'opening' in lower:
-            current_section = 'opening'
-        elif 'strategic' in lower or 'strategy' in lower:
-            current_section = 'strategy'
-        elif 'tactical' in lower or 'tactics' in lower:
-            current_section = 'tactics'
-        elif 'training' in lower or 'recommendation' in lower:
-            current_section = 'training'
-        
-        # Store content
-        if current_section == 'summary' and not parsed['summary']:
-            parsed['summary'] = section
-        elif current_section == 'opening' and not parsed['opening']:
-            parsed['opening'] = section
-        elif current_section == 'strategy' and not parsed['strategy']:
-            parsed['strategy'] = section
-        elif current_section == 'tactics' and not parsed['tactics']:
-            parsed['tactics'] = section
-        elif current_section == 'training':
-            # Extract bullet points
-            lines = section.split('\n')
-            for line in lines:
-                if line.strip().startswith(('-', '•', '*', '1.', '2.', '3.')):
-                    parsed['training'].append(line.strip().lstrip('-•* 123456789.'))
+    current_content = []
     
-    # Fallback if parsing fails
+    for line in lines:
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+            
+        lower = line_stripped.lower()
+        
+        # Detect section headers (with or without markdown formatting)
+        if any(h in lower for h in ['game summary', 'summary:', '**summary', '1.', 'overall']):
+            if current_section and current_content:
+                _store_section(parsed, current_section, current_content)
+            current_section = 'summary'
+            current_content = []
+            # If header has content after colon, add it
+            if ':' in line_stripped:
+                after_colon = line_stripped.split(':', 1)[1].strip()
+                if after_colon:
+                    current_content.append(after_colon)
+        elif any(h in lower for h in ['key moment', 'critical moment', '2.', 'critical position']):
+            if current_section and current_content:
+                _store_section(parsed, current_section, current_content)
+            current_section = 'key_moments'
+            current_content = []
+        elif any(h in lower for h in ['opening advice', 'opening:', '3.', '**opening']):
+            if current_section and current_content:
+                _store_section(parsed, current_section, current_content)
+            current_section = 'opening'
+            current_content = []
+        elif any(h in lower for h in ['strategic', 'strategy', '4.', '**strategic']):
+            if current_section and current_content:
+                _store_section(parsed, current_section, current_content)
+            current_section = 'strategy'
+            current_content = []
+        elif any(h in lower for h in ['tactical', 'tactics', '5.', '**tactical']):
+            if current_section and current_content:
+                _store_section(parsed, current_section, current_content)
+            current_section = 'tactics'
+            current_content = []
+        elif any(h in lower for h in ['training', 'recommendation', '6.', '**training', 'practice']):
+            if current_section and current_content:
+                _store_section(parsed, current_section, current_content)
+            current_section = 'training'
+            current_content = []
+        else:
+            # Regular content line
+            if current_section:
+                current_content.append(line_stripped)
+    
+    # Store the last section
+    if current_section and current_content:
+        _store_section(parsed, current_section, current_content)
+    
+    # Fallback if parsing fails - use the whole content
+    if not parsed['summary'] and content:
+        parsed['summary'] = content[:500] + '...' if len(content) > 500 else content
+    
+    # Ensure training has items
+    if not parsed['training']:
+        parsed['training'] = [
+            "Review your biggest blunders from this game",
+            "Practice similar tactical patterns on Lichess puzzles",
+            "Study the opening variation you played"
+        ]
+    
+    # Ensure tactics has content
+    if not parsed['tactics']:
+        parsed['tactics'] = "Focus on calculation and pattern recognition. Review tactical motifs like pins, forks, and discovered attacks."
+    
+    return parsed
+
+
+def _store_section(parsed: Dict, section: str, content: List[str]) -> None:
+    """Store parsed content into the appropriate section."""
+    text = '\n'.join(content).strip()
+    
+    if section == 'summary':
+        parsed['summary'] = text
+    elif section == 'opening':
+        parsed['opening'] = text
+    elif section == 'strategy':
+        parsed['strategy'] = text
+    elif section == 'tactics':
+        parsed['tactics'] = text
+    elif section == 'key_moments':
+        # Parse key moments as list
+        for line in content:
+            if line.strip():
+                parsed['key_moments'].append({'move': '?', 'advice': line.strip()})
+    elif section == 'training':
+        # Extract bullet points
+        for line in content:
+            clean = line.strip().lstrip('-•*0123456789.) ')
+            if clean and len(clean) > 5:
+                parsed['training'].append(clean)
+
+
+# =============================================================================
+# CAREER/MULTI-GAME ANALYSIS
+# =============================================================================
+
+
+def generate_career_analysis(
+    all_games: List[Dict[str, Any]],
+    player_name: str,
+    player_rating: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Generate comprehensive AI analysis of player's entire game history.
+    
+    This analyzes patterns, trends, and gives career-level coaching advice.
+    
+    Args:
+        all_games: List of all analyzed games
+        player_name: Player's username
+        player_rating: Current rating (if known)
+    
+    Returns:
+        Dict with career analysis sections
+    """
+    client = _get_openai_client()
+    
+    # Aggregate statistics across all games
+    stats = _aggregate_career_stats(all_games)
+    
+    prompt = f"""You are an expert chess coach analyzing a player's complete game history.
+
+**Player**: {player_name}
+**Rating**: {player_rating or 'Unknown'}
+**Games Analyzed**: {stats['total_games']}
+
+**Career Statistics**:
+- Overall Win Rate: {stats['win_rate']:.1%}
+- Average CPL (Opening): {stats['opening_cpl']:.1f}
+- Average CPL (Middlegame): {stats['middlegame_cpl']:.1f}
+- Average CPL (Endgame): {stats['endgame_cpl']:.1f}
+- Blunders per 100 moves: {stats['blunder_rate']:.1f}
+- Mistakes per 100 moves: {stats['mistake_rate']:.1f}
+
+**Opening Repertoire**:
+{_format_opening_stats(stats['openings'])}
+
+**Phase Performance**:
+- Best Phase: {stats['best_phase']}
+- Worst Phase: {stats['worst_phase']}
+
+**Trends**:
+- {stats['trend_summary']}
+
+**Provide a comprehensive career analysis with these sections**:
+
+1. **Career Overview** (3-4 sentences): Overall assessment of the player's chess journey
+
+2. **Biggest Strengths** (3 items): What this player does well, with specific examples
+
+3. **Critical Weaknesses** (3 items): Most impactful areas holding them back
+
+4. **Opening Repertoire Analysis**: 
+   - Which openings suit their style?
+   - Which openings should they avoid?
+   - Recommended additions to repertoire
+
+5. **Phase-by-Phase Breakdown**:
+   - Opening: specific advice
+   - Middlegame: specific advice  
+   - Endgame: specific advice
+
+6. **Personalized Training Plan** (weekly schedule):
+   - Monday: ...
+   - Tuesday: ...
+   - etc.
+
+7. **Rating Improvement Estimate**: 
+   - What rating could they reach in 6 months with focused training?
+   - Key milestones to track progress
+
+Be specific, use their actual statistics, and give actionable advice."""
+
+    response = client.chat.completions.create(
+        model="gpt-4-turbo-preview",
+        messages=[
+            {"role": "system", "content": "You are an expert chess coach with decades of experience helping players improve."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.7,
+        max_tokens=3000,
+    )
+    
+    content = response.choices[0].message.content
+    tokens_used = response.usage.total_tokens
+    cost_cents = int((tokens_used / 1000) * 3)
+    
+    return {
+        'analysis': content,
+        'stats': stats,
+        'tokens_used': tokens_used,
+        'cost_cents': cost_cents,
+        'timestamp': datetime.now(),
+    }
+
+
+def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate statistics across all games."""
+    
+    if not games:
+        return {
+            'total_games': 0,
+            'win_rate': 0,
+            'opening_cpl': 0,
+            'middlegame_cpl': 0,
+            'endgame_cpl': 0,
+            'blunder_rate': 0,
+            'mistake_rate': 0,
+            'openings': {},
+            'best_phase': 'unknown',
+            'worst_phase': 'unknown',
+            'trend_summary': 'Not enough games for trend analysis',
+        }
+    
+    total_games = len(games)
+    wins = sum(1 for g in games if g.get('result') in ['1-0', '0-1'] and 
+               ((g.get('focus_color') == 'white' and g.get('result') == '1-0') or
+                (g.get('focus_color') == 'black' and g.get('result') == '0-1')))
+    
+    # Collect CPL by phase
+    opening_cpls = []
+    middlegame_cpls = []
+    endgame_cpls = []
+    blunders = 0
+    mistakes = 0
+    total_moves = 0
+    openings = {}
+    
+    for game in games:
+        moves_table = game.get('moves_table', [])
+        focus_color = game.get('focus_color', 'white')
+        opening = game.get('opening_name', 'Unknown')
+        result = game.get('result', '*')
+        
+        # Track opening stats
+        if opening not in openings:
+            openings[opening] = {'games': 0, 'wins': 0, 'total_cpl': 0}
+        openings[opening]['games'] += 1
+        if (focus_color == 'white' and result == '1-0') or (focus_color == 'black' and result == '0-1'):
+            openings[opening]['wins'] += 1
+        
+        for move in moves_table:
+            if move.get('color') != focus_color:
+                continue
+            
+            total_moves += 1
+            cp_loss = move.get('cp_loss', 0) or 0
+            phase = move.get('phase', 'middlegame')
+            
+            if phase == 'opening':
+                opening_cpls.append(cp_loss)
+            elif phase == 'middlegame':
+                middlegame_cpls.append(cp_loss)
+            else:
+                endgame_cpls.append(cp_loss)
+            
+            if cp_loss >= 300:
+                blunders += 1
+            elif cp_loss >= 100:
+                mistakes += 1
+            
+            openings[opening]['total_cpl'] += cp_loss
+    
+    # Calculate averages
+    avg_opening = sum(opening_cpls) / len(opening_cpls) if opening_cpls else 0
+    avg_middlegame = sum(middlegame_cpls) / len(middlegame_cpls) if middlegame_cpls else 0
+    avg_endgame = sum(endgame_cpls) / len(endgame_cpls) if endgame_cpls else 0
+    
+    # Determine best/worst phase
+    phases = {'opening': avg_opening, 'middlegame': avg_middlegame, 'endgame': avg_endgame}
+    best_phase = min(phases, key=phases.get) if phases else 'unknown'
+    worst_phase = max(phases, key=phases.get) if phases else 'unknown'
+    
+    # Calculate rates per 100 moves
+    blunder_rate = (blunders / total_moves * 100) if total_moves > 0 else 0
+    mistake_rate = (mistakes / total_moves * 100) if total_moves > 0 else 0
+    
+    # Trend summary
+    if total_games >= 10:
+        first_half = games[:len(games)//2]
+        second_half = games[len(games)//2:]
+        
+        first_blunders = sum(1 for g in first_half for m in g.get('moves_table', []) if m.get('cp_loss', 0) >= 300)
+        second_blunders = sum(1 for g in second_half for m in g.get('moves_table', []) if m.get('cp_loss', 0) >= 300)
+        
+        if second_blunders < first_blunders * 0.8:
+            trend = "Improving! Blunder rate has decreased over recent games."
+        elif second_blunders > first_blunders * 1.2:
+            trend = "Blunder rate has increased recently. Time to slow down and focus."
+        else:
+            trend = "Performance is consistent across games."
+    else:
+        trend = "Not enough games for trend analysis."
+    
+    return {
+        'total_games': total_games,
+        'win_rate': wins / total_games if total_games > 0 else 0,
+        'opening_cpl': avg_opening,
+        'middlegame_cpl': avg_middlegame,
+        'endgame_cpl': avg_endgame,
+        'blunder_rate': blunder_rate,
+        'mistake_rate': mistake_rate,
+        'openings': openings,
+        'best_phase': best_phase,
+        'worst_phase': worst_phase,
+        'trend_summary': trend,
+    }
+
+
+def _format_opening_stats(openings: Dict[str, Dict]) -> str:
+    """Format opening statistics for the prompt."""
+    if not openings:
+        return "No opening data available"
+    
+    # Sort by games played
+    sorted_openings = sorted(openings.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
+    
+    lines = []
+    for name, stats in sorted_openings:
+        games = stats['games']
+        wins = stats['wins']
+        win_rate = wins / games if games > 0 else 0
+        avg_cpl = stats['total_cpl'] / max(games, 1)
+        lines.append(f"- {name}: {games} games, {win_rate:.0%} win rate, avg CPL: {avg_cpl:.0f}")
+    
+    return '\n'.join(lines) if lines else "No opening data"
     if not parsed['summary']:
         parsed['summary'] = content[:200] + '...'
     

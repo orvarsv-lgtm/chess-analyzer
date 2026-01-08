@@ -11,6 +11,7 @@ from datetime import datetime
 from src.ai_coach import (
     generate_game_review,
     generate_demo_review,
+    generate_career_analysis,
     check_ai_coach_quota,
     increment_ai_coach_usage,
     AICoachResponse,
@@ -25,7 +26,7 @@ def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
         aggregated: Analyzed games data
     """
     st.header("🤖 AI Chess Coach")
-    st.caption("GPT-4 powered personalized coaching insights • Premium Feature")
+    st.caption("GPT-4 powered personalized coaching insights")
     
     # Check if user has analyzed games
     games = aggregated.get("games", [])
@@ -52,8 +53,25 @@ def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
     # Main AI Coach interface
     st.markdown("---")
     
-    # Game selector
-    st.subheader("Select a game to review")
+    # Mode selector: Single Game vs Career Analysis
+    analysis_mode = st.radio(
+        "Analysis Mode",
+        ["📄 Single Game Review", "📊 Full Career Analysis"],
+        horizontal=True,
+        help="Single game reviews analyze one game in depth. Career analysis looks at all your games to identify patterns and trends."
+    )
+    
+    focus_player = aggregated.get('focus_player', '')
+    
+    if analysis_mode == "📊 Full Career Analysis":
+        _render_career_analysis(games, focus_player, user_id)
+    else:
+        _render_single_game_review(games, aggregated, user_id)
+
+
+def _render_single_game_review(games: List[Dict], aggregated: Dict, user_id: str) -> None:
+    """Render single game review interface."""
+    st.subheader("📄 Single Game Review")
     
     game_options = []
     for i, game in enumerate(games):
@@ -121,14 +139,120 @@ def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
                     selected_game,
                     player_color,
                     player_rating,
-                    user_tier,
+                    'coach',
                     user_id,
                     cache_key,
-                    remaining
+                    999
                 )
+
+
+def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -> None:
+    """Render full career analysis interface."""
+    st.subheader("📊 Full Career Analysis")
+    st.write(f"Analyzing **{len(games)} games** for comprehensive career insights.")
+    
+    # Get player rating from first game
+    player_rating = None
+    if games:
+        first_game = games[0]
+        focus_color = first_game.get('focus_color', 'white')
+        if focus_color == 'white':
+            player_rating = first_game.get('white_elo') or first_game.get('white_rating')
+        else:
+            player_rating = first_game.get('black_elo') or first_game.get('black_rating')
+    
+    # Show what will be analyzed
+    st.info(f"""
+    🔍 **Career Analysis Will Include:**
+    - Overall win rate and performance trends
+    - Opening repertoire analysis (which openings work best for you)
+    - Phase-by-phase breakdown (opening, middlegame, endgame)
+    - Your biggest strengths and weaknesses
+    - Personalized weekly training plan
+    - Rating improvement estimate
+    """)
+    
+    # Cache key for career analysis
+    cache_key = f"career_analysis_{player_name}_{len(games)}_{user_id}"
+    cached_analysis = st.session_state.get(cache_key)
+    
+    if cached_analysis:
+        st.success("✅ Career analysis already generated (using cached version)")
+        _render_career_analysis_result(cached_analysis)
         
+        if st.button("🔄 Regenerate Career Analysis"):
+            if cache_key in st.session_state:
+                del st.session_state[cache_key]
+            st.rerun()
+    else:
+        if st.button("🚀 Generate Career Analysis", type="primary", use_container_width=True):
+            with st.spinner("🤖 AI Coach is analyzing your entire chess career... (this may take 30-60 seconds)"):
+                try:
+                    import os
+                    has_api_key = bool(os.getenv('OPENAI_API_KEY'))
+                    
+                    # Try Streamlit secrets too
+                    if not has_api_key:
+                        try:
+                            has_api_key = bool(st.secrets.get('OPENAI_API_KEY'))
+                        except:
+                            pass
+                    
+                    if not has_api_key:
+                        st.warning("⚠️ OpenAI API key not configured. Cannot generate real analysis.")
+                        st.info("Add OPENAI_API_KEY to Streamlit secrets to enable AI analysis.")
+                        return
+                    
+                    result = generate_career_analysis(
+                        all_games=games,
+                        player_name=player_name or "Player",
+                        player_rating=player_rating
+                    )
+                    
+                    # Cache the result
+                    st.session_state[cache_key] = result
+                    
+                    st.success(f"✅ Career analysis complete! ({result['tokens_used']} tokens, ~${result['cost_cents']/100:.2f})")
+                    _render_career_analysis_result(result)
+                    
+                except Exception as e:
+                    st.error(f"❌ Failed to generate career analysis: {str(e)}")
+                    st.info("Try again or check if your OpenAI API key is valid.")
+
+
+def _render_career_analysis_result(result: Dict[str, Any]) -> None:
+    """Render the career analysis result."""
+    
+    # Show stats summary
+    stats = result.get('stats', {})
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Games Analyzed", stats.get('total_games', 0))
+    with col2:
+        st.metric("Win Rate", f"{stats.get('win_rate', 0):.1%}")
+    with col3:
+        st.metric("Best Phase", stats.get('best_phase', 'N/A').title())
+    with col4:
+        st.metric("Worst Phase", stats.get('worst_phase', 'N/A').title())
+    
+    st.markdown("---")
+    
+    # Show the full analysis
+    st.markdown("### 🤖 AI Career Analysis")
+    st.markdown(result.get('analysis', 'No analysis available'))
+    
+    # Metadata
+    with st.expander("ℹ️ Analysis Metadata", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Tokens Used", result.get('tokens_used', 0))
         with col2:
-            st.caption(f"💎 Reviews remaining: **{remaining}**")
+            st.metric("Cost", f"${result.get('cost_cents', 0)/100:.2f}")
+        with col3:
+            ts = result.get('timestamp')
+            if ts:
+                st.metric("Generated", ts.strftime("%Y-%m-%d %H:%M"))
 
 
 def _render_tier_status(user_tier: str, remaining: int):
