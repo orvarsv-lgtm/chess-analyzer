@@ -506,77 +506,101 @@ def generate_career_analysis(
     # Aggregate statistics across all games
     stats = _aggregate_career_stats(all_games)
     
-    # Format additional context
-    worst_games_str = _format_worst_games(stats.get('worst_games', []))
-    best_games_str = _format_best_games(stats.get('best_games', []))
-    blunder_phase_str = _format_blunder_phases(stats.get('blunder_phases', {}), stats.get('total_blunders', 0))
-    
+    # Format data for prompt
     white_stats = stats.get('white_stats', {})
     black_stats = stats.get('black_stats', {})
+    ppi = stats.get('ppi', {})
+    blunder_contexts = stats.get('blunder_contexts', {})
+    conversion_stats = stats.get('conversion_stats', {})
+    opening_outcomes = stats.get('opening_outcomes', {})
+    rating_cost = stats.get('biggest_rating_cost', (None, {}))
+    baselines = stats.get('phase_baselines', {})
     
-    prompt = f"""You are an expert chess coach analyzing a player's complete game history. Give SPECIFIC, ACTIONABLE advice based on their actual data.
+    # Format skill attribution
+    skill_attribution_str = _format_skill_attribution(blunder_contexts, stats.get('total_blunders', 0))
+    
+    # Format biggest rating cost
+    rating_cost_str = _format_rating_cost(stats.get('rating_cost_factors', {}))
+    
+    # Format opening outcomes
+    opening_outcome_str = _format_opening_outcomes(opening_outcomes, stats.get('openings', {}))
+    
+    prompt = f"""You are an expert chess coach. Analyze this player's data and provide SPECIFIC, ACTIONABLE insights.
+
+IMPORTANT CONTEXT: Raw CPL comparisons across phases are misleading because endgames naturally have higher CPL (fewer moves = sharper swings). Use the Phase Performance Index (PPI) instead - it normalizes CPL against expected baselines. PPI of 1.0 = average; lower is better.
 
 **Player**: {player_name}
 **Rating**: {player_rating or 'Unknown'}
-**Rating Range in Dataset**: {stats.get('rating_range', (0,0))[0]} - {stats.get('rating_range', (0,0))[1]}
-**Games Analyzed**: {stats['total_games']} (W: {stats.get('wins', 0)}, L: {stats.get('losses', 0)}, D: {stats.get('draws', 0)})
-
-**Performance by Color**:
-- As White: {white_stats.get('games', 0)} games, {white_stats.get('win_rate', 0):.0%} win rate, avg CPL: {white_stats.get('avg_cpl', 0):.0f}
-- As Black: {black_stats.get('games', 0)} games, {black_stats.get('win_rate', 0):.0%} win rate, avg CPL: {black_stats.get('avg_cpl', 0):.0f}
-
-**Phase Performance (Average CPL - lower is better)**:
-- Opening (moves 1-15): {stats['opening_cpl']:.0f} CPL
-- Middlegame (moves 16-40): {stats['middlegame_cpl']:.0f} CPL  
-- Endgame (moves 41+): {stats['endgame_cpl']:.0f} CPL
-- Best Phase: {stats['best_phase']} | Worst Phase: {stats['worst_phase']}
-
-**Error Analysis**:
-- Blunders (≥300 CPL): {stats.get('total_blunders', 0)} total ({stats['blunder_rate']:.1f} per 100 moves)
-- Mistakes (100-299 CPL): {stats.get('total_mistakes', 0)} total ({stats['mistake_rate']:.1f} per 100 moves)
-{blunder_phase_str}
-
-**Opening Repertoire**:
-{_format_opening_stats(stats['openings'])}
-
-**Best Performed Games** (lowest average CPL):
-{best_games_str}
-
-**Worst Performed Games** (highest average CPL - focus areas):
-{worst_games_str}
-
-**Recent Trend**: {stats['trend_summary']}
+**Games Analyzed**: {stats['total_games']} (W:{stats.get('wins', 0)} L:{stats.get('losses', 0)} D:{stats.get('draws', 0)})
 
 ---
+**PHASE PERFORMANCE (Normalized)**
+Phase baselines (expected CPL): Opening={baselines.get('opening', 45)}, Middlegame={baselines.get('middlegame', 95)}, Endgame={baselines.get('endgame', 130)}
 
-**Provide a SPECIFIC career analysis with these sections**:
+| Phase | Raw CPL | Baseline | PPI | Assessment |
+|-------|---------|----------|-----|------------|
+| Opening | {stats['opening_cpl']:.0f} | {baselines.get('opening', 45)} | {ppi.get('opening', 0):.2f} | {"✅ Strong" if ppi.get('opening', 2) < 1.0 else "⚠️ Below avg" if ppi.get('opening', 0) < 1.3 else "❌ Weak"} |
+| Middlegame | {stats['middlegame_cpl']:.0f} | {baselines.get('middlegame', 95)} | {ppi.get('middlegame', 0):.2f} | {"✅ Strong" if ppi.get('middlegame', 2) < 1.0 else "⚠️ Below avg" if ppi.get('middlegame', 0) < 1.3 else "❌ Weak"} |
+| Endgame | {stats['endgame_cpl']:.0f} | {baselines.get('endgame', 130)} | {ppi.get('endgame', 0):.2f} | {"✅ Strong" if ppi.get('endgame', 2) < 1.0 else "⚠️ Below avg" if ppi.get('endgame', 0) < 1.3 else "❌ Weak"} |
 
-1. **Career Overview** (3-4 sentences): Assessment based on their actual stats. Mention their rating, win rate by color difference if significant, and phase strengths.
+Best phase (by PPI): **{stats['best_phase']}** | Worst phase (by PPI): **{stats['worst_phase']}**
 
-2. **Biggest Strengths** (3 items): Be specific! Reference their actual openings, win rates, and best games. Example: "Your Scotch Game shows mastery with 75% win rate and only 73 CPL"
+---
+**SKILL ATTRIBUTION (Why blunders happen)**
+{skill_attribution_str}
 
-3. **Critical Weaknesses** (3 items): Reference specific numbers. Example: "Endgame CPL of 171 vs Opening CPL of 46 shows a 3.7x decline - this is where games are being lost"
+---
+**CONVERSION ANALYSIS**
+- Had winning position (≥+1.5) in {conversion_stats.get('winning_positions', 0)} games
+- Actually converted to wins: {conversion_stats.get('converted_wins', 0)} ({stats.get('conversion_rate', 0):.0f}% conversion rate)
+- Had losing position in {conversion_stats.get('losing_positions', 0)} games, saved {conversion_stats.get('saved_draws_or_wins', 0)}
 
-4. **Opening Repertoire Analysis**: 
-   - Recommend specific openings based on their data
-   - Identify which openings have high blunder counts
-   - If they play better as White or Black, suggest appropriate repertoire
+---
+**OPENING OUTCOMES** (Position quality, not CPL)
+{opening_outcome_str}
 
-5. **Phase-by-Phase Breakdown**:
-   - Opening: What's working? What needs attention?
-   - Middlegame: Specific tactical/strategic issues based on their CPL jump
-   - Endgame: Concrete endgame types to study based on their weaknesses
+---
+**BIGGEST RATING COST FACTORS** (Fix these first!)
+{rating_cost_str}
 
-6. **Personalized Training Plan** (weekly schedule):
-   - Be specific: "Tuesday: Practice rook endgames (your endgame CPL is 171)"
-   - Reference their openings: "Study games in the Vienna Game (your 50% win rate suggests you're not fully understanding the plans)"
+---
+**COLOR PERFORMANCE**
+- As White: {white_stats.get('games', 0)}g, {white_stats.get('win_rate', 0):.0%} WR, CPL:{white_stats.get('avg_cpl', 0):.0f}
+- As Black: {black_stats.get('games', 0)}g, {black_stats.get('win_rate', 0):.0%} WR, CPL:{black_stats.get('avg_cpl', 0):.0f}
 
-7. **Rating Improvement Estimate**: 
-   - Current estimated strength based on CPL
-   - Realistic 3-month and 6-month targets
-   - Specific milestones: "Reduce blunder rate from 8.5 to 5.0 per 100 moves"
+---
+**TOP OPENINGS**
+{_format_opening_stats_v2(stats['openings'])}
 
-Be brutally honest but encouraging. Use their actual numbers throughout."""
+---
+**TREND**: {stats['trend_summary']}
+
+===
+
+Now provide analysis with these sections. Be SPECIFIC - use "because X data shows Y" statements:
+
+1. **Overview** (3 sentences max): Key insight about where they're actually strong/weak, using PPI not raw CPL.
+
+2. **Biggest Strength**: ONE specific thing with data. Example: "Opening PPI of 0.85 shows you're playing above average - your preparation is working."
+
+3. **Critical Weakness**: ONE specific thing with data. Example: "42% of blunders happen after captures, indicating recapture calculation issues."
+
+4. **What's Costing You The Most Rating Points**: Reference the rating cost factors. Be specific about WHY this matters.
+
+5. **Opening Analysis**: Use the opening OUTCOMES (eval after move 15), not just CPL. Which openings leave you in good positions? Which don't?
+
+6. **Targeted Fixes** (3 items max):
+   - Each must include a "because" statement with specific data
+   - Give a concrete, measurable goal (not "study endgames")
+   - Example: "Improve recapture calculation because 42% of your blunders follow captures. Goal: reduce post-capture blunders from 12 to 6."
+
+7. **Controllable Goals** (instead of rating predictions):
+   - Goal 1: [Metric] from [current] → [target]
+   - Goal 2: [Metric] from [current] → [target]
+   - Goal 3: [Metric] from [current] → [target]
+   - Example: "Conversion rate from 58% → 75% when ahead by +1.5"
+
+Do NOT give generic advice. Every recommendation must reference their specific data."""
 
     response = client.chat.completions.create(
         model="gpt-4-turbo-preview",
@@ -602,28 +626,18 @@ Be brutally honest but encouraging. Use their actual numbers throughout."""
 
 
 def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Aggregate statistics across all games."""
+    """Aggregate statistics across all games with advanced analytics."""
+    
+    # Phase CPL baselines (empirically derived from typical amateur play)
+    # These represent "expected" CPL for each phase at amateur level
+    PHASE_BASELINES = {
+        'opening': 45,      # Fewer critical decisions, more theory
+        'middlegame': 95,   # Complex, many candidate moves
+        'endgame': 130,     # Fewer pieces but sharper - one mistake = huge CPL
+    }
     
     if not games:
-        return {
-            'total_games': 0,
-            'win_rate': 0,
-            'opening_cpl': 0,
-            'middlegame_cpl': 0,
-            'endgame_cpl': 0,
-            'blunder_rate': 0,
-            'mistake_rate': 0,
-            'openings': {},
-            'best_phase': 'unknown',
-            'worst_phase': 'unknown',
-            'trend_summary': 'Not enough games for trend analysis',
-            'white_stats': {},
-            'black_stats': {},
-            'worst_games': [],
-            'best_games': [],
-            'blunder_phases': {},
-            'rating_range': (0, 0),
-        }
+        return _empty_career_stats()
     
     total_games = len(games)
     wins = 0
@@ -646,11 +660,49 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Track blunders by phase
     blunder_phases = {'opening': 0, 'middlegame': 0, 'endgame': 0}
     
+    # === NEW: Skill Attribution Tracking ===
+    # Track WHERE blunders happen contextually
+    blunder_contexts = {
+        'after_capture': 0,      # Blunder within 2 moves of a capture
+        'after_check': 0,        # Blunder within 2 moves of check
+        'in_winning_position': 0,  # Blunder when eval was +150+
+        'in_losing_position': 0,   # Blunder when already losing
+        'in_equal_position': 0,    # Blunder in roughly equal position
+        'time_trouble_likely': 0,  # Blunder after move 35 (proxy for time trouble)
+    }
+    
+    # === NEW: Conversion Tracking ===
+    conversion_stats = {
+        'winning_positions': 0,     # Games where player had +150 at some point
+        'converted_wins': 0,        # Actually won those games
+        'losing_positions': 0,      # Games where player was -150 at some point  
+        'saved_draws_or_wins': 0,   # Drew or won those "lost" games
+    }
+    
+    # === NEW: Opening Outcome Tracking ===
+    opening_outcomes = {
+        'games_with_opening_eval': 0,
+        'avg_eval_after_opening': 0,  # Eval at move 15
+        'left_opening_better': 0,     # % of games leaving opening with advantage
+        'left_opening_worse': 0,
+        'transition_cpl_sum': 0,      # CPL for moves 10-20 (opening to middlegame)
+        'transition_moves': 0,
+    }
+    
     # Track game quality for best/worst
     game_quality = []
     
     # Track ratings
     ratings = []
+    
+    # === NEW: Rating Cost Tracking ===
+    # Estimate which errors cost the most rating points
+    rating_cost_factors = {
+        'blunders_in_winning_pos': {'count': 0, 'estimated_points_lost': 0},
+        'endgame_collapses': {'count': 0, 'estimated_points_lost': 0},
+        'opening_disasters': {'count': 0, 'estimated_points_lost': 0},
+        'missed_wins': {'count': 0, 'estimated_points_lost': 0},
+    }
     
     for game in games:
         moves_table = game.get('moves_table', [])
@@ -666,12 +718,13 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
         # Track wins/losses/draws
         is_win = (focus_color == 'white' and result == '1-0') or (focus_color == 'black' and result == '0-1')
         is_loss = (focus_color == 'white' and result == '0-1') or (focus_color == 'black' and result == '1-0')
+        is_draw = result == '1/2-1/2'
         
         if is_win:
             wins += 1
         elif is_loss:
             losses += 1
-        elif result == '1/2-1/2':
+        elif is_draw:
             draws += 1
         
         # Track by color
@@ -686,7 +739,11 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
         
         # Track opening stats
         if opening not in openings:
-            openings[opening] = {'games': 0, 'wins': 0, 'losses': 0, 'total_cpl': 0, 'total_moves': 0, 'blunders': 0}
+            openings[opening] = {
+                'games': 0, 'wins': 0, 'losses': 0, 
+                'total_cpl': 0, 'total_moves': 0, 'blunders': 0,
+                'eval_after_opening_sum': 0, 'eval_after_opening_count': 0,
+            }
         openings[opening]['games'] += 1
         if is_win:
             openings[opening]['wins'] += 1
@@ -697,9 +754,51 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
         game_moves = 0
         game_blunders = 0
         
-        for move in moves_table:
+        # Track position context through the game
+        had_winning_position = False
+        had_losing_position = False
+        recent_capture = False
+        recent_check = False
+        last_few_moves_context = []  # Track recent move types
+        
+        prev_eval = 0
+        opening_exit_eval = None
+        
+        for i, move in enumerate(moves_table):
             move_color = move.get('mover') or move.get('color')
+            ply = move.get('ply', i + 1)
+            move_num = (ply + 1) // 2
+            
+            # Track eval for conversion analysis
+            eval_after = move.get('score_cp') or move.get('eval_after')
+            if eval_after is not None:
+                try:
+                    eval_val = int(eval_after)
+                    # Normalize to player's perspective
+                    if focus_color == 'black':
+                        eval_val = -eval_val
+                    
+                    if eval_val >= 150:
+                        had_winning_position = True
+                    if eval_val <= -150:
+                        had_losing_position = True
+                    
+                    # Capture opening exit eval (around move 15)
+                    if 13 <= move_num <= 17 and opening_exit_eval is None:
+                        opening_exit_eval = eval_val
+                    
+                    prev_eval = eval_val
+                except (TypeError, ValueError):
+                    pass
+            
+            # Only analyze focus player's moves
             if move_color != focus_color:
+                # Track opponent's captures/checks for context
+                move_san = move.get('move_san', '')
+                if 'x' in move_san:
+                    recent_capture = True
+                if '+' in move_san or '#' in move_san:
+                    recent_check = True
                 continue
             
             total_moves += 1
@@ -708,9 +807,11 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
             if cp_loss == 0:
                 cp_loss = move.get('actual_cp_loss', 0) or 0
             phase = move.get('phase', 'middlegame')
+            move_san = move.get('move_san', '')
             
             game_cpl_sum += cp_loss
             
+            # Phase CPL tracking
             if phase == 'opening':
                 opening_cpls.append(cp_loss)
             elif phase == 'middlegame':
@@ -718,11 +819,36 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 endgame_cpls.append(cp_loss)
             
+            # Transition CPL (moves 10-20)
+            if 10 <= move_num <= 20:
+                opening_outcomes['transition_cpl_sum'] += cp_loss
+                opening_outcomes['transition_moves'] += 1
+            
+            # Blunder analysis with context
             if cp_loss >= 300:
                 blunders += 1
                 game_blunders += 1
                 blunder_phases[phase] = blunder_phases.get(phase, 0) + 1
                 openings[opening]['blunders'] += 1
+                
+                # === Skill Attribution ===
+                if recent_capture:
+                    blunder_contexts['after_capture'] += 1
+                if recent_check:
+                    blunder_contexts['after_check'] += 1
+                if move_num >= 35:
+                    blunder_contexts['time_trouble_likely'] += 1
+                
+                # Position context
+                if prev_eval >= 150:
+                    blunder_contexts['in_winning_position'] += 1
+                    rating_cost_factors['blunders_in_winning_pos']['count'] += 1
+                    rating_cost_factors['blunders_in_winning_pos']['estimated_points_lost'] += 15
+                elif prev_eval <= -150:
+                    blunder_contexts['in_losing_position'] += 1
+                else:
+                    blunder_contexts['in_equal_position'] += 1
+                
             elif cp_loss >= 100:
                 mistakes += 1
             
@@ -736,6 +862,55 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 black_games['cpl_sum'] += cp_loss
                 black_games['moves'] += 1
+            
+            # Reset context flags after player's move
+            recent_capture = 'x' in move_san
+            recent_check = '+' in move_san or '#' in move_san
+        
+        # === Opening outcome tracking ===
+        if opening_exit_eval is not None:
+            opening_outcomes['games_with_opening_eval'] += 1
+            opening_outcomes['avg_eval_after_opening'] += opening_exit_eval
+            openings[opening]['eval_after_opening_sum'] += opening_exit_eval
+            openings[opening]['eval_after_opening_count'] += 1
+            
+            if opening_exit_eval >= 50:
+                opening_outcomes['left_opening_better'] += 1
+            elif opening_exit_eval <= -50:
+                opening_outcomes['left_opening_worse'] += 1
+        
+        # === Conversion tracking ===
+        if had_winning_position:
+            conversion_stats['winning_positions'] += 1
+            if is_win:
+                conversion_stats['converted_wins'] += 1
+            else:
+                rating_cost_factors['missed_wins']['count'] += 1
+                rating_cost_factors['missed_wins']['estimated_points_lost'] += 20
+        
+        if had_losing_position:
+            conversion_stats['losing_positions'] += 1
+            if is_win or is_draw:
+                conversion_stats['saved_draws_or_wins'] += 1
+        
+        # === Endgame collapse detection ===
+        if len(endgame_cpls) > 0 and game_blunders >= 2:
+            endgame_blunders = sum(1 for i, m in enumerate(moves_table) 
+                                   if m.get('phase') == 'endgame' 
+                                   and (m.get('cp_loss', 0) or 0) >= 300
+                                   and (m.get('mover') or m.get('color')) == focus_color)
+            if endgame_blunders >= 2 and is_loss:
+                rating_cost_factors['endgame_collapses']['count'] += 1
+                rating_cost_factors['endgame_collapses']['estimated_points_lost'] += 18
+        
+        # === Opening disaster detection ===
+        opening_blunders = sum(1 for m in moves_table 
+                              if m.get('phase') == 'opening' 
+                              and (m.get('cp_loss', 0) or 0) >= 300
+                              and (m.get('mover') or m.get('color')) == focus_color)
+        if opening_blunders >= 2 and is_loss:
+            rating_cost_factors['opening_disasters']['count'] += 1
+            rating_cost_factors['opening_disasters']['estimated_points_lost'] += 12
         
         # Track game quality
         avg_cpl = game_cpl_sum / game_moves if game_moves > 0 else 0
@@ -748,7 +923,9 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
             'avg_cpl': avg_cpl,
             'blunders': game_blunders,
             'is_win': is_win,
+            'is_loss': is_loss,
             'date': game.get('date', ''),
+            'had_winning_pos': had_winning_position,
         })
     
     # Calculate averages
@@ -756,10 +933,17 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
     avg_middlegame = sum(middlegame_cpls) / len(middlegame_cpls) if middlegame_cpls else 0
     avg_endgame = sum(endgame_cpls) / len(endgame_cpls) if endgame_cpls else 0
     
-    # Determine best/worst phase
-    phases = {'opening': avg_opening, 'middlegame': avg_middlegame, 'endgame': avg_endgame}
-    best_phase = min(phases, key=phases.get) if phases else 'unknown'
-    worst_phase = max(phases, key=phases.get) if phases else 'unknown'
+    # === PHASE PERFORMANCE INDEX (PPI) ===
+    # PPI = player_CPL / baseline_CPL (lower is better, 1.0 = average)
+    ppi = {
+        'opening': avg_opening / PHASE_BASELINES['opening'] if PHASE_BASELINES['opening'] > 0 else 0,
+        'middlegame': avg_middlegame / PHASE_BASELINES['middlegame'] if PHASE_BASELINES['middlegame'] > 0 else 0,
+        'endgame': avg_endgame / PHASE_BASELINES['endgame'] if PHASE_BASELINES['endgame'] > 0 else 0,
+    }
+    
+    # Determine best/worst phase BY PPI (not raw CPL!)
+    best_phase = min(ppi, key=ppi.get) if ppi else 'unknown'
+    worst_phase = max(ppi, key=ppi.get) if ppi else 'unknown'
     
     # Calculate rates per 100 moves
     blunder_rate = (blunders / total_moves * 100) if total_moves > 0 else 0
@@ -773,46 +957,28 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Rating range
     rating_range = (min(ratings), max(ratings)) if ratings else (0, 0)
     
-    # Trend summary
-    if total_games >= 10:
-        first_half = games[:len(games)//2]
-        second_half = games[len(games)//2:]
-        
-        # Count blunders using correct keys
-        first_blunders = 0
-        for g in first_half:
-            focus_color = g.get('focus_color', 'white')
-            for m in g.get('moves_table', []):
-                move_color = m.get('mover') or m.get('color')
-                if move_color == focus_color:
-                    cp = m.get('cp_loss', 0) or m.get('actual_cp_loss', 0) or 0
-                    if cp >= 300:
-                        first_blunders += 1
-        
-        second_blunders = 0
-        for g in second_half:
-            focus_color = g.get('focus_color', 'white')
-            for m in g.get('moves_table', []):
-                move_color = m.get('mover') or m.get('color')
-                if move_color == focus_color:
-                    cp = m.get('cp_loss', 0) or m.get('actual_cp_loss', 0) or 0
-                    if cp >= 300:
-                        second_blunders += 1
-        
-        if second_blunders < first_blunders * 0.8:
-            trend = "Improving! Blunder rate has decreased over recent games."
-        elif second_blunders > first_blunders * 1.2:
-            trend = "Blunder rate has increased recently. Time to slow down and focus."
-        else:
-            trend = "Performance is consistent across games."
-    else:
-        trend = "Not enough games for trend analysis."
+    # Trend summary with more detail
+    trend = _compute_trend_summary(games, total_games)
     
     # Calculate color-specific stats
     white_win_rate = white_games['wins'] / white_games['games'] if white_games['games'] > 0 else 0
     black_win_rate = black_games['wins'] / black_games['games'] if black_games['games'] > 0 else 0
     white_avg_cpl = white_games['cpl_sum'] / white_games['moves'] if white_games['moves'] > 0 else 0
     black_avg_cpl = black_games['cpl_sum'] / black_games['moves'] if black_games['moves'] > 0 else 0
+    
+    # === Finalize opening outcomes ===
+    if opening_outcomes['games_with_opening_eval'] > 0:
+        opening_outcomes['avg_eval_after_opening'] /= opening_outcomes['games_with_opening_eval']
+    if opening_outcomes['transition_moves'] > 0:
+        opening_outcomes['avg_transition_cpl'] = opening_outcomes['transition_cpl_sum'] / opening_outcomes['transition_moves']
+    else:
+        opening_outcomes['avg_transition_cpl'] = 0
+    
+    # === Compute conversion rate ===
+    conversion_rate = (conversion_stats['converted_wins'] / conversion_stats['winning_positions'] * 100) if conversion_stats['winning_positions'] > 0 else 0
+    
+    # === Determine biggest rating cost factor ===
+    biggest_rating_cost = max(rating_cost_factors.items(), key=lambda x: x[1]['estimated_points_lost'])
     
     return {
         'total_games': total_games,
@@ -832,7 +998,7 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
         'best_phase': best_phase,
         'worst_phase': worst_phase,
         'trend_summary': trend,
-        # New detailed stats
+        # Color stats
         'white_stats': {
             'games': white_games['games'],
             'wins': white_games['wins'],
@@ -849,7 +1015,72 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
         'best_games': best_games,
         'worst_games': worst_games,
         'rating_range': rating_range,
+        # === NEW ANALYTICS ===
+        'phase_baselines': PHASE_BASELINES,
+        'ppi': ppi,  # Phase Performance Index
+        'blunder_contexts': blunder_contexts,  # Skill attribution
+        'conversion_stats': conversion_stats,
+        'conversion_rate': conversion_rate,
+        'opening_outcomes': opening_outcomes,
+        'rating_cost_factors': rating_cost_factors,
+        'biggest_rating_cost': biggest_rating_cost,
     }
+
+
+def _empty_career_stats() -> Dict[str, Any]:
+    """Return empty stats structure."""
+    return {
+        'total_games': 0, 'win_rate': 0, 'opening_cpl': 0, 'middlegame_cpl': 0,
+        'endgame_cpl': 0, 'blunder_rate': 0, 'mistake_rate': 0, 'openings': {},
+        'best_phase': 'unknown', 'worst_phase': 'unknown',
+        'trend_summary': 'Not enough games for trend analysis',
+        'white_stats': {}, 'black_stats': {}, 'worst_games': [], 'best_games': [],
+        'blunder_phases': {}, 'rating_range': (0, 0), 'ppi': {},
+        'blunder_contexts': {}, 'conversion_stats': {}, 'conversion_rate': 0,
+        'opening_outcomes': {}, 'rating_cost_factors': {}, 'biggest_rating_cost': None,
+        'phase_baselines': {'opening': 45, 'middlegame': 95, 'endgame': 130},
+    }
+
+
+def _compute_trend_summary(games: List[Dict], total_games: int) -> str:
+    """Compute detailed trend summary."""
+    if total_games < 10:
+        return "Not enough games for trend analysis."
+    
+    first_half = games[:len(games)//2]
+    second_half = games[len(games)//2:]
+    
+    first_blunders = 0
+    first_moves = 0
+    for g in first_half:
+        focus_color = g.get('focus_color', 'white')
+        for m in g.get('moves_table', []):
+            if (m.get('mover') or m.get('color')) == focus_color:
+                first_moves += 1
+                cp = m.get('cp_loss', 0) or m.get('actual_cp_loss', 0) or 0
+                if cp >= 300:
+                    first_blunders += 1
+    
+    second_blunders = 0
+    second_moves = 0
+    for g in second_half:
+        focus_color = g.get('focus_color', 'white')
+        for m in g.get('moves_table', []):
+            if (m.get('mover') or m.get('color')) == focus_color:
+                second_moves += 1
+                cp = m.get('cp_loss', 0) or m.get('actual_cp_loss', 0) or 0
+                if cp >= 300:
+                    second_blunders += 1
+    
+    first_rate = (first_blunders / first_moves * 100) if first_moves > 0 else 0
+    second_rate = (second_blunders / second_moves * 100) if second_moves > 0 else 0
+    
+    if second_rate < first_rate * 0.8:
+        return f"Improving! Blunder rate decreased from {first_rate:.1f} to {second_rate:.1f} per 100 moves."
+    elif second_rate > first_rate * 1.2:
+        return f"Blunder rate increased from {first_rate:.1f} to {second_rate:.1f} per 100 moves. Consider slowing down."
+    else:
+        return f"Consistent performance. Blunder rate stable around {(first_rate + second_rate)/2:.1f} per 100 moves."
 
 
 def _format_opening_stats(openings: Dict[str, Dict]) -> str:
@@ -918,7 +1149,201 @@ def _format_blunder_phases(blunder_phases: Dict[str, int], total_blunders: int) 
         parts.append(f"{phase.title()}: {count} ({pct:.0f}%)")
     
     return f"- Blunder distribution: {', '.join(parts)}"
-    return parsed
+
+
+def _format_skill_attribution(blunder_contexts: Dict[str, int], total_blunders: int) -> str:
+    """Format skill attribution breakdown for blunders."""
+    if not blunder_contexts or total_blunders == 0:
+        return "No skill attribution data available."
+    
+    lines = []
+    context_labels = {
+        'after_capture': 'After captures (recapture blindness)',
+        'after_check': 'After checks (check escape issues)',
+        'in_winning_position': 'In winning positions (conversion failures)',
+        'in_losing_position': 'In losing positions (desperation errors)',
+        'in_equal_position': 'In equal positions (calculation errors)',
+        'time_trouble_likely': 'Likely time trouble (late-game errors)',
+    }
+    
+    for ctx, count in sorted(blunder_contexts.items(), key=lambda x: -x[1]):
+        if count > 0:
+            label = context_labels.get(ctx, ctx.replace('_', ' ').title())
+            pct = (count / total_blunders * 100) if total_blunders > 0 else 0
+            lines.append(f"- {label}: {count} ({pct:.0f}%)")
+    
+    return '\n'.join(lines) if lines else "No patterns detected."
+
+
+def _format_rating_cost(rating_cost_factors: Dict[str, Any]) -> str:
+    """Format what's costing the most rating points."""
+    if not rating_cost_factors:
+        return "No rating cost data available."
+    
+    cost_labels = {
+        'blunders_in_winning_pos': 'Throwing away winning positions',
+        'endgame_collapses': 'Endgame collapses (winning → lost)',
+        'opening_disasters': 'Opening disasters (lost before move 15)',
+        'missed_wins': 'Missed wins (drawing won positions)',
+        'time_losses': 'Time management issues',
+    }
+    
+    lines = []
+    
+    # Handle both dict format and int format
+    for factor, data in sorted(rating_cost_factors.items(), key=lambda x: x[1].get('count', x[1]) if isinstance(x[1], dict) else x[1], reverse=True):
+        if isinstance(data, dict):
+            count = data.get('count', 0)
+            points = data.get('estimated_points_lost', 0)
+        else:
+            count = data
+            points = 0
+        
+        if count > 0:
+            label = cost_labels.get(factor, factor.replace('_', ' ').title())
+            impact = '🔴' if count >= 3 else '🟡' if count >= 1 else ''
+            points_str = f" (~{points} rating pts)" if points > 0 else ""
+            lines.append(f"- {impact} {label}: {count} games{points_str}")
+    
+    if not lines:
+        return "✅ No major rating drains identified."
+    
+    return '\n'.join(lines)
+
+
+def _format_opening_outcomes(opening_outcomes: Dict[str, Dict], openings: Dict) -> str:
+    """Format opening outcome analysis (position quality after opening)."""
+    if not opening_outcomes:
+        return "No opening outcome data available."
+    
+    lines = []
+    
+    for opening_name, data in sorted(opening_outcomes.items(), key=lambda x: x[1].get('games', 0), reverse=True)[:5]:
+        games = data.get('games', 0)
+        if games == 0:
+            continue
+        
+        avg_eval = data.get('avg_eval_after_opening', 0)
+        transition_cpl = data.get('transition_cpl', 0)  # CPL for moves 10-20
+        
+        # Determine outcome quality
+        if avg_eval > 50:
+            outcome = '✅ Good positions'
+        elif avg_eval < -50:
+            outcome = '⚠️ Difficult positions'
+        else:
+            outcome = '➡️ Equal positions'
+        
+        # Note if transition CPL is high
+        transition_note = f" (but {transition_cpl:.0f} CPL in moves 10-20)" if transition_cpl > 80 else ""
+        
+        lines.append(f"- {opening_name[:35]}: {outcome} (avg eval: {avg_eval:+.0f}cp){transition_note}")
+    
+    return '\n'.join(lines) if lines else "Not enough opening data."
+
+
+def _format_ppi_table(ppi: Dict[str, float], phase_cpls: Dict[str, float]) -> str:
+    """Format Phase Performance Index table."""
+    if not ppi:
+        return "No PPI data available."
+    
+    baselines = {'opening': 45, 'middlegame': 95, 'endgame': 130}
+    
+    lines = ["Phase Performance Index (1.0 = average, lower = better):"]
+    lines.append("| Phase      | Your CPL | Baseline | PPI  | Assessment |")
+    lines.append("|------------|----------|----------|------|------------|")
+    
+    for phase in ['opening', 'middlegame', 'endgame']:
+        your_cpl = phase_cpls.get(phase, 0)
+        baseline = baselines.get(phase, 100)
+        phase_ppi = ppi.get(phase, 1.0)
+        
+        if phase_ppi <= 0.7:
+            assessment = "Excellent"
+        elif phase_ppi <= 0.9:
+            assessment = "Good"
+        elif phase_ppi <= 1.1:
+            assessment = "Average"
+        elif phase_ppi <= 1.3:
+            assessment = "Below avg"
+        else:
+            assessment = "Needs work"
+        
+        lines.append(f"| {phase.title():<10} | {your_cpl:>8.0f} | {baseline:>8} | {phase_ppi:.2f} | {assessment:<10} |")
+    
+    return '\n'.join(lines)
+
+
+def _format_conversion_stats(conversion_stats: Dict, conversion_rate: float) -> str:
+    """Format conversion tracking stats."""
+    if not conversion_stats:
+        return "No conversion data available."
+    
+    winning_pos = conversion_stats.get('winning_positions', 0)
+    converted = conversion_stats.get('converted_wins', 0)
+    losing_pos = conversion_stats.get('losing_positions', 0)
+    saved = conversion_stats.get('saved_draws_or_wins', 0)
+    
+    lines = []
+    
+    if winning_pos > 0:
+        conv_pct = (converted / winning_pos * 100)
+        if conv_pct >= 90:
+            assessment = "✅ Excellent"
+        elif conv_pct >= 75:
+            assessment = "Good"
+        elif conv_pct >= 60:
+            assessment = "⚠️ Needs work"
+        else:
+            assessment = "🔴 Major issue"
+        lines.append(f"Winning position conversion: {converted}/{winning_pos} ({conv_pct:.0f}%) - {assessment}")
+    
+    if losing_pos > 0:
+        save_pct = (saved / losing_pos * 100)
+        lines.append(f"Swindles from losing positions: {saved}/{losing_pos} ({save_pct:.0f}%)")
+    
+    return '\n'.join(lines) if lines else "Not enough position data."
+
+
+def _format_opening_stats_v2(openings: Dict[str, Dict]) -> str:
+    """Format opening statistics with enhanced metrics (v2)."""
+    if not openings:
+        return "No opening data available"
+    
+    # Filter out 'Unknown' if there are other openings
+    filtered = {k: v for k, v in openings.items() if k and k != 'Unknown'}
+    if not filtered:
+        filtered = openings  # Fall back to including Unknown
+    
+    # Sort by games played
+    sorted_openings = sorted(filtered.items(), key=lambda x: x[1]['games'], reverse=True)[:7]
+    
+    lines = []
+    for name, stats in sorted_openings:
+        games = stats['games']
+        wins = stats['wins']
+        losses = stats.get('losses', 0)
+        blunders = stats.get('blunders', 0)
+        total_moves = stats.get('total_moves', games * 30)
+        win_rate = wins / games if games > 0 else 0
+        avg_cpl = stats['total_cpl'] / total_moves if total_moves > 0 else 0
+        
+        # Get eval after opening if available
+        avg_eval = stats.get('avg_eval_after_opening', None)
+        eval_str = f", Pos:{avg_eval:+.0f}cp" if avg_eval is not None else ""
+        
+        # Warnings
+        warnings = []
+        if blunders >= 3:
+            warnings.append(f"⚠️{blunders} blunders")
+        if win_rate < 0.35 and games >= 3:
+            warnings.append(f"🔴low WR")
+        
+        warning_str = f" ({', '.join(warnings)})" if warnings else ""
+        
+        lines.append(f"- {name[:35]}: {games}g, {wins}W-{losses}L ({win_rate:.0%}), CPL:{avg_cpl:.0f}{eval_str}{warning_str}")
+    
+    return '\n'.join(lines) if lines else "No opening data"
 
 
 # =============================================================================
