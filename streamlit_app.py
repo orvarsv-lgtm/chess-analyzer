@@ -16,6 +16,16 @@ import chess.pgn
 from src.lichess_api import fetch_lichess_pgn
 from src.analytics import generate_coaching_report, CoachingSummary
 
+# Game cache for avoiding re-analysis
+from src.game_cache import (
+    get_cached_games_for_user,
+    cache_game,
+    get_cache_stats,
+    clear_cache,
+    _extract_game_id,
+    _hash_pgn,
+)
+
 # New feature imports
 from src.database import get_db
 from src.game_replayer import render_game_replayer
@@ -875,6 +885,31 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
             if share_link:
                 st.markdown(f"**Share this analysis:**")
                 st.code(share_link, language="text")
+        
+        # Cache management
+        with st.expander("📦 Cache Settings", expanded=False):
+            stats = get_cache_stats()
+            if "error" not in stats:
+                st.caption(f"**Games cached:** {stats.get('total_games', 0)}")
+                st.caption(f"**Users:** {stats.get('unique_users', 0)}")
+                st.caption(f"**Size:** {stats.get('cache_size_mb', 0)} MB")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🗑️ Clear my cache", help="Clear cached games for current user"):
+                        if focus_player:
+                            cleared = clear_cache(focus_player)
+                            st.success(f"Cleared {cleared} games")
+                            st.rerun()
+                        else:
+                            st.warning("No user to clear")
+                with col2:
+                    if st.button("🗑️ Clear all", help="Clear entire cache"):
+                        cleared = clear_cache()
+                        st.success(f"Cleared {cleared} games")
+                        st.rerun()
+            else:
+                st.caption("Cache not available")
 
     st.subheader("Analysis")
     st.metric("Games analyzed", int(aggregated.get("games_analyzed") or len(games) or 0))
@@ -1463,12 +1498,55 @@ def main() -> None:
             progress = st.progress(0)
             status = st.empty()
             moves_counter = st.empty()
+            cache_info = st.empty()
 
             aggregated_games: list[dict[str, Any]] = []
             aggregated_rows: list[dict[str, Any]] = []
 
+            # Check cache for already-analyzed games
+            cached_games = get_cached_games_for_user(username, int(analysis_depth))
+            cache_hits = 0
+            cache_misses = 0
+
             for i, gi in enumerate(games_inputs[:games_to_analyze], start=1):
-                status.info(f"Analyzing {i} of {games_to_analyze} games...")
+                game_id = _extract_game_id(gi.headers)
+                pgn_hash = _hash_pgn(gi.pgn)
+                
+                # Check if this game is already cached
+                if game_id and game_id in cached_games:
+                    cached = cached_games[game_id]
+                    # Verify it's the same game (PGN hash check would be here)
+                    status.info(f"Game {i} of {games_to_analyze}: ✅ Using cached analysis")
+                    cache_hits += 1
+                    
+                    # Reconstruct game data from cache
+                    focus_color = _infer_focus_color(gi.headers, focus_player)
+                    game_data = {
+                        "index": gi.index,
+                        "date": cached.get("date") or gi.headers.get("UTCDate") or gi.headers.get("Date") or "",
+                        "white": cached.get("white") or gi.headers.get("White") or "",
+                        "black": cached.get("black") or gi.headers.get("Black") or "",
+                        "result": cached.get("result") or gi.headers.get("Result") or "",
+                        "eco": cached.get("eco") or gi.headers.get("ECO") or "",
+                        "opening": cached.get("opening") or gi.headers.get("Opening") or "",
+                        "moves": int((gi.num_plies + 1) // 2),
+                        "moves_table": cached.get("moves_table", []),
+                        "focus_color": focus_color,
+                        "white_rating": cached.get("white_rating"),
+                        "black_rating": cached.get("black_rating"),
+                        "focus_player_rating": cached.get("focus_player_rating"),
+                        "_cached": True,
+                    }
+                    aggregated_games.append(game_data)
+                    aggregated_rows.extend(cached.get("raw_analysis", []))
+                    
+                    progress.progress(int((i / games_to_analyze) * 100))
+                    cache_info.caption(f"📦 Cache: {cache_hits} hits, {cache_misses} new")
+                    continue
+                
+                # Not in cache - analyze with engine
+                cache_misses += 1
+                status.info(f"Analyzing {i} of {games_to_analyze} games... (new)")
                 try:
                     resp = _post_to_engine(gi.pgn, max_games=1, depth=int(analysis_depth))
                     valid = _validate_engine_response(resp)
@@ -1511,28 +1589,43 @@ def main() -> None:
                 focus_player_rating = (
                     white_rating if focus_color == "white" else black_rating if focus_color == "black" else 0
                 )
-                aggregated_games.append(
-                    {
-                        "index": gi.index,
-                        "date": gi.headers.get("UTCDate") or gi.headers.get("Date") or "",
-                        "white": gi.headers.get("White") or "",
-                        "black": gi.headers.get("Black") or "",
-                        "result": gi.headers.get("Result") or "",
-                        "eco": gi.headers.get("ECO") or eco_code or "",
-                        "opening": gi.headers.get("Opening") or opening_name or "",
-                        "moves": int((gi.num_plies + 1) // 2),
-                        "moves_table": moves_table,
-                        "focus_color": focus_color,
-                        "white_rating": white_rating,
-                        "black_rating": black_rating,
-                        "focus_player_rating": focus_player_rating,
-                    }
-                )
+                game_data = {
+                    "index": gi.index,
+                    "date": gi.headers.get("UTCDate") or gi.headers.get("Date") or "",
+                    "white": gi.headers.get("White") or "",
+                    "black": gi.headers.get("Black") or "",
+                    "result": gi.headers.get("Result") or "",
+                    "eco": gi.headers.get("ECO") or eco_code or "",
+                    "opening": gi.headers.get("Opening") or opening_name or "",
+                    "moves": int((gi.num_plies + 1) // 2),
+                    "moves_table": moves_table,
+                    "focus_color": focus_color,
+                    "white_rating": white_rating,
+                    "black_rating": black_rating,
+                    "focus_player_rating": focus_player_rating,
+                }
+                aggregated_games.append(game_data)
+                
+                # Cache this newly analyzed game
+                if game_id:
+                    cache_game(
+                        game_id=game_id,
+                        username=username,
+                        analysis_depth=int(analysis_depth),
+                        pgn_hash=pgn_hash,
+                        game_data=game_data,
+                        raw_analysis=rows,
+                    )
 
                 progress.progress(int((i / games_to_analyze) * 100))
                 moves_counter.write(f"Total moves analyzed: {len(aggregated_rows)}")
+                cache_info.caption(f"📦 Cache: {cache_hits} hits, {cache_misses} new")
 
-            status.success("Backend status: 200 OK")
+            # Show final cache stats
+            if cache_hits > 0:
+                status.success(f"✅ Done! Used {cache_hits} cached games, analyzed {cache_misses} new games.")
+            else:
+                status.success("Backend status: 200 OK")
 
             aggregated = _aggregate_postprocessed_results(aggregated_games)
             aggregated["focus_player"] = focus_player  # Pass through for analytics
