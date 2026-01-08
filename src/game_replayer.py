@@ -267,7 +267,7 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
         white_cp_loss = white_eval.get('cp_loss', 0)
         white_quality = _classify_move_quality(white_cp_loss)
         white_color = _get_quality_color(white_quality)
-        white_style = f"background-color: {white_color}; padding: 4px 8px; border-radius: 3px;"
+        white_style = f"background-color: {white_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold;"
         if i + 1 == current_ply:
             white_style += " border: 2px solid #000;"
         
@@ -280,7 +280,7 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
             black_cp_loss = black_eval.get('cp_loss', 0)
             black_quality = _classify_move_quality(black_cp_loss)
             black_color = _get_quality_color(black_quality)
-            black_style = f"background-color: {black_color}; padding: 4px 8px; border-radius: 3px;"
+            black_style = f"background-color: {black_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold;"
             if i + 2 == current_ply:
                 black_style += " border: 2px solid #000;"
             
