@@ -60,20 +60,26 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         current_ply = st.session_state.replay_ply
         current_fen = positions[current_ply]
         
-        # Render chessboard (using chess.svg or custom component)
-        from ui.chessboard_component import render_chessboard
-        
-        # Get current move eval for highlighting
+        # Get current move eval for later display
         current_eval = None
         if current_ply > 0 and current_ply <= len(move_evals):
             current_eval = move_evals[current_ply - 1]
         
-        render_chessboard(
-            fen=current_fen,
-            size=400,
-            orientation="white" if game_data.get('color') == 'white' else "black",
-            highlight_squares=_get_highlight_squares(current_ply, san_moves, current_eval)
-        )
+        # Render chessboard using simple SVG display
+        board_at_ply = chess.Board(current_fen)
+        
+        # Display using chess.svg (simpler, no interactive component)
+        try:
+            import chess.svg
+            svg_board = chess.svg.board(
+                board=board_at_ply,
+                size=400,
+                orientation=chess.WHITE if game_data.get('focus_color') == 'white' else chess.BLACK
+            )
+            st.markdown(f'<div style="display: flex; justify-content: center;">{svg_board}</div>', unsafe_allow_html=True)
+        except Exception:
+            # Fallback to text representation
+            st.code(str(board_at_ply))
         
         # Move navigation controls
         st.write("")  # Spacing

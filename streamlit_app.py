@@ -2051,8 +2051,80 @@ def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
     # Add export button
     add_export_button(aggregated, focus_player)
     
-    # Render opening repertoire UI (it uses database directly)
-    render_opening_repertoire_ui(focus_player)
+    # Analyze openings from the games we have
+    st.subheader("📖 Opening Repertoire")
+    
+    # Color filter
+    color_filter = st.radio("Color", ["Both", "White", "Black"], horizontal=True)
+    
+    # Group games by opening
+    opening_stats = {}
+    for game in games:
+        opening = game.get('opening', 'Unknown')
+        eco = game.get('eco', '')
+        focus_color = game.get('focus_color', 'white')
+        result = game.get('result', '')
+        
+        # Apply color filter
+        if color_filter == "White" and focus_color != "white":
+            continue
+        if color_filter == "Black" and focus_color != "black":
+            continue
+        
+        # Determine outcome
+        if focus_color == 'white':
+            outcome = 'win' if result == '1-0' else 'loss' if result == '0-1' else 'draw'
+        else:
+            outcome = 'win' if result == '0-1' else 'loss' if result == '1-0' else 'draw'
+        
+        # Initialize stats for this opening
+        if opening not in opening_stats:
+            opening_stats[opening] = {
+                'eco': eco,
+                'games': 0,
+                'wins': 0,
+                'draws': 0,
+                'losses': 0,
+            }
+        
+        opening_stats[opening]['games'] += 1
+        if outcome == 'win':
+            opening_stats[opening]['wins'] += 1
+        elif outcome == 'draw':
+            opening_stats[opening]['draws'] += 1
+        else:
+            opening_stats[opening]['losses'] += 1
+    
+    if not opening_stats:
+        st.info("No opening data yet. Play some games and analyze them to build your repertoire!")
+        return
+    
+    # Display opening statistics
+    opening_rows = []
+    for opening, stats in opening_stats.items():
+        total = stats['games']
+        win_rate = (stats['wins'] / total * 100) if total > 0 else 0
+        opening_rows.append({
+            'Opening': f"{opening} ({stats['eco']})" if stats['eco'] else opening,
+            'Games': total,
+            'Win Rate': f"{win_rate:.1f}%",
+            'W-D-L': f"{stats['wins']}-{stats['draws']}-{stats['losses']}",
+        })
+    
+    # Sort by games played
+    opening_rows = sorted(opening_rows, key=lambda x: x['Games'], reverse=True)
+    
+    st.dataframe(opening_rows, use_container_width=True, hide_index=True)
+    
+    # Recommendations
+    st.subheader("💡 Recommendations")
+    weak_openings = [r for r in opening_rows if float(r['Win Rate'].rstrip('%')) < 40 and r['Games'] >= 3]
+    if weak_openings:
+        st.warning(f"**Weak openings to study:** {', '.join([r['Opening'].split(' (')[0] for r in weak_openings[:3]])}")
+    
+    rare_openings = [r for r in opening_rows if r['Games'] < 3]
+    if rare_openings:
+        st.info(f"**Build more experience in:** {len(rare_openings)} openings played fewer than 3 times")
 
 
 def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
@@ -2066,27 +2138,47 @@ def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
         return
     
     focus_player = aggregated.get("focus_player", "").strip()
-    focus_player_rating = 0
     
-    # Try to get player rating from first game
-    if games:
-        first_game = games[0]
-        focus_player_rating = first_game.get("focus_player_rating", 0)
-        if focus_player_rating == 0:
-            focus_color = first_game.get("focus_color")
-            if focus_color == "white":
-                focus_player_rating = first_game.get("white_rating", 0)
-            elif focus_color == "black":
-                focus_player_rating = first_game.get("black_rating", 0)
+    # Extract rating data from games
+    games_with_ratings = []
+    total_player_rating = 0
+    rating_count = 0
     
-    # Check if we have enough data
-    if focus_player_rating == 0:
+    for game in games:
+        focus_color = game.get('focus_color', 'white')
+        white_rating = game.get('white_rating', 0)
+        black_rating = game.get('black_rating', 0)
+        
+        if white_rating > 0 and black_rating > 0:
+            player_rating = white_rating if focus_color == 'white' else black_rating
+            opponent_rating = black_rating if focus_color == 'white' else white_rating
+            
+            total_player_rating += player_rating
+            rating_count += 1
+            
+            games_with_ratings.append({
+                'white_rating': white_rating,
+                'black_rating': black_rating,
+                'focus_color': focus_color,
+                'focus_player_rating': player_rating,
+                'opponent_rating': opponent_rating,
+                'result': game.get('result', ''),
+                'game_info': {'score': 'win' if (focus_color == 'white' and game.get('result') == '1-0') or (focus_color == 'black' and game.get('result') == '0-1') else 'loss' if (focus_color == 'white' and game.get('result') == '0-1') or (focus_color == 'black' and game.get('result') == '1-0') else 'draw'},
+                'move_evals': [],
+            })
+    
+    if not games_with_ratings:
         st.warning("No rating data available in analyzed games. Opponent strength analysis requires games with player ratings.")
         st.info("💡 Tip: Lichess games usually include ratings. Try analyzing games from Lichess to see opponent strength analysis.")
         return
     
+    avg_player_rating = total_player_rating // rating_count if rating_count > 0 else 0
+    
+    st.metric("Your Average Rating", avg_player_rating)
+    st.caption(f"Based on {len(games_with_ratings)} games with rating data")
+    
     # Render opponent strength analysis
-    render_opponent_strength_analysis(games, focus_player_rating)
+    render_opponent_strength_analysis(games_with_ratings, avg_player_rating)
 
 
 def _render_streaks_tab(aggregated: dict[str, Any]) -> None:
@@ -2147,13 +2239,22 @@ def _render_streaks_tab(aggregated: dict[str, Any]) -> None:
     # Show achievement milestones
     st.divider()
     st.subheader("🎯 Achievement Milestones")
-    milestones = get_streak_milestones()
+    
+    # Hardcode milestones with proper formatting
+    milestones = [
+        ("🥉 Bronze Streak", 3),
+        ("🥈 Silver Streak", 5),
+        ("🥇 Gold Streak", 7),
+        ("💎 Diamond Streak", 10),
+        ("👑 Master Streak", 15),
+        ("🏆 Grandmaster Streak", 20),
+    ]
     
     milestone_cols = st.columns(3)
-    for i, (name, count) in enumerate(milestones.items()):
+    for i, (name, count) in enumerate(milestones):
         col = milestone_cols[i % 3]
         with col:
-            st.metric(str(name), f"{count} games")
+            st.metric(name, f"{count} games")
 
 
 # Prevent any accidental local analysis path.
