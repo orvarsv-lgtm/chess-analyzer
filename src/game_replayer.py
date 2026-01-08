@@ -53,8 +53,14 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
     if 'replay_ply' not in st.session_state:
         st.session_state.replay_ply = 0
     
-    # Bounds check current_ply (in case it's from a previous game)
-    if st.session_state.replay_ply > max_ply:
+    # Ensure replay_ply is an integer and bounds check (in case it's from a previous game)
+    try:
+        current_ply = int(st.session_state.replay_ply)
+        if current_ply > max_ply or current_ply < 0:
+            current_ply = 0
+            st.session_state.replay_ply = 0
+    except (TypeError, ValueError):
+        current_ply = 0
         st.session_state.replay_ply = 0
     
     # ======= LAYOUT =======
@@ -62,7 +68,6 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
     
     with col1:
         # Chessboard display
-        current_ply = st.session_state.replay_ply
         current_fen = positions[current_ply]
         
         # Get current move eval for later display
