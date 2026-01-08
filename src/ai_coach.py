@@ -525,91 +525,81 @@ def generate_career_analysis(
     # Format opening outcomes
     opening_outcome_str = _format_opening_outcomes(opening_outcomes, stats.get('openings', {}))
     
-    prompt = f"""You are an expert chess coach. Analyze this player's data and provide SPECIFIC, ACTIONABLE insights.
-
-IMPORTANT CONTEXT: Raw CPL comparisons across phases are misleading because endgames naturally have higher CPL (fewer moves = sharper swings). Use the Phase Performance Index (PPI) instead - it normalizes CPL against expected baselines. PPI of 1.0 = average; lower is better.
+    prompt = f"""You are an expert chess coach giving a focused, actionable review. Your job is to tell a SIMPLE STORY with ONE clear enemy and ONE clear mission.
 
 **Player**: {player_name}
 **Rating**: {player_rating or 'Unknown'}
 **Games Analyzed**: {stats['total_games']} (W:{stats.get('wins', 0)} L:{stats.get('losses', 0)} D:{stats.get('draws', 0)})
 
 ---
-**PHASE PERFORMANCE (Normalized)**
-Phase baselines (expected CPL): Opening={baselines.get('opening', 45)}, Middlegame={baselines.get('middlegame', 95)}, Endgame={baselines.get('endgame', 130)}
-
-| Phase | Raw CPL | Baseline | PPI | Assessment |
-|-------|---------|----------|-----|------------|
-| Opening | {stats['opening_cpl']:.0f} | {baselines.get('opening', 45)} | {ppi.get('opening', 0):.2f} | {"✅ Strong" if ppi.get('opening', 2) < 1.0 else "⚠️ Below avg" if ppi.get('opening', 0) < 1.3 else "❌ Weak"} |
-| Middlegame | {stats['middlegame_cpl']:.0f} | {baselines.get('middlegame', 95)} | {ppi.get('middlegame', 0):.2f} | {"✅ Strong" if ppi.get('middlegame', 2) < 1.0 else "⚠️ Below avg" if ppi.get('middlegame', 0) < 1.3 else "❌ Weak"} |
-| Endgame | {stats['endgame_cpl']:.0f} | {baselines.get('endgame', 130)} | {ppi.get('endgame', 0):.2f} | {"✅ Strong" if ppi.get('endgame', 2) < 1.0 else "⚠️ Below avg" if ppi.get('endgame', 0) < 1.3 else "❌ Weak"} |
-
-Best phase (by PPI): **{stats['best_phase']}** | Worst phase (by PPI): **{stats['worst_phase']}**
+**PHASE CONTEXT** (background only)
+PPI normalizes CPL for phase difficulty. Near 1.0 = average. All phases similar = balanced skill.
+| Phase | PPI |
+|-------|-----|
+| Opening | {ppi.get('opening', 0):.2f} |
+| Middlegame | {ppi.get('middlegame', 0):.2f} |
+| Endgame | {ppi.get('endgame', 0):.2f} |
 
 ---
-**SKILL ATTRIBUTION (Why blunders happen)**
+**CONVERSION** (often the real story)
+- Winning positions (eval >= +1.5): {conversion_stats.get('winning_positions', 0)} games
+- Actually converted: {conversion_stats.get('converted_wins', 0)} ({stats.get('conversion_rate', 0):.0f}%)
+
+---
+**FAILURE PATTERNS**
 {skill_attribution_str}
 
 ---
-**CONVERSION ANALYSIS**
-- Had winning position (≥+1.5) in {conversion_stats.get('winning_positions', 0)} games
-- Actually converted to wins: {conversion_stats.get('converted_wins', 0)} ({stats.get('conversion_rate', 0):.0f}% conversion rate)
-- Had losing position in {conversion_stats.get('losing_positions', 0)} games, saved {conversion_stats.get('saved_draws_or_wins', 0)}
-
----
-**OPENING OUTCOMES** (Position quality, not CPL)
-{opening_outcome_str}
-
----
-**BIGGEST RATING COST FACTORS** (Fix these first!)
+**RELATIVE IMPACT** (rank order only)
 {rating_cost_str}
 
 ---
-**COLOR PERFORMANCE**
-- As White: {white_stats.get('games', 0)}g, {white_stats.get('win_rate', 0):.0%} WR, CPL:{white_stats.get('avg_cpl', 0):.0f}
-- As Black: {black_stats.get('games', 0)}g, {black_stats.get('win_rate', 0):.0%} WR, CPL:{black_stats.get('avg_cpl', 0):.0f}
+**OPENING POSITION QUALITY**
+{opening_outcome_str}
 
 ---
-**TOP OPENINGS**
-{_format_opening_stats_v2(stats['openings'])}
-
----
-**TREND**: {stats['trend_summary']}
+**COLOR SPLIT**
+- White: {white_stats.get('games', 0)}g, {white_stats.get('win_rate', 0):.0%} WR
+- Black: {black_stats.get('games', 0)}g, {black_stats.get('win_rate', 0):.0%} WR
 
 ===
 
-Now provide analysis with these sections. Be SPECIFIC - use "because X data shows Y" statements:
+Write your analysis using this EXACT structure:
 
-1. **Overview** (3 sentences max): Key insight about where they're actually strong/weak, using PPI not raw CPL.
+## The Story (2-3 sentences)
+State the ONE main problem clearly. Example: "You get winning positions but fail to convert them. This single issue explains most of your lost results."
 
-2. **Biggest Strength**: ONE specific thing with data. Example: "Opening PPI of 0.85 shows you're playing above average - your preparation is working."
+## Primary Improvement Lever
+Name the ONE thing to fix. This is the enemy. Everything else is secondary.
 
-3. **Critical Weakness**: ONE specific thing with data. Example: "42% of blunders happen after captures, indicating recapture calculation issues."
+## Why This Happens
+Describe the pattern as a behavior, not a statistic. Example: "After forcing captures, you stop checking for counterplay." NOT: "42% of blunders are after captures."
 
-4. **What's Costing You The Most Rating Points**: Reference the rating cost factors. Be specific about WHY this matters.
+## The Fix
+One specific action. Example: "Before every recapture, ask: what is their best reply? Practice in 10 endgame puzzles daily for 2 weeks."
 
-5. **Opening Analysis**: Use the opening OUTCOMES (eval after move 15), not just CPL. Which openings leave you in good positions? Which don't?
+## Controllable Goal
+One measurable target. Example: "Conversion rate: {stats.get('conversion_rate', 0):.0f}% to 70%"
 
-6. **Targeted Fixes** (3 items max):
-   - Each must include a "because" statement with specific data
-   - Give a concrete, measurable goal (not "study endgames")
-   - Example: "Improve recapture calculation because 42% of your blunders follow captures. Goal: reduce post-capture blunders from 12 to 6."
+## Opening Note (only if relevant)
+If openings are NOT the main issue, skip this entirely.
+If they are, split into: (a) openings giving good positions, (b) openings where results collapse despite good positions.
 
-7. **Controllable Goals** (instead of rating predictions):
-   - Goal 1: [Metric] from [current] → [target]
-   - Goal 2: [Metric] from [current] → [target]
-   - Goal 3: [Metric] from [current] → [target]
-   - Example: "Conversion rate from 58% → 75% when ahead by +1.5"
-
-Do NOT give generic advice. Every recommendation must reference their specific data."""
+CONSTRAINTS:
+- If all PPI values are within 0.2 of each other, say "phases are balanced" and move on.
+- If conversion is below 70%, that is almost always the primary lever.
+- NEVER cite absolute rating points. Use "largest impact factor" only.
+- NEVER list overlapping statistical categories as separate issues.
+- Keep it SHORT. One enemy, one mission, one fix."""
 
     response = client.chat.completions.create(
         model="gpt-4-turbo-preview",
         messages=[
-            {"role": "system", "content": "You are an expert chess coach with decades of experience helping players improve."},
+            {"role": "system", "content": "You are a chess coach who tells simple stories. One enemy. One mission. No hedging."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.7,
-        max_tokens=3000,
+        max_tokens=2000,
     )
     
     content = response.choices[0].message.content

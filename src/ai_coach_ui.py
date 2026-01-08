@@ -163,13 +163,12 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
     
     # Show what will be analyzed
     st.info(f"""
-    🔍 **Career Analysis Will Include:**
-    - **Phase Performance Index (PPI)**: Normalized analysis across opening/middlegame/endgame
-    - **Skill Attribution**: *Why* you blunder (after captures, in winning positions, etc.)
-    - **Conversion Analysis**: How often you win from winning positions
-    - **Rating Cost Factors**: What's actually costing you rating points
-    - **Opening Outcomes**: Position quality after your openings (not just CPL)
-    - **Controllable Goals**: Specific, measurable targets instead of vague rating predictions
+    🎯 **Career Analysis Focus:**
+    - **The Story**: Your ONE main problem, clearly stated
+    - **Primary Improvement Lever**: The single thing that will move your results most
+    - **Why This Happens**: The pattern behind your mistakes (behavior, not statistics)
+    - **The Fix**: One specific action to take
+    - **Controllable Goal**: One measurable target
     """)
     
     # Cache key for career analysis
@@ -221,272 +220,84 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
 
 
 def _render_career_analysis_result(result: Dict[str, Any]) -> None:
-    """Render the career analysis result with advanced analytics."""
+    """Render the career analysis result - focused on the AI story, not stats."""
     
-    # Show stats summary
     stats = result.get('stats', {})
     
-    # Main metrics row
-    col1, col2, col3, col4 = st.columns(4)
+    # Just 3 key metrics - less is more
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Games Analyzed", stats.get('total_games', 0))
+        st.metric("Games", stats.get('total_games', 0))
     with col2:
         win_rate = stats.get('win_rate', 0)
-        st.metric("Win Rate", f"{win_rate:.1%}")
+        st.metric("Win Rate", f"{win_rate:.0%}")
     with col3:
         conversion_rate = stats.get('conversion_rate', 0)
-        st.metric("Conversion Rate", f"{conversion_rate:.0f}%", help="% of winning positions actually converted to wins")
-    with col4:
-        biggest_cost = stats.get('biggest_rating_cost', (None, {}))[0]
-        st.metric("Biggest Leak", (biggest_cost or 'N/A').replace('_', ' ').title()[:15], help="What's costing you the most rating points")
-    
-    # === NEW: Phase Performance Index (PPI) ===
-    st.markdown("#### 📊 Phase Performance Index (Normalized)")
-    st.caption("PPI normalizes your CPL against expected baselines. 1.0 = average; lower is better.")
-    
-    ppi = stats.get('ppi', {})
-    baselines = stats.get('phase_baselines', {'opening': 45, 'middlegame': 95, 'endgame': 130})
-    
-    ppi_col1, ppi_col2, ppi_col3 = st.columns(3)
-    with ppi_col1:
-        opening_ppi = ppi.get('opening', 0)
-        opening_cpl = stats.get('opening_cpl', 0)
-        ppi_icon = "✅" if opening_ppi <= 0.9 else "⚠️" if opening_ppi <= 1.1 else "🔴"
-        st.metric(
-            f"{ppi_icon} Opening PPI",
-            f"{opening_ppi:.2f}" if opening_ppi > 0 else "N/A",
-            help=f"Your CPL: {opening_cpl:.0f} vs baseline: {baselines['opening']}"
-        )
-    with ppi_col2:
-        mid_ppi = ppi.get('middlegame', 0)
-        mid_cpl = stats.get('middlegame_cpl', 0)
-        ppi_icon = "✅" if mid_ppi <= 0.9 else "⚠️" if mid_ppi <= 1.1 else "🔴"
-        st.metric(
-            f"{ppi_icon} Middlegame PPI",
-            f"{mid_ppi:.2f}" if mid_ppi > 0 else "N/A",
-            help=f"Your CPL: {mid_cpl:.0f} vs baseline: {baselines['middlegame']}"
-        )
-    with ppi_col3:
-        end_ppi = ppi.get('endgame', 0)
-        end_cpl = stats.get('endgame_cpl', 0)
-        ppi_icon = "✅" if end_ppi <= 0.9 else "⚠️" if end_ppi <= 1.1 else "🔴"
-        st.metric(
-            f"{ppi_icon} Endgame PPI",
-            f"{end_ppi:.2f}" if end_ppi > 0 else "N/A",
-            help=f"Your CPL: {end_cpl:.0f} vs baseline: {baselines['endgame']}"
-        )
-    
-    # Show best/worst phase (now based on PPI)
-    best_phase = stats.get('best_phase', 'unknown')
-    worst_phase = stats.get('worst_phase', 'unknown')
-    st.caption(f"**Best phase (by PPI):** {best_phase.title()} | **Weakest phase (by PPI):** {worst_phase.title()}")
-    
-    # === NEW: Skill Attribution ===
-    st.markdown("#### 🎯 Skill Attribution (Why Blunders Happen)")
-    blunder_contexts = stats.get('blunder_contexts', {})
-    total_blunders = stats.get('total_blunders', 0)
-    
-    if blunder_contexts and total_blunders > 0:
-        # Sort by frequency
-        sorted_contexts = sorted(blunder_contexts.items(), key=lambda x: -x[1])
-        
-        context_labels = {
-            'after_capture': ('After captures', 'Recapture calculation issues'),
-            'after_check': ('After checks', 'Check response issues'),
-            'in_winning_position': ('In winning positions', 'Conversion failures'),
-            'in_losing_position': ('In losing positions', 'Desperation errors'),
-            'in_equal_position': ('In equal positions', 'Calculation errors'),
-            'time_trouble_likely': ('Late-game moves', 'Possible time pressure'),
-        }
-        
-        for ctx, count in sorted_contexts[:4]:  # Show top 4
-            if count > 0:
-                pct = count / total_blunders * 100
-                label, desc = context_labels.get(ctx, (ctx.replace('_', ' ').title(), ''))
-                severity = "🔴" if pct >= 30 else "🟡" if pct >= 15 else ""
-                st.caption(f"{severity} **{label}**: {count} ({pct:.0f}%) - {desc}")
-    else:
-        st.caption("Not enough blunder data for skill attribution analysis.")
-    
-    # === NEW: Rating Cost Factors ===
-    st.markdown("#### 💸 What's Costing You Rating Points")
-    rating_cost_factors = stats.get('rating_cost_factors', {})
-    
-    # Check if there are any costs (handling both dict and int formats)
-    has_costs = False
-    for factor, data in rating_cost_factors.items():
-        count = data.get('count', 0) if isinstance(data, dict) else data
-        if count > 0:
-            has_costs = True
-            break
-    
-    if has_costs:
-        cost_labels = {
-            'blunders_in_winning_pos': 'Throwing away winning positions',
-            'endgame_collapses': 'Endgame collapses',
-            'opening_disasters': 'Opening disasters',
-            'missed_wins': 'Drawing won positions',
-        }
-        
-        # Helper to get count value
-        def get_count(item):
-            val = item[1]
-            if isinstance(val, dict):
-                return val.get('count', 0)
-            return val if isinstance(val, (int, float)) else 0
-        
-        # Sort by count
-        sorted_costs = sorted(rating_cost_factors.items(), key=get_count, reverse=True)
-        for factor, data in sorted_costs:
-            if isinstance(data, dict):
-                count = data.get('count', 0)
-                points = data.get('estimated_points_lost', 0)
-            elif isinstance(data, (int, float)):
-                count = data
-                points = 0
-            else:
-                continue
-            if count > 0:
-                label = cost_labels.get(factor, factor.replace('_', ' ').title())
-                severity = "🔴" if count >= 3 else "🟡"
-                points_str = f" (~{points} pts)" if points > 0 else ""
-                st.caption(f"{severity} **{label}**: {count} games{points_str}")
-    else:
-        st.success("✅ No major rating leaks identified!")
-    
-    # === NEW: Conversion Tracking ===
-    st.markdown("#### 🏆 Conversion Analysis")
-    conversion_stats = stats.get('conversion_stats', {})
-    
-    conv_col1, conv_col2 = st.columns(2)
-    with conv_col1:
-        winning_pos = conversion_stats.get('winning_positions', 0)
-        converted = conversion_stats.get('converted_wins', 0)
-        if winning_pos > 0:
-            conv_pct = converted / winning_pos * 100
-            icon = "✅" if conv_pct >= 80 else "⚠️" if conv_pct >= 60 else "🔴"
-            st.metric(
-                f"{icon} Winning Position Conversion",
-                f"{converted}/{winning_pos} ({conv_pct:.0f}%)",
-                help="How often you win when you've had a +1.5 advantage"
-            )
-        else:
-            st.caption("No winning position data")
-    with conv_col2:
-        losing_pos = conversion_stats.get('losing_positions', 0)
-        saved = conversion_stats.get('saved_draws_or_wins', 0)
-        if losing_pos > 0:
-            save_pct = saved / losing_pos * 100
-            st.metric(
-                "🎲 Swindle Rate",
-                f"{saved}/{losing_pos} ({save_pct:.0f}%)",
-                help="How often you escaped from lost positions"
-            )
-        else:
-            st.caption("No swindle data")
-    
-    # Performance by color (keep existing)
-    st.markdown("#### ♔ Performance by Color")
-    white_stats = stats.get('white_stats', {})
-    black_stats = stats.get('black_stats', {})
-    
-    color_col1, color_col2 = st.columns(2)
-    with color_col1:
-        w_games = white_stats.get('games', 0)
-        w_wr = white_stats.get('win_rate', 0)
-        w_cpl = white_stats.get('avg_cpl', 0)
-        st.markdown(f"""
-        **⬜ As White**: {w_games} games  
-        Win Rate: **{w_wr:.0%}** | Avg CPL: **{w_cpl:.0f}**
-        """)
-    with color_col2:
-        b_games = black_stats.get('games', 0)
-        b_wr = black_stats.get('win_rate', 0)
-        b_cpl = black_stats.get('avg_cpl', 0)
-        st.markdown(f"""
-        **⬛ As Black**: {b_games} games  
-        Win Rate: **{b_wr:.0%}** | Avg CPL: **{b_cpl:.0f}**
-        """)
-    
-    # Show error rates with context
-    st.markdown("#### ⚠️ Error Analysis")
-    err_col1, err_col2, err_col3 = st.columns(3)
-    with err_col1:
-        br = stats.get('blunder_rate', 0)
-        color = "🟢" if br < 5 else "🟡" if br < 10 else "🔴"
-        st.metric(f"{color} Blunders/100 moves", f"{br:.1f}")
-    with err_col2:
-        mr = stats.get('mistake_rate', 0)
-        color = "🟢" if mr < 10 else "🟡" if mr < 15 else "🔴"
-        st.metric(f"{color} Mistakes/100 moves", f"{mr:.1f}")
-    with err_col3:
-        total_b = stats.get('total_blunders', 0)
-        st.metric("Total Blunders", total_b)
-    
-    # Blunder distribution by phase (kept for reference, but skill attribution is more useful)
-    blunder_phases = stats.get('blunder_phases', {})
-    if blunder_phases and stats.get('total_blunders', 0) > 0:
-        total_b = stats.get('total_blunders', 1)
-        st.caption(f"Blunder distribution by phase: Opening {blunder_phases.get('opening', 0)} ({blunder_phases.get('opening', 0)/total_b*100:.0f}%) | Middlegame {blunder_phases.get('middlegame', 0)} ({blunder_phases.get('middlegame', 0)/total_b*100:.0f}%) | Endgame {blunder_phases.get('endgame', 0)} ({blunder_phases.get('endgame', 0)/total_b*100:.0f}%)")
-    
-    # Show top openings
-    openings = stats.get('openings', {})
-    if openings:
-        st.markdown("#### 📚 Top Openings")
-        # Filter unknown and sort
-        filtered = {k: v for k, v in openings.items() if k and k != 'Unknown'}
-        if not filtered:
-            filtered = openings
-        sorted_openings = sorted(filtered.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
-        
-        for name, data in sorted_openings:
-            games = data['games']
-            wins = data['wins']
-            losses = data.get('losses', 0)
-            blunders = data.get('blunders', 0)
-            total_moves = data.get('total_moves', games * 30)
-            win_rate = wins / games if games > 0 else 0
-            avg_cpl = data['total_cpl'] / total_moves if total_moves > 0 else 0
-            
-            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-            with col1:
-                warning = " ⚠️" if blunders >= 3 else ""
-                st.write(f"**{name}**{warning}")
-            with col2:
-                st.write(f"{games} games")
-            with col3:
-                wr_color = "🟢" if win_rate >= 0.6 else "🟡" if win_rate >= 0.4 else "🔴"
-                st.write(f"{wr_color} {win_rate:.0%} W")
-            with col4:
-                cpl_color = "🟢" if avg_cpl < 80 else "🟡" if avg_cpl < 130 else "🔴"
-                st.write(f"{cpl_color} CPL: {avg_cpl:.0f}")
-    
-    # Show best and worst games
-    best_games = stats.get('best_games', [])
-    worst_games = stats.get('worst_games', [])
-    
-    if best_games or worst_games:
-        st.markdown("#### 🎯 Game Highlights")
-        
-        game_col1, game_col2 = st.columns(2)
-        with game_col1:
-            st.markdown("**✅ Best Performed Games**")
-            for g in best_games[:3]:
-                result_emoji = "🏆" if g.get('is_win') else "📊"
-                st.caption(f"{result_emoji} Game {g.get('index', '?')}: {g.get('opening', 'Unknown')[:25]} - CPL: {g.get('avg_cpl', 0):.0f}")
-        with game_col2:
-            st.markdown("**⚠️ Games to Review**")
-            for g in worst_games[:3]:
-                result_emoji = "❌" if not g.get('is_win') else "📊"
-                st.caption(f"{result_emoji} Game {g.get('index', '?')}: {g.get('opening', 'Unknown')[:25]} - CPL: {g.get('avg_cpl', 0):.0f}, {g.get('blunders', 0)} blunders")
+        conv_icon = "✅" if conversion_rate >= 70 else "⚠️" if conversion_rate >= 50 else "🔴"
+        st.metric(f"{conv_icon} Conversion", f"{conversion_rate:.0f}%", help="How often you win from winning positions (≥+1.5)")
     
     st.markdown("---")
     
-    # Show the full analysis
-    st.markdown("### 🤖 AI Career Analysis")
+    # Show the AI analysis first and prominently - this is the main content
+    st.markdown("### 🎯 Your Analysis")
     st.markdown(result.get('analysis', 'No analysis available'))
     
-    # Metadata
+    # Put all the detailed stats in a collapsible section
+    with st.expander("📊 Detailed Statistics (for reference)", expanded=False):
+        # PPI Section
+        st.markdown("**Phase Performance Index**")
+        st.caption("PPI normalizes CPL for phase difficulty. Near 1.0 = average.")
+        
+        ppi = stats.get('ppi', {})
+        baselines = stats.get('phase_baselines', {'opening': 45, 'middlegame': 95, 'endgame': 130})
+        
+        ppi_col1, ppi_col2, ppi_col3 = st.columns(3)
+        with ppi_col1:
+            opening_ppi = ppi.get('opening', 0)
+            ppi_icon = "✅" if opening_ppi <= 0.9 else "⚠️" if opening_ppi <= 1.1 else "🔴"
+            st.metric(f"{ppi_icon} Opening", f"{opening_ppi:.2f}" if opening_ppi > 0 else "N/A")
+        with ppi_col2:
+            mid_ppi = ppi.get('middlegame', 0)
+            ppi_icon = "✅" if mid_ppi <= 0.9 else "⚠️" if mid_ppi <= 1.1 else "🔴"
+            st.metric(f"{ppi_icon} Middlegame", f"{mid_ppi:.2f}" if mid_ppi > 0 else "N/A")
+        with ppi_col3:
+            end_ppi = ppi.get('endgame', 0)
+            ppi_icon = "✅" if end_ppi <= 0.9 else "⚠️" if end_ppi <= 1.1 else "🔴"
+            st.metric(f"{ppi_icon} Endgame", f"{end_ppi:.2f}" if end_ppi > 0 else "N/A")
+        
+        st.markdown("---")
+        
+        # Conversion
+        st.markdown("**Conversion Analysis**")
+        conversion_stats_data = stats.get('conversion_stats', {})
+        winning_pos = conversion_stats_data.get('winning_positions', 0)
+        converted = conversion_stats_data.get('converted_wins', 0)
+        if winning_pos > 0:
+            conv_pct = converted / winning_pos * 100
+            st.caption(f"Winning positions: {winning_pos} | Converted: {converted} ({conv_pct:.0f}%)")
+        
+        st.markdown("---")
+        
+        # Color split
+        st.markdown("**Performance by Color**")
+        white_stats = stats.get('white_stats', {})
+        black_stats = stats.get('black_stats', {})
+        st.caption(f"White: {white_stats.get('games', 0)}g, {white_stats.get('win_rate', 0):.0%} WR | Black: {black_stats.get('games', 0)}g, {black_stats.get('win_rate', 0):.0%} WR")
+        
+        st.markdown("---")
+        
+        # Openings
+        openings = stats.get('openings', {})
+        if openings:
+            st.markdown("**Opening Results**")
+            sorted_openings = sorted(openings.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
+            for name, data in sorted_openings:
+                if name and name != 'Unknown':
+                    games = data['games']
+                    wr = data['wins'] / games if games > 0 else 0
+                    st.caption(f"• {name}: {games}g, {wr:.0%} WR")
+    
+    # Metadata at the bottom
     with st.expander("ℹ️ Analysis Metadata", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
