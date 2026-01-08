@@ -66,6 +66,26 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         if current_ply > 0 and current_ply <= len(move_evals):
             current_eval = move_evals[current_ply - 1]
         
+        # Quality badge above chessboard
+        if current_eval:
+            cp_loss = current_eval.get('cp_loss', 0)
+            quality = _classify_move_quality(cp_loss)
+            quality_colors = {
+                'Best': '#28a745',
+                'Excellent': '#5cb85c',
+                'Good': '#90EE90',
+                'Inaccuracy': '#ffc107',
+                'Mistake': '#fd7e14',
+                'Blunder': '#dc3545'
+            }
+            quality_color = quality_colors.get(quality, '#6c757d')
+            st.markdown(
+                f'<div style="background-color: {quality_color}; color: white; '
+                f'padding: 8px 16px; border-radius: 6px; text-align: center; '
+                f'font-weight: bold; font-size: 18px; margin-bottom: 10px;">{quality} ({cp_loss}cp)</div>',
+                unsafe_allow_html=True
+            )
+        
         # Render chessboard using simple SVG display
         board_at_ply = chess.Board(current_fen)
         
@@ -135,24 +155,7 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
             
             with eval_cols[1]:
                 cp_loss = current_eval.get('cp_loss', 0)
-                quality = _classify_move_quality(cp_loss)
                 st.metric("CP Loss", f"{cp_loss}cp")
-                # Quality badge with color coding
-                quality_colors = {
-                    'Best': '#28a745',
-                    'Excellent': '#5cb85c',
-                    'Good': '#90EE90',
-                    'Inaccuracy': '#ffc107',
-                    'Mistake': '#fd7e14',
-                    'Blunder': '#dc3545'
-                }
-                quality_color = quality_colors.get(quality, '#6c757d')
-                st.markdown(
-                    f'<div style="background-color: {quality_color}; color: white; '
-                    f'padding: 6px 12px; border-radius: 4px; text-align: center; '
-                    f'font-weight: bold; margin-top: -10px;">{quality}</div>',
-                    unsafe_allow_html=True
-                )
             
             with eval_cols[2]:
                 eval_after = current_eval.get('eval_after')
@@ -294,12 +297,12 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
 def _get_quality_color(quality: str) -> str:
     """Get background color for move quality."""
     colors = {
-        'Best': '#90EE90',       # Light green
-        'Excellent': '#B4EEB4',  # Pale green
-        'Good': '#E8F5E9',       # Very light green
-        'Inaccuracy': '#FFF9C4', # Light yellow
-        'Mistake': '#FFE0B2',    # Light orange
-        'Blunder': '#FFCDD2',    # Light red
+        'Best': '#4CAF50',       # Rich green
+        'Excellent': '#8BC34A',  # Light green
+        'Good': '#CDDC39',       # Lime
+        'Inaccuracy': '#FFEB3B', # Yellow
+        'Mistake': '#FF9800',    # Orange
+        'Blunder': '#F44336',    # Red
     }
     return colors.get(quality, '#FFFFFF')
 
