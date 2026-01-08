@@ -110,47 +110,20 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
             # Fallback to text representation
             st.code(str(board_at_ply))
         
-        # Move navigation controls
+        # Move navigation with slider
         st.write("")  # Spacing
         
-        nav_cols = st.columns([1, 1, 1, 1, 1])
+        move_num = (current_ply + 1) // 2 + 1
+        turn = "White" if current_ply % 2 == 0 else "Black"
         
-        with nav_cols[0]:
-            if st.button("⏮️ Start", use_container_width=True):
-                st.session_state.replay_ply = 0
-                st.rerun()
-        
-        with nav_cols[1]:
-            if st.button("◀️ Back", use_container_width=True, disabled=(current_ply == 0)):
-                st.session_state.replay_ply = max(0, current_ply - 1)
-                st.rerun()
-        
-        with nav_cols[2]:
-            move_num = (current_ply + 1) // 2 + 1
-            turn = "White" if current_ply % 2 == 0 else "Black"
-            st.markdown(f"<div style='text-align: center; padding: 8px;'><b>Move {move_num} - {turn}</b></div>", unsafe_allow_html=True)
-        
-        with nav_cols[3]:
-            if st.button("▶️ Next", use_container_width=True, disabled=(current_ply >= max_ply)):
-                st.session_state.replay_ply = min(max_ply, current_ply + 1)
-                st.rerun()
-        
-        with nav_cols[4]:
-            if st.button("⏭️ End", use_container_width=True):
-                st.session_state.replay_ply = max_ply
-                st.rerun()
-        
-        # Slider for quick navigation
-        new_ply = st.slider(
-            "Position",
+        # Single slider for navigation
+        st.session_state.replay_ply = st.slider(
+            f"Move {move_num} - {turn}",
             min_value=0,
             max_value=max_ply,
             value=current_ply,
-            label_visibility="collapsed"
+            key=f"replay_slider_{id(game_data)}"
         )
-        if new_ply != current_ply:
-            st.session_state.replay_ply = new_ply
-            st.rerun()
         
         # Current position info
         if current_ply > 0 and current_eval:
@@ -188,41 +161,17 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         # Move list with clickable moves
         st.write("**📋 Move List**")
         
-        # Create scrollable container with clickable moves
+        # Create scrollable container
         move_list_html = _generate_move_list_html(san_moves, move_evals, current_ply, game_data.get('color'))
         
-        # Use components.html to enable JavaScript interactivity
-        from streamlit.components.v1 import html as components_html
-        
-        # Create interactive HTML with JavaScript
-        interactive_html = f"""
-        <div style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-            {move_list_html}
-        </div>
-        <script>
-            // Get all move cells
-            const moveCells = document.querySelectorAll('td[data-ply]');
-            moveCells.forEach(cell => {{
-                cell.style.cursor = 'pointer';
-                cell.addEventListener('click', function() {{
-                    const ply = parseInt(this.getAttribute('data-ply'));
-                    // Send message to Streamlit
-                    window.parent.postMessage({{
-                        type: 'streamlit:setComponentValue',
-                        value: ply
-                    }}, '*');
-                }});
-            }});
-        </script>
-        """
-        
-        # Render interactive component
-        clicked_ply = components_html(interactive_html, height=520, scrolling=False)
-        
-        # Update replay_ply if a move was clicked
-        if clicked_ply is not None and clicked_ply != st.session_state.replay_ply:
-            st.session_state.replay_ply = clicked_ply
-            st.rerun()
+        st.markdown(
+            f"""
+            <div style="max-height: 600px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                {move_list_html}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
         
         # Evaluation graph
         st.write("---")
