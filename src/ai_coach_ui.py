@@ -35,17 +35,19 @@ def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
     
     # Premium gate + quota check
     # TODO: Replace with real user authentication
-    user_tier = st.session_state.get('user_tier', 'free')
+    # TESTING MODE: Paywall disabled for testing
+    user_tier = st.session_state.get('user_tier', 'coach')  # Default to unlimited for testing
     user_id = st.session_state.get('user_id', 'demo_user')
     
     has_quota, remaining = check_ai_coach_quota(user_tier, user_id)
     
-    # Show tier status
-    _render_tier_status(user_tier, remaining)
+    # Show tier status (informational only during testing)
+    st.info("🧪 **Testing Mode**: AI Coach paywall is disabled. All users have unlimited access.")
     
-    if not has_quota:
-        _render_upgrade_prompt()
-        return
+    # Paywall disabled for testing
+    # if not has_quota:
+    #     _render_upgrade_prompt()
+    #     return
     
     # Main AI Coach interface
     st.markdown("---")
