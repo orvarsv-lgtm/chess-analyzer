@@ -2161,6 +2161,23 @@ def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
             total_player_rating += player_rating
             rating_count += 1
             
+            # Determine score from result
+            if focus_color == 'white':
+                score = 'win' if game.get('result') == '1-0' else 'loss' if game.get('result') == '0-1' else 'draw'
+            else:
+                score = 'win' if game.get('result') == '0-1' else 'loss' if game.get('result') == '1-0' else 'draw'
+            
+            # Extract move evaluations for CPL calculation
+            move_evals = []
+            moves_table = game.get('moves_table', [])
+            for move in moves_table:
+                if move.get('mover') == focus_color:  # Only include focus player's moves
+                    move_evals.append({
+                        'cp_loss': move.get('cp_loss', 0),
+                        'phase': move.get('phase', 'middlegame'),
+                        'san': move.get('move_san', ''),
+                    })
+            
             games_with_ratings.append({
                 'white_rating': white_rating,
                 'black_rating': black_rating,
@@ -2168,8 +2185,16 @@ def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
                 'focus_player_rating': player_rating,
                 'opponent_rating': opponent_rating,
                 'result': game.get('result', ''),
-                'game_info': {'score': 'win' if (focus_color == 'white' and game.get('result') == '1-0') or (focus_color == 'black' and game.get('result') == '0-1') else 'loss' if (focus_color == 'white' and game.get('result') == '0-1') or (focus_color == 'black' and game.get('result') == '1-0') else 'draw'},
-                'move_evals': [],
+                'game_info': {
+                    'score': score,
+                    'opponent_elo': opponent_rating,
+                    'opponent_rating': opponent_rating,
+                    'opening_name': game.get('opening', 'Unknown'),
+                    'eco': game.get('eco', ''),
+                    'date': game.get('date', ''),
+                    'color': focus_color,
+                },
+                'move_evals': move_evals,
             })
     
     if not games_with_ratings:
