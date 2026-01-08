@@ -859,10 +859,8 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
     all_rows: list[dict[str, Any]] = aggregated.get("analysis", []) or []
     focus_player = aggregated.get("focus_player", "").strip()
 
-    # Add quick wins to sidebar
+    # Add export to sidebar
     with st.sidebar:
-        add_dark_mode_toggle()
-        add_keyboard_shortcuts()
         if focus_player:
             add_export_button(aggregated, focus_player)
             share_link = create_shareable_link(aggregated, focus_player)
@@ -2000,10 +1998,6 @@ def _render_game_replayer_tab(aggregated: dict[str, Any]) -> None:
         st.info("No games analyzed yet. Run an analysis first!")
         return
     
-    # Add quick wins
-    add_dark_mode_toggle()
-    add_keyboard_shortcuts()
-    
     # Game selector
     game_options = [
         f"Game {i+1}: {g.get('white', 'Unknown')} vs {g.get('black', 'Unknown')} ({g.get('date', 'Unknown')})"
@@ -2025,6 +2019,16 @@ def _render_game_replayer_tab(aggregated: dict[str, Any]) -> None:
             st.warning("No move data available for this game.")
             return
         
+        # Reconstruct moves_pgn from moves_table if not present
+        if 'moves_pgn' not in game_data or not game_data['moves_pgn']:
+            # Extract SAN moves from moves_table
+            san_moves = []
+            for move in moves_table:
+                move_san = move.get('move_san', '')
+                if move_san:
+                    san_moves.append(move_san)
+            game_data['moves_pgn'] = ' '.join(san_moves)
+        
         # Render the interactive replayer
         render_game_replayer(game_data, moves_table)
 
@@ -2044,12 +2048,11 @@ def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
         st.info("No games analyzed yet. Run an analysis first!")
         return
     
-    # Add quick wins
-    add_dark_mode_toggle()
+    # Add export button
     add_export_button(aggregated, focus_player)
     
-    # Render opening repertoire UI
-    render_opening_repertoire_ui(focus_player, games)
+    # Render opening repertoire UI (it uses database directly)
+    render_opening_repertoire_ui(focus_player)
 
 
 def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
@@ -2076,8 +2079,11 @@ def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
             elif focus_color == "black":
                 focus_player_rating = first_game.get("black_rating", 0)
     
-    # Add quick wins
-    add_dark_mode_toggle()
+    # Check if we have enough data
+    if focus_player_rating == 0:
+        st.warning("No rating data available in analyzed games. Opponent strength analysis requires games with player ratings.")
+        st.info("💡 Tip: Lichess games usually include ratings. Try analyzing games from Lichess to see opponent strength analysis.")
+        return
     
     # Render opponent strength analysis
     render_opponent_strength_analysis(games, focus_player_rating)
@@ -2099,11 +2105,41 @@ def _render_streaks_tab(aggregated: dict[str, Any]) -> None:
         st.warning("No focus player identified. Please analyze games from a specific player.")
         return
     
-    # Add quick wins
-    add_dark_mode_toggle()
+    # Convert games to the format expected by detect_current_streaks
+    games_for_streaks = []
+    for game in games:
+        # Determine score from result and focus color
+        focus_color = game.get('focus_color', 'white')
+        result = game.get('result', '')
+        
+        if focus_color == 'white':
+            score = 'win' if result == '1-0' else 'loss' if result == '0-1' else 'draw'
+        else:
+            score = 'win' if result == '0-1' else 'loss' if result == '1-0' else 'draw'
+        
+        # Check for blunders in moves_table
+        moves_table = game.get('moves_table', [])
+        move_evals = []
+        for move in moves_table:
+            cp_loss = move.get('cp_loss', 0)
+            # Mark as blunder if CP loss >= 300
+            blunder_type = 'blunder' if cp_loss >= 300 else None
+            move_evals.append({
+                'cp_loss': cp_loss,
+                'blunder_type': blunder_type,
+            })
+        
+        games_for_streaks.append({
+            'game_info': {
+                'date': game.get('date', ''),
+                'score': score,
+            },
+            'move_evals': move_evals,
+            'opening': game.get('opening', 'Unknown'),
+        })
     
     # Detect current streaks
-    streaks = detect_current_streaks(games, focus_player)
+    streaks = detect_current_streaks(games_for_streaks, focus_player)
     
     # Render streak badges and achievements
     render_streak_badges(streaks)
@@ -2117,7 +2153,7 @@ def _render_streaks_tab(aggregated: dict[str, Any]) -> None:
     for i, (name, count) in enumerate(milestones.items()):
         col = milestone_cols[i % 3]
         with col:
-            st.metric(name, f"{count} games")
+            st.metric(str(name), f"{count} games")
 
 
 # Prevent any accidental local analysis path.
