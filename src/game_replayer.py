@@ -137,7 +137,22 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
                 cp_loss = current_eval.get('cp_loss', 0)
                 quality = _classify_move_quality(cp_loss)
                 st.metric("CP Loss", f"{cp_loss}cp")
-                st.caption(f"Quality: {quality}")
+                # Quality badge with color coding
+                quality_colors = {
+                    'Best': '#28a745',
+                    'Excellent': '#5cb85c',
+                    'Good': '#90EE90',
+                    'Inaccuracy': '#ffc107',
+                    'Mistake': '#fd7e14',
+                    'Blunder': '#dc3545'
+                }
+                quality_color = quality_colors.get(quality, '#6c757d')
+                st.markdown(
+                    f'<div style="background-color: {quality_color}; color: white; '
+                    f'padding: 6px 12px; border-radius: 4px; text-align: center; '
+                    f'font-weight: bold; margin-top: -10px;">{quality}</div>',
+                    unsafe_allow_html=True
+                )
             
             with eval_cols[2]:
                 eval_after = current_eval.get('eval_after')
@@ -246,7 +261,8 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
         # White's move
         white_move = san_moves[i]
         white_eval = move_evals[i] if i < len(move_evals) else {}
-        white_quality = white_eval.get('move_quality', 'Good')
+        white_cp_loss = white_eval.get('cp_loss', 0)
+        white_quality = _classify_move_quality(white_cp_loss)
         white_color = _get_quality_color(white_quality)
         white_style = f"background-color: {white_color}; padding: 4px 8px; border-radius: 3px;"
         if i + 1 == current_ply:
@@ -258,7 +274,8 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
         if i + 1 < len(san_moves):
             black_move = san_moves[i + 1]
             black_eval = move_evals[i + 1] if i + 1 < len(move_evals) else {}
-            black_quality = black_eval.get('move_quality', 'Good')
+            black_cp_loss = black_eval.get('cp_loss', 0)
+            black_quality = _classify_move_quality(black_cp_loss)
             black_color = _get_quality_color(black_quality)
             black_style = f"background-color: {black_color}; padding: 4px 8px; border-radius: 3px;"
             if i + 2 == current_ply:
