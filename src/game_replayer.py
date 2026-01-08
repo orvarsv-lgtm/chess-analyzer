@@ -27,10 +27,6 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
     """
     st.subheader("🎮 Game Replayer")
     
-    # Initialize session state for current position
-    if 'replay_ply' not in st.session_state:
-        st.session_state.replay_ply = 0
-    
     # Parse game into board positions
     moves_pgn = game_data.get('moves_pgn', '')
     if not moves_pgn:
@@ -52,6 +48,10 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
             continue
     
     max_ply = len(san_moves)
+    
+    # Initialize session state for current position
+    if 'replay_ply' not in st.session_state:
+        st.session_state.replay_ply = 0
     
     # Bounds check current_ply (in case it's from a previous game)
     if st.session_state.replay_ply > max_ply:
