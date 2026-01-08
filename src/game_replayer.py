@@ -179,61 +179,41 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         # Move list with clickable moves
         st.write("**📋 Move List**")
         
-        # Create scrollable container
+        # Create scrollable container with clickable moves
         move_list_html = _generate_move_list_html(san_moves, move_evals, current_ply, game_data.get('color'))
         
-        st.markdown(
-            f"""
-            <div style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                {move_list_html}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        # Use components.html to enable JavaScript interactivity
+        from streamlit.components.v1 import html as components_html
         
-        # Move list as clickable buttons (alternative to HTML)
-        st.write("")
-        st.write("**Click to jump:**")
+        # Create interactive HTML with JavaScript
+        interactive_html = f"""
+        <div style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+            {move_list_html}
+        </div>
+        <script>
+            // Get all move cells
+            const moveCells = document.querySelectorAll('td[data-ply]');
+            moveCells.forEach(cell => {{
+                cell.style.cursor = 'pointer';
+                cell.addEventListener('click', function() {{
+                    const ply = parseInt(this.getAttribute('data-ply'));
+                    // Send message to Streamlit
+                    window.parent.postMessage({{
+                        type: 'streamlit:setComponentValue',
+                        value: ply
+                    }}, '*');
+                }});
+            }});
+        </script>
+        """
         
-        for i in range(0, len(san_moves), 2):
-            move_num = (i // 2) + 1
-            cols = st.columns([1, 2, 2])
-            
-            with cols[0]:
-                st.write(f"{move_num}.")
-            
-            # White's move
-            with cols[1]:
-                white_move = san_moves[i]
-                white_eval = move_evals[i] if i < len(move_evals) else {}
-                quality = white_eval.get('move_quality', 'Good')
-                
-                button_color = _get_quality_color(quality)
-                
-                if st.button(
-                    f"{white_move}",
-                    key=f"move_{i}",
-                    help=f"{quality} ({white_eval.get('cp_loss', 0)}cp loss)",
-                    use_container_width=True
-                ):
-                    st.session_state.replay_ply = i + 1
-                    st.rerun()
-            
-            # Black's move (if exists)
-            with cols[2]:
-                if i + 1 < len(san_moves):
-                    black_move = san_moves[i + 1]
-                    black_eval = move_evals[i + 1] if i + 1 < len(move_evals) else {}
-                    quality = black_eval.get('move_quality', 'Good')
-                    
-                    if st.button(
-                        f"{black_move}",
-                        key=f"move_{i+1}",
-                        help=f"{quality} ({black_eval.get('cp_loss', 0)}cp loss)",
-                        use_container_width=True
-                    ):
-                        st.session_state.replay_ply = i + 2
-                        st.rerun()
+        # Render interactive component
+        clicked_ply = components_html(interactive_html, height=520, scrolling=False)
+        
+        # Update replay_ply if a move was clicked
+        if clicked_ply is not None and clicked_ply != st.session_state.replay_ply:
+            st.session_state.replay_ply = clicked_ply
+            st.rerun()
         
         # Evaluation graph
         st.write("---")
@@ -253,7 +233,7 @@ def _get_highlight_squares(ply: int, san_moves: List[str], current_eval: Optiona
 
 
 def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], current_ply: int, user_color: str) -> str:
-    """Generate HTML for move list with color-coded quality."""
+    """Generate HTML for move list with color-coded quality and clickable moves."""
     html = "<table style='width: 100%; font-size: 14px;'>"
     
     for i in range(0, len(san_moves), 2):
@@ -267,11 +247,11 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
         white_cp_loss = white_eval.get('actual_cp_loss') or white_eval.get('cp_loss', 0)
         white_quality = _classify_move_quality(white_cp_loss)
         white_color = _get_quality_color(white_quality)
-        white_style = f"background-color: {white_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold;"
+        white_style = f"background-color: {white_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold; cursor: pointer; user-select: none;"
         if i + 1 == current_ply:
             white_style += " border: 2px solid #000;"
         
-        html += f"<td style='{white_style}'>{white_move}</td>"
+        html += f"<td style='{white_style}' data-ply='{i + 1}' title='{white_quality} ({white_cp_loss}cp loss)'>{white_move}</td>"
         
         # Black's move
         if i + 1 < len(san_moves):
@@ -280,11 +260,11 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
             black_cp_loss = black_eval.get('actual_cp_loss') or black_eval.get('cp_loss', 0)
             black_quality = _classify_move_quality(black_cp_loss)
             black_color = _get_quality_color(black_quality)
-            black_style = f"background-color: {black_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold;"
+            black_style = f"background-color: {black_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold; cursor: pointer; user-select: none;"
             if i + 2 == current_ply:
                 black_style += " border: 2px solid #000;"
             
-            html += f"<td style='{black_style}'>{black_move}</td>"
+            html += f"<td style='{black_style}' data-ply='{i + 2}' title='{black_quality} ({black_cp_loss}cp loss)'>{black_move}</td>"
         else:
             html += "<td></td>"
         
