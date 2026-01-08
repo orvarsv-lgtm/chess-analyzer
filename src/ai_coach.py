@@ -617,22 +617,30 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
     for game in games:
         moves_table = game.get('moves_table', [])
         focus_color = game.get('focus_color', 'white')
-        opening = game.get('opening_name', 'Unknown')
+        # Try both 'opening' (Streamlit format) and 'opening_name' (engine format)
+        opening = game.get('opening') or game.get('opening_name') or 'Unknown'
         result = game.get('result', '*')
         
         # Track opening stats
         if opening not in openings:
-            openings[opening] = {'games': 0, 'wins': 0, 'total_cpl': 0}
+            openings[opening] = {'games': 0, 'wins': 0, 'total_cpl': 0, 'total_moves': 0}
         openings[opening]['games'] += 1
         if (focus_color == 'white' and result == '1-0') or (focus_color == 'black' and result == '0-1'):
             openings[opening]['wins'] += 1
         
         for move in moves_table:
-            if move.get('color') != focus_color:
+            # Streamlit format uses 'mover', engine format uses 'color'
+            move_color = move.get('mover') or move.get('color')
+            if move_color != focus_color:
                 continue
             
             total_moves += 1
+            # Streamlit format: cp_loss is already filtered (use actual_cp_loss for raw)
+            # For focus player moves, cp_loss should be the correct value
             cp_loss = move.get('cp_loss', 0) or 0
+            # If cp_loss is 0, try actual_cp_loss (might be unfiltered)
+            if cp_loss == 0:
+                cp_loss = move.get('actual_cp_loss', 0) or 0
             phase = move.get('phase', 'middlegame')
             
             if phase == 'opening':
@@ -648,6 +656,7 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
                 mistakes += 1
             
             openings[opening]['total_cpl'] += cp_loss
+            openings[opening]['total_moves'] += 1
     
     # Calculate averages
     avg_opening = sum(opening_cpls) / len(opening_cpls) if opening_cpls else 0
@@ -668,8 +677,26 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
         first_half = games[:len(games)//2]
         second_half = games[len(games)//2:]
         
-        first_blunders = sum(1 for g in first_half for m in g.get('moves_table', []) if m.get('cp_loss', 0) >= 300)
-        second_blunders = sum(1 for g in second_half for m in g.get('moves_table', []) if m.get('cp_loss', 0) >= 300)
+        # Count blunders using correct keys
+        first_blunders = 0
+        for g in first_half:
+            focus_color = g.get('focus_color', 'white')
+            for m in g.get('moves_table', []):
+                move_color = m.get('mover') or m.get('color')
+                if move_color == focus_color:
+                    cp = m.get('cp_loss', 0) or m.get('actual_cp_loss', 0) or 0
+                    if cp >= 300:
+                        first_blunders += 1
+        
+        second_blunders = 0
+        for g in second_half:
+            focus_color = g.get('focus_color', 'white')
+            for m in g.get('moves_table', []):
+                move_color = m.get('mover') or m.get('color')
+                if move_color == focus_color:
+                    cp = m.get('cp_loss', 0) or m.get('actual_cp_loss', 0) or 0
+                    if cp >= 300:
+                        second_blunders += 1
         
         if second_blunders < first_blunders * 0.8:
             trend = "Improving! Blunder rate has decreased over recent games."
@@ -700,15 +727,21 @@ def _format_opening_stats(openings: Dict[str, Dict]) -> str:
     if not openings:
         return "No opening data available"
     
+    # Filter out 'Unknown' if there are other openings
+    filtered = {k: v for k, v in openings.items() if k and k != 'Unknown'}
+    if not filtered:
+        filtered = openings  # Fall back to including Unknown
+    
     # Sort by games played
-    sorted_openings = sorted(openings.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
+    sorted_openings = sorted(filtered.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
     
     lines = []
     for name, stats in sorted_openings:
         games = stats['games']
         wins = stats['wins']
+        total_moves = stats.get('total_moves', games * 30)  # Estimate if not available
         win_rate = wins / games if games > 0 else 0
-        avg_cpl = stats['total_cpl'] / max(games, 1)
+        avg_cpl = stats['total_cpl'] / total_moves if total_moves > 0 else 0
         lines.append(f"- {name}: {games} games, {win_rate:.0%} win rate, avg CPL: {avg_cpl:.0f}")
     
     return '\n'.join(lines) if lines else "No opening data"

@@ -236,6 +236,53 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     with col4:
         st.metric("Worst Phase", stats.get('worst_phase', 'N/A').title())
     
+    # Show detailed phase CPL
+    st.markdown("#### 📊 Phase Performance (Average CPL)")
+    cpl_col1, cpl_col2, cpl_col3 = st.columns(3)
+    with cpl_col1:
+        opening_cpl = stats.get('opening_cpl', 0)
+        st.metric("Opening", f"{opening_cpl:.1f}" if opening_cpl > 0 else "N/A")
+    with cpl_col2:
+        mid_cpl = stats.get('middlegame_cpl', 0)
+        st.metric("Middlegame", f"{mid_cpl:.1f}" if mid_cpl > 0 else "N/A")
+    with cpl_col3:
+        end_cpl = stats.get('endgame_cpl', 0)
+        st.metric("Endgame", f"{end_cpl:.1f}" if end_cpl > 0 else "N/A")
+    
+    # Show error rates
+    err_col1, err_col2 = st.columns(2)
+    with err_col1:
+        st.metric("Blunders per 100 moves", f"{stats.get('blunder_rate', 0):.1f}")
+    with err_col2:
+        st.metric("Mistakes per 100 moves", f"{stats.get('mistake_rate', 0):.1f}")
+    
+    # Show top openings
+    openings = stats.get('openings', {})
+    if openings:
+        st.markdown("#### 📚 Top Openings")
+        # Filter unknown and sort
+        filtered = {k: v for k, v in openings.items() if k and k != 'Unknown'}
+        if not filtered:
+            filtered = openings
+        sorted_openings = sorted(filtered.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
+        
+        for name, data in sorted_openings:
+            games = data['games']
+            wins = data['wins']
+            total_moves = data.get('total_moves', games * 30)
+            win_rate = wins / games if games > 0 else 0
+            avg_cpl = data['total_cpl'] / total_moves if total_moves > 0 else 0
+            
+            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+            with col1:
+                st.write(f"**{name}**")
+            with col2:
+                st.write(f"{games} games")
+            with col3:
+                st.write(f"{win_rate:.0%} W")
+            with col4:
+                st.write(f"CPL: {avg_cpl:.0f}")
+    
     st.markdown("---")
     
     # Show the full analysis
