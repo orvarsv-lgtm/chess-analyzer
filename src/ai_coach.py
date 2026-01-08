@@ -34,15 +34,15 @@ except ImportError:
 _openai_client = None
 
 
-def _get_openaGet API key from environment (already loaded by load_dotenv at module import)
+def _get_openai_client():
+    """Lazy initialization of OpenAI client."""
+    global _openai_client
+    if _openai_client is None:
+        try:
+            from openai import OpenAI
+            
+            # Get API key from environment (already loaded by load_dotenv at module import)
             api_key = os.getenv('OPENAI_API_KEY')
-                # Try loading from .env file using python-dotenv
-                try:
-                    from dotenv import load_dotenv
-                    load_dotenv()
-                    api_key = os.getenv('OPENAI_API_KEY')
-                except ImportError:
-                    pass  # dotenv not installed, continue with env var only
             
             if not api_key:
                 raise ValueError("OPENAI_API_KEY not found in environment or .env file")
