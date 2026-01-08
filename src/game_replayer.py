@@ -12,6 +12,7 @@ Features:
 import streamlit as st
 import chess
 import chess.pgn
+import chess.svg
 from typing import List, Dict, Any, Optional
 import io
 
@@ -70,7 +71,6 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         
         # Display using chess.svg (simpler, no interactive component)
         try:
-            import chess.svg
             svg_board = chess.svg.board(
                 board=board_at_ply,
                 size=400,
