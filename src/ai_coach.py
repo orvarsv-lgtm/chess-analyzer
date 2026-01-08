@@ -1190,14 +1190,23 @@ def _format_rating_cost(rating_cost_factors: Dict[str, Any]) -> str:
     
     lines = []
     
+    # Helper to get count value from either dict or int
+    def get_count(item):
+        val = item[1]
+        if isinstance(val, dict):
+            return val.get('count', 0)
+        return val if isinstance(val, (int, float)) else 0
+    
     # Handle both dict format and int format
-    for factor, data in sorted(rating_cost_factors.items(), key=lambda x: x[1].get('count', x[1]) if isinstance(x[1], dict) else x[1], reverse=True):
+    for factor, data in sorted(rating_cost_factors.items(), key=get_count, reverse=True):
         if isinstance(data, dict):
             count = data.get('count', 0)
             points = data.get('estimated_points_lost', 0)
-        else:
+        elif isinstance(data, (int, float)):
             count = data
             points = 0
+        else:
+            continue  # Skip invalid data
         
         if count > 0:
             label = cost_labels.get(factor, factor.replace('_', ' ').title())

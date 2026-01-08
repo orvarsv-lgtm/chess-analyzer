@@ -328,15 +328,24 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
             'missed_wins': 'Drawing won positions',
         }
         
+        # Helper to get count value
+        def get_count(item):
+            val = item[1]
+            if isinstance(val, dict):
+                return val.get('count', 0)
+            return val if isinstance(val, (int, float)) else 0
+        
         # Sort by count
-        sorted_costs = sorted(
-            rating_cost_factors.items(), 
-            key=lambda x: x[1].get('count', x[1]) if isinstance(x[1], dict) else x[1], 
-            reverse=True
-        )
+        sorted_costs = sorted(rating_cost_factors.items(), key=get_count, reverse=True)
         for factor, data in sorted_costs:
-            count = data.get('count', 0) if isinstance(data, dict) else data
-            points = data.get('estimated_points_lost', 0) if isinstance(data, dict) else 0
+            if isinstance(data, dict):
+                count = data.get('count', 0)
+                points = data.get('estimated_points_lost', 0)
+            elif isinstance(data, (int, float)):
+                count = data
+                points = 0
+            else:
+                continue
             if count > 0:
                 label = cost_labels.get(factor, factor.replace('_', ' ').title())
                 severity = "🔴" if count >= 3 else "🟡"
