@@ -2151,8 +2151,8 @@ def _render_opponent_analysis_tab(aggregated: dict[str, Any]) -> None:
     
     for game in games:
         focus_color = game.get('focus_color', 'white')
-        white_rating = game.get('white_rating', 0)
-        black_rating = game.get('black_rating', 0)
+        white_rating = game.get('white_elo', 0) or game.get('white_rating', 0)
+        black_rating = game.get('black_elo', 0) or game.get('black_rating', 0)
         
         if white_rating > 0 and black_rating > 0:
             player_rating = white_rating if focus_color == 'white' else black_rating
