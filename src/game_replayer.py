@@ -68,7 +68,7 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         
         # Quality badge above chessboard
         if current_eval:
-            cp_loss = current_eval.get('cp_loss', 0)
+            cp_loss = current_eval.get('actual_cp_loss') or current_eval.get('cp_loss', 0)
             quality = _classify_move_quality(cp_loss)
             quality_colors = {
                 'Best': '#28a745',
@@ -264,7 +264,7 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
         # White's move
         white_move = san_moves[i]
         white_eval = move_evals[i] if i < len(move_evals) else {}
-        white_cp_loss = white_eval.get('cp_loss', 0)
+        white_cp_loss = white_eval.get('actual_cp_loss') or white_eval.get('cp_loss', 0)
         white_quality = _classify_move_quality(white_cp_loss)
         white_color = _get_quality_color(white_quality)
         white_style = f"background-color: {white_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold;"
@@ -277,7 +277,7 @@ def _generate_move_list_html(san_moves: List[str], move_evals: List[Dict], curre
         if i + 1 < len(san_moves):
             black_move = san_moves[i + 1]
             black_eval = move_evals[i + 1] if i + 1 < len(move_evals) else {}
-            black_cp_loss = black_eval.get('cp_loss', 0)
+            black_cp_loss = black_eval.get('actual_cp_loss') or black_eval.get('cp_loss', 0)
             black_quality = _classify_move_quality(black_cp_loss)
             black_color = _get_quality_color(black_quality)
             black_style = f"background-color: {black_color}; padding: 4px 8px; border-radius: 3px; color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; font-weight: bold;"

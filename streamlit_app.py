@@ -552,6 +552,10 @@ def _compute_cp_loss_rows(
                 cp_loss = min(int(cp_loss), int(CPL_CP_LOSS_CAP))
 
         prev_score = curr
+        
+        # Store actual cp_loss for display purposes (before filtering by focus_color)
+        actual_cp_loss = cp_loss
+        
         if focus_color and mover != focus_color:
             cp_loss = 0
             cpl_included = False
@@ -571,6 +575,7 @@ def _compute_cp_loss_rows(
                 "move_san": r.get("move_san"),
                 "score_cp": int(curr) if curr is not None else None,
                 "cp_loss": cp_loss,
+                "actual_cp_loss": actual_cp_loss,  # For display in move list
                 "phase": phase,
                 "cpl_included": bool(cpl_included),
             }
@@ -1491,7 +1496,7 @@ def main() -> None:
                     total_plies=gi.num_plies,
                     fens_after_ply=gi.fens_after_ply,
                 )
-                moves_table = pd.DataFrame(cp_rows)[["ply", "mover", "move_san", "score_cp", "cp_loss", "phase"]].to_dict(
+                moves_table = pd.DataFrame(cp_rows)[["ply", "mover", "move_san", "score_cp", "cp_loss", "actual_cp_loss", "phase"]].to_dict(
                     orient="records"
                 )
                 aggregated_rows.extend(rows)
@@ -1616,7 +1621,7 @@ def main() -> None:
                     total_plies=gi.num_plies,
                     fens_after_ply=gi.fens_after_ply,
                 )
-                moves_table = pd.DataFrame(cp_rows)[["ply", "mover", "move_san", "score_cp", "cp_loss", "phase"]].to_dict(
+                moves_table = pd.DataFrame(cp_rows)[["ply", "mover", "move_san", "score_cp", "cp_loss", "actual_cp_loss", "phase"]].to_dict(
                     orient="records"
                 )
                 aggregated_rows.extend(rows)
