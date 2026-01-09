@@ -64,7 +64,7 @@ def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
     focus_player = aggregated.get('focus_player', '')
     
     if analysis_mode == "📊 Full Career Analysis":
-        _render_career_analysis(games, focus_player, user_id)
+        _render_career_analysis(games, focus_player, user_id, aggregated=aggregated)
     else:
         _render_single_game_review(games, aggregated, user_id)
 
@@ -146,8 +146,15 @@ def _render_single_game_review(games: List[Dict], aggregated: Dict, user_id: str
                 )
 
 
-def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -> None:
-    """Render full career analysis interface."""
+def _render_career_analysis(games: List[Dict], player_name: str, user_id: str, aggregated: Optional[Dict[str, Any]] = None) -> None:
+    """Render full career analysis interface.
+    
+    Args:
+        games: List of analyzed game dicts
+        player_name: Player username
+        user_id: User ID for caching
+        aggregated: Full aggregated data from Analysis tab (includes phase_stats, opening_rates, etc.)
+    """
     st.subheader("📊 Full Career Analysis")
     st.write(f"Analyzing **{len(games)} games** for comprehensive career insights.")
     
@@ -208,7 +215,8 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
                     result = generate_career_analysis(
                         all_games=games,
                         player_name=player_name or "Player",
-                        player_rating=player_rating
+                        player_rating=player_rating,
+                        aggregated_data=aggregated,
                     )
                     
                     # Cache the result

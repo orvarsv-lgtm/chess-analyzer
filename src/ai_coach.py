@@ -580,6 +580,7 @@ def generate_career_analysis(
     all_games: List[Dict[str, Any]],
     player_name: str,
     player_rating: Optional[int] = None,
+    aggregated_data: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Generate comprehensive AI coaching analysis of player's entire game history.
@@ -594,12 +595,18 @@ def generate_career_analysis(
         all_games: List of all analyzed games
         player_name: Player's username
         player_rating: Current rating (if known)
+        aggregated_data: Full aggregated data from Analysis tab (includes phase_stats,
+                         opening_rates, cpl_trend, endgame_success, coach_summary, etc.)
     
     Returns:
         Dict with career analysis sections
     """
     # Aggregate statistics across all games
     stats = _aggregate_career_stats(all_games)
+    
+    # Merge in additional computed data from Analysis tab if available
+    if aggregated_data:
+        stats = _merge_aggregated_data_into_stats(stats, aggregated_data, all_games)
     
     # Import the coaching prompt builder
     from src.coaching_prompt import (
@@ -791,6 +798,230 @@ Do NOT add new information. Only rephrase what's there."""
         'timestamp': datetime.now(),
         'primary_issue': data_analysis.get('primary_issue', ''),
         'data_sources': data_analysis.get('data_sources', []),
+    }
+
+
+def _merge_aggregated_data_into_stats(
+    stats: Dict[str, Any],
+    aggregated: Dict[str, Any],
+    games: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Merge additional computed data from Analysis/Repertoire/Opponent/Streaks tabs into stats.
+    
+    This gives the AI Coach access to ALL computed artifacts, not just raw game data.
+    
+    Args:
+        stats: Base stats from _aggregate_career_stats
+        aggregated: Full aggregated data from streamlit_app._aggregate_postprocessed_results
+        games: List of game dicts
+    
+    Returns:
+        Enhanced stats dict with all additional computed data
+    """
+    # === From Analysis Tab ===
+    # Phase stats (already computed by Analysis tab)
+    if 'phase_stats' in aggregated:
+        stats['analysis_phase_stats'] = aggregated['phase_stats']
+    
+    # Opening rates (win/draw/loss by opening)
+    if 'opening_rates' in aggregated:
+        stats['opening_rates'] = aggregated['opening_rates']
+    
+    # CPL trend over games
+    if 'cpl_trend' in aggregated:
+        stats['cpl_trend'] = aggregated['cpl_trend']
+    
+    # Endgame success metrics
+    if 'endgame_success' in aggregated:
+        stats['endgame_success'] = aggregated['endgame_success']
+    
+    # Endgame inflation percentage
+    if 'endgame_inflation_pct' in aggregated:
+        stats['endgame_inflation_pct'] = aggregated['endgame_inflation_pct']
+    
+    # Coach summary (deterministic recommendations)
+    if 'coach_summary' in aggregated:
+        stats['coach_summary'] = aggregated['coach_summary']
+    
+    # === From Opening Repertoire Tab ===
+    # Compute opening repertoire stats
+    opening_repertoire = _compute_opening_repertoire_stats(games)
+    stats['opening_repertoire'] = opening_repertoire
+    
+    # === From Opponent Analysis Tab ===
+    # Compute opponent strength stats
+    opponent_stats = _compute_opponent_strength_stats(games)
+    stats['opponent_analysis'] = opponent_stats
+    
+    # === From Streaks Tab ===
+    # Compute streak stats
+    streak_stats = _compute_streak_stats(games)
+    stats['streaks'] = streak_stats
+    
+    return stats
+
+
+def _compute_opening_repertoire_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute opening repertoire stats from games."""
+    opening_stats = {}
+    
+    for game in games:
+        opening = game.get('opening', 'Unknown')
+        focus_color = game.get('focus_color', 'white')
+        result = game.get('result', '')
+        
+        # Determine outcome
+        if focus_color == 'white':
+            outcome = 'win' if result == '1-0' else 'loss' if result == '0-1' else 'draw'
+        else:
+            outcome = 'win' if result == '0-1' else 'loss' if result == '1-0' else 'draw'
+        
+        if opening not in opening_stats:
+            opening_stats[opening] = {
+                'games': 0, 'wins': 0, 'draws': 0, 'losses': 0,
+                'as_white': 0, 'as_black': 0,
+            }
+        
+        opening_stats[opening]['games'] += 1
+        opening_stats[opening][outcome + 's'] += 1
+        opening_stats[opening][f'as_{focus_color}'] += 1
+    
+    # Find weak openings (< 40% win rate with 3+ games)
+    weak_openings = []
+    strong_openings = []
+    for name, data in opening_stats.items():
+        if data['games'] >= 3:
+            win_rate = data['wins'] / data['games'] * 100
+            if win_rate < 40:
+                weak_openings.append({'name': name, 'games': data['games'], 'win_rate': win_rate})
+            elif win_rate >= 60:
+                strong_openings.append({'name': name, 'games': data['games'], 'win_rate': win_rate})
+    
+    return {
+        'by_opening': opening_stats,
+        'weak_openings': weak_openings[:3],  # Top 3 weakest
+        'strong_openings': strong_openings[:3],  # Top 3 strongest
+        'total_unique_openings': len(opening_stats),
+    }
+
+
+def _compute_opponent_strength_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute performance vs different opponent rating levels."""
+    rating_buckets = {
+        'lower_rated': {'games': 0, 'wins': 0, 'losses': 0, 'draws': 0},  # 100+ below
+        'similar_rated': {'games': 0, 'wins': 0, 'losses': 0, 'draws': 0},  # within 100
+        'higher_rated': {'games': 0, 'wins': 0, 'losses': 0, 'draws': 0},  # 100+ above
+    }
+    
+    total_player_rating = 0
+    rating_count = 0
+    
+    for game in games:
+        focus_color = game.get('focus_color', 'white')
+        white_rating = game.get('white_rating', 0) or game.get('white_elo', 0) or 0
+        black_rating = game.get('black_rating', 0) or game.get('black_elo', 0) or 0
+        
+        if white_rating > 0 and black_rating > 0:
+            player_rating = white_rating if focus_color == 'white' else black_rating
+            opponent_rating = black_rating if focus_color == 'white' else white_rating
+            
+            total_player_rating += player_rating
+            rating_count += 1
+            
+            rating_diff = opponent_rating - player_rating
+            
+            if rating_diff <= -100:
+                bucket = 'lower_rated'
+            elif rating_diff >= 100:
+                bucket = 'higher_rated'
+            else:
+                bucket = 'similar_rated'
+            
+            result = game.get('result', '')
+            if focus_color == 'white':
+                outcome = 'wins' if result == '1-0' else 'losses' if result == '0-1' else 'draws'
+            else:
+                outcome = 'wins' if result == '0-1' else 'losses' if result == '1-0' else 'draws'
+            
+            rating_buckets[bucket]['games'] += 1
+            rating_buckets[bucket][outcome] += 1
+    
+    # Calculate win rates per bucket
+    for bucket in rating_buckets.values():
+        if bucket['games'] > 0:
+            bucket['win_rate'] = bucket['wins'] / bucket['games'] * 100
+        else:
+            bucket['win_rate'] = 0
+    
+    avg_rating = total_player_rating // rating_count if rating_count > 0 else 0
+    
+    return {
+        'by_opponent_strength': rating_buckets,
+        'avg_player_rating': avg_rating,
+        'games_with_ratings': rating_count,
+    }
+
+
+def _compute_streak_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute streak stats from games."""
+    current_streak = 0
+    current_streak_type = None  # 'win' or 'loss'
+    max_win_streak = 0
+    max_loss_streak = 0
+    
+    blunder_free_streak = 0
+    max_blunder_free = 0
+    
+    for game in games:
+        focus_color = game.get('focus_color', 'white')
+        result = game.get('result', '')
+        
+        if focus_color == 'white':
+            outcome = 'win' if result == '1-0' else 'loss' if result == '0-1' else 'draw'
+        else:
+            outcome = 'win' if result == '0-1' else 'loss' if result == '1-0' else 'draw'
+        
+        # Track win/loss streaks
+        if outcome == 'win':
+            if current_streak_type == 'win':
+                current_streak += 1
+            else:
+                current_streak = 1
+                current_streak_type = 'win'
+            max_win_streak = max(max_win_streak, current_streak)
+        elif outcome == 'loss':
+            if current_streak_type == 'loss':
+                current_streak += 1
+            else:
+                current_streak = 1
+                current_streak_type = 'loss'
+            max_loss_streak = max(max_loss_streak, current_streak)
+        else:
+            current_streak = 0
+            current_streak_type = None
+        
+        # Track blunder-free games
+        moves_table = game.get('moves_table', [])
+        has_blunder = any(
+            (move.get('cp_loss', 0) or 0) >= 300
+            for move in moves_table
+            if move.get('mover') == focus_color
+        )
+        
+        if not has_blunder:
+            blunder_free_streak += 1
+            max_blunder_free = max(max_blunder_free, blunder_free_streak)
+        else:
+            blunder_free_streak = 0
+    
+    return {
+        'current_streak': current_streak,
+        'current_streak_type': current_streak_type,
+        'max_win_streak': max_win_streak,
+        'max_loss_streak': max_loss_streak,
+        'current_blunder_free': blunder_free_streak,
+        'max_blunder_free': max_blunder_free,
     }
 
 

@@ -108,6 +108,36 @@ def build_career_coaching_prompt(
     # Trend
     trend = stats.get('trend_summary', 'No trend data')
     
+    # === NEW DATA FROM OTHER TABS ===
+    
+    # Opening Repertoire
+    opening_repertoire = stats.get('opening_repertoire', {})
+    weak_openings = opening_repertoire.get('weak_openings', [])
+    strong_openings = opening_repertoire.get('strong_openings', [])
+    
+    # Opponent Analysis
+    opponent_analysis = stats.get('opponent_analysis', {})
+    opponent_by_strength = opponent_analysis.get('by_opponent_strength', {})
+    
+    # Streaks
+    streaks = stats.get('streaks', {})
+    max_win_streak = streaks.get('max_win_streak', 0)
+    max_loss_streak = streaks.get('max_loss_streak', 0)
+    max_blunder_free = streaks.get('max_blunder_free', 0)
+    current_streak = streaks.get('current_streak', 0)
+    current_streak_type = streaks.get('current_streak_type', '')
+    
+    # Endgame Success (from Analysis tab)
+    endgame_success = stats.get('endgame_success', {})
+    endgame_games = endgame_success.get('endgame_games', 0)
+    endgame_wins = endgame_success.get('endgame_wins', 0)
+    endgame_win_rate = endgame_success.get('endgame_win_rate', 0)
+    
+    # Coach Summary (deterministic AI-free coaching insights)
+    coach_summary = stats.get('coach_summary', {})
+    deterministic_weakness = coach_summary.get('primary_weakness', '')
+    deterministic_strengths = coach_summary.get('strengths', [])
+    
     # Calculate blunder percentages
     after_capture_pct = (blunder_contexts.get('after_capture', 0) / total_blunders * 100) if total_blunders > 0 else 0
     in_winning_pct = (blunder_contexts.get('in_winning_position', 0) / total_blunders * 100) if total_blunders > 0 else 0
@@ -170,6 +200,28 @@ PLAYER DATA: {player_name} ({player_rating or 'Unrated'})
 
 📈 TREND
 {trend}
+
+📚 OPENING REPERTOIRE
+{_format_opening_repertoire(weak_openings, strong_openings)}
+
+⚔️ OPPONENT STRENGTH ANALYSIS
+{_format_opponent_analysis(opponent_by_strength)}
+
+🏆 STREAKS & CONSISTENCY
+• Max win streak: {max_win_streak} games
+• Max loss streak: {max_loss_streak} games
+• Longest blunder-free run: {max_blunder_free} games
+• Current streak: {current_streak} {current_streak_type or 'N/A'}s
+
+🎯 ENDGAME CONVERSION
+• Endgame games (40+ moves): {endgame_games}
+• Endgame wins: {endgame_wins}
+• Endgame win rate: {endgame_win_rate:.0f}%
+
+🤖 DETERMINISTIC ANALYSIS SUMMARY
+(From rule-based system, no LLM — use this as ground truth)
+• Primary weakness identified: {deterministic_weakness or 'None flagged'}
+• Strengths: {', '.join(deterministic_strengths) if deterministic_strengths else 'None flagged'}
 
 ══════════════════════════════════════════════════════════════════════════════
 """
@@ -446,6 +498,67 @@ def _format_openings_table(openings: Dict[str, Dict]) -> str:
         lines.append(f"│ {display_name:<30} │ {games:>5} │ {eval_str:>12} │ {win_rate:>7.0f}% │")
     
     lines.append("└────────────────────────────────┴───────┴──────────────┴──────────┘")
+    
+    return '\n'.join(lines)
+
+
+def _format_opening_repertoire(weak_openings: list, strong_openings: list) -> str:
+    """Format opening repertoire stats for the prompt."""
+    lines = []
+    
+    if weak_openings:
+        lines.append("❌ Weak openings (<40% win rate, 3+ games):")
+        for opening in weak_openings:
+            lines.append(f"  • {opening['name']}: {opening['games']} games, {opening['win_rate']:.0f}% win rate")
+    else:
+        lines.append("✓ No significantly weak openings detected")
+    
+    lines.append("")
+    
+    if strong_openings:
+        lines.append("✅ Strong openings (≥60% win rate, 3+ games):")
+        for opening in strong_openings:
+            lines.append(f"  • {opening['name']}: {opening['games']} games, {opening['win_rate']:.0f}% win rate")
+    else:
+        lines.append("• No standout strong openings detected")
+    
+    return '\n'.join(lines)
+
+
+def _format_opponent_analysis(opponent_by_strength: dict) -> str:
+    """Format opponent strength analysis for the prompt."""
+    if not opponent_by_strength:
+        return "No opponent rating data available"
+    
+    lines = ["┌───────────────────┬───────┬──────────┬──────────┐",
+             "│ Opponent Level    │ Games │ Win Rate │ Analysis │",
+             "├───────────────────┼───────┼──────────┼──────────┤"]
+    
+    labels = {
+        'lower_rated': 'Lower (-100+)',
+        'similar_rated': 'Similar (±100)',
+        'higher_rated': 'Higher (+100+)',
+    }
+    
+    for key, label in labels.items():
+        data = opponent_by_strength.get(key, {})
+        games = data.get('games', 0)
+        win_rate = data.get('win_rate', 0)
+        
+        # Analysis based on expected performance
+        if key == 'lower_rated':
+            expected = 70  # Should win most vs weaker
+            analysis = "🟢 Good" if win_rate >= expected else "🔴 Leaking" if games >= 5 else "—"
+        elif key == 'similar_rated':
+            expected = 50  # Should be around 50%
+            analysis = "🟢 OK" if 40 <= win_rate <= 60 else "🟡 Check" if games >= 5 else "—"
+        else:  # higher_rated
+            expected = 30  # Lower expected vs stronger
+            analysis = "🟢 Punching up" if win_rate >= expected else "🟡 Expected" if games >= 5 else "—"
+        
+        lines.append(f"│ {label:<17} │ {games:>5} │ {win_rate:>7.0f}% │ {analysis:<8} │")
+    
+    lines.append("└───────────────────┴───────┴──────────┴──────────┘")
     
     return '\n'.join(lines)
 
