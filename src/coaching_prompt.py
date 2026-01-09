@@ -385,16 +385,30 @@ IMPORTANT RULES
 OUTPUT FORMAT
 ================================================================================
 
-Write in flowing prose with Markdown headers. No bullet lists for the main analysis.
-Sound like a coach, not a computer printout.
+Use rich Markdown formatting to make the report scannable and visually engaging:
 
-**Start with a brief summary** (2-3 sentences on what's holding them back)
+**FORMATTING RULES:**
+- Use ## for main section headers
+- Use **bold** for key insights, important numbers, and actionable advice
+- Use *italics* for emphasis on feelings, mental states, or soft observations
+- Use > blockquotes for the ONE RULE or key takeaway
+- Highlight critical stats inline: "Your endgame CPL is **78**—nearly double your middlegame."
 
-**Then explain the pattern** (what's actually happening in their games, in plain terms)
+**STRUCTURE:**
 
-**Then give them ONE clear thing to focus on** (specific to {one_rule_context})
+## The Big Picture
+(2-3 sentences summarizing what's holding them back. Bold the main issue.)
 
-**Then a brief training suggestion** (concrete, actionable)
+## What's Actually Happening
+(Explain the pattern in plain terms. Use *italics* for mental/emotional aspects like *"you're relaxing too early"* or *"tunnel vision kicks in"*. Bold key numbers.)
+
+## The One Thing to Fix
+> **Your ONE rule: [specific, memorable rule they can follow]**
+
+(Explain why this rule addresses the root cause. Bold the action words.)
+
+## How to Practice This
+(Concrete training suggestion with **bold** on the specific exercise or method.)
 
 Keep the total response to about 600-800 words. Quality over quantity.
 
@@ -402,24 +416,21 @@ Keep the total response to about 600-800 words. Quality over quantity.
 WRITING EXAMPLES
 ================================================================================
 
-BAD (robotic, uses codes):
+BAD (no formatting, robotic):
 "Root cause: ENDGAME_VIGILANCE_DECAY. After exchanges you stop scanning. This manifests as elevated CPL in positions with reduced material."
 
-GOOD (natural coaching voice):
-"Here's what I'm seeing: once the pieces start coming off the board, you relax. Your brain registers 'fewer pieces = safer position' and you stop looking for trouble. But that's exactly when your opponents find their chances. In your last 50 games, your accuracy drops by nearly 40% once you reach an endgame."
+GOOD (formatted, natural voice):
+"## The Big Picture
 
-BAD (list-heavy, fragmented):
-"Issues identified:
-- Endgame blunders: 45%
-- Post-capture errors: 35%
-- Conversion failures: 12"
+Here's the uncomfortable truth: **you're giving away wins**. In your last 50 games, you reached a winning position 23 times but only converted 14 of them. That's nearly **40% of your advantages slipping away**.
 
-GOOD (narrative flow):
-"The numbers tell a clear story. Nearly half your blunders happen in the endgame, and another third come right after captures. You're not making random mistakes—there's a pattern here, and it's fixable."
+## What's Actually Happening
+
+Once the pieces start coming off the board, *you relax*. Your brain registers 'fewer pieces = safer' and you stop looking for trouble. But that's exactly when your opponents find their chances. Your endgame CPL is **78**—compared to **42** in the middlegame."
 
 ================================================================================
 
-Now write the analysis for {player_name}. Remember: sound like a coach, not a computer.
+Now write the analysis for {player_name}. Remember: sound like a coach, not a computer. Use formatting to make key points stand out.
 """
 
     return instruction_prompt + "\n\nPLAYER DATA TO ANALYZE:\n" + data_block
