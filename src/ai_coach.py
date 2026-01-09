@@ -883,8 +883,11 @@ def _compute_opening_repertoire_stats(games: List[Dict[str, Any]]) -> Dict[str, 
                 'as_white': 0, 'as_black': 0,
             }
         
+        # Map outcome to correct plural key ('loss' -> 'losses', not 'losss')
+        outcome_key = {'win': 'wins', 'draw': 'draws', 'loss': 'losses'}[outcome]
+        
         opening_stats[opening]['games'] += 1
-        opening_stats[opening][outcome + 's'] += 1
+        opening_stats[opening][outcome_key] += 1
         opening_stats[opening][f'as_{focus_color}'] += 1
     
     # Find weak openings (< 40% win rate with 3+ games)
