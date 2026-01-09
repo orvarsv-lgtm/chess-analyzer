@@ -86,16 +86,19 @@ def build_career_coaching_prompt(
     else:
         severity = "MODERATE"
     
-    # Determine confidence level based on sample size
-    if total_games >= 50:
-        confidence = "HIGH"
-        confidence_note = "Based on 50+ games, these patterns are well-established."
-    elif total_games >= 20:
+    # Determine confidence based on sample size
+    if total_games <= 50:
+        confidence = "VERY LOW"
+        confidence_note = f"Only {total_games} games analyzed—not enough to identify reliable patterns."
+        insufficient_data = True
+    elif total_games <= 100:
         confidence = "MEDIUM"
-        confidence_note = f"Based on {total_games} games—patterns are emerging but need confirmation."
+        confidence_note = f"Based on {total_games} games—patterns are becoming clear."
+        insufficient_data = False
     else:
-        confidence = "LOW"
-        confidence_note = f"Only {total_games} games analyzed. Take these as early signals, not certainties."
+        confidence = "HIGH"
+        confidence_note = f"Based on {total_games} games—these patterns are well-established."
+        insufficient_data = False
     
     # Opening outcomes
     opening_outcomes = stats.get('opening_outcomes', {})
@@ -234,7 +237,7 @@ PLAYER DATA: {player_name} ({player_rating or 'Unrated'})
 ================================================================================
 
 SEVERITY ASSESSMENT: {severity}
-CONFIDENCE LEVEL: {confidence}
+CONFIDENCE: {confidence}
 {confidence_note}
 
 HIGH-LEVEL RESULTS
@@ -312,14 +315,36 @@ Recoverable games: {recoverable_games} (approximately {recoverable_games * point
 ================================================================================
 """
 
+    # Build data sufficiency warning
+    if insufficient_data:
+        data_warning = f"""
+================================================================================
+IMPORTANT: LIMITED DATA ({total_games} games)
+================================================================================
+You MUST acknowledge upfront that {total_games} games is not enough data to draw
+reliable conclusions. Start your analysis by saying something like:
+
+"I've looked at your last {total_games} games, but I want to be upfront with you—
+that's really not enough to spot reliable patterns. What I'm seeing could easily
+be normal variance or just a rough patch. Take what I say here with a grain of
+salt, and let's revisit once you have more games under your belt."
+
+Then offer tentative observations (use words like "might", "seems like", "could be")
+rather than confident diagnoses. Do NOT make strong claims about root causes or
+patterns with this little data.
+================================================================================
+"""
+    else:
+        data_warning = ""
+
     # Build the instruction prompt
     instruction_prompt = f"""
 You are a veteran chess coach with decades of experience. You speak plainly, cut straight to the issue, and don't waste words. When something is fine, you say so. When something is costing them games, you tell them directly.
 
 Write a performance report that sounds like a real coach talking to their student. Be specific, be human, be authoritative.
-
+{data_warning}
 ================================================================================
-SEVERITY: {severity} | CONFIDENCE: {confidence}
+SEVERITY: {severity}
 
 Match your tone:
 - CRITICAL: Be blunt. This is costing real rating points.
