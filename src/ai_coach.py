@@ -625,7 +625,7 @@ def generate_career_analysis(
                 {"role": "user", "content": coaching_prompt}
             ],
             temperature=0.7,  # Allow some creativity in explanations
-            max_tokens=1500,  # Enough for full structured output
+            max_tokens=2500,  # Increased for premium report format
         )
         
         analysis_text = response.choices[0].message.content

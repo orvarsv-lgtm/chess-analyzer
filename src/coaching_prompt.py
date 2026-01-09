@@ -1,10 +1,14 @@
 """
-Coaching Prompt Engine - Sophisticated LLM Coaching Prompts
+Coaching Prompt Engine - Elite Chess Coaching Prompts
 
 This module generates the prompts that turn raw chess analytics 
-into genuine coaching insights via GPT-4.
+into premium diagnostic coaching insights via GPT-4.
 
-The AI Coach is a DIAGNOSTIC REASONING LAYER, not a statistics printer.
+The AI Coach produces executive-level performance reports that:
+- Identify ONE primary cause with quantified impact
+- Explain the cognitive mechanism (not just statistics)
+- Provide behavioral rules with measurable targets
+- Project expected rating gains based on data
 """
 
 from typing import Dict, Any, Optional
@@ -16,15 +20,17 @@ def build_career_coaching_prompt(
     player_rating: Optional[int] = None,
 ) -> str:
     """
-    Build the master prompt for career-level coaching analysis.
+    Build the master prompt for elite career-level coaching analysis.
     
-    This prompt instructs GPT-4 to:
-    1. Identify ONE primary cause (not multiple equal-weight issues)
-    2. Explain the cognitive failure mechanism (WHY it happens)
-    3. Map evidence to the diagnosis
-    4. Describe the failure loop
-    5. Give ONE behavioral fix + max 2 secondary fixes
-    6. Project outcome
+    This prompt instructs GPT-4 to produce a premium coaching report with:
+    1. Executive diagnosis (ONE primary cause, quantified)
+    2. Cognitive mechanism explanation
+    3. Evidence tables with specific numbers
+    4. The failure loop pattern
+    5. Primary fix with behavioral rule
+    6. Secondary fixes with target metrics
+    7. Expected rating impact projection
+    8. One-sentence summary
     """
     
     # Extract all relevant data
@@ -45,6 +51,7 @@ def build_career_coaching_prompt(
     # Blunder data
     total_blunders = stats.get('total_blunders', 0)
     blunder_rate = stats.get('blunder_rate', 0)
+    mistake_rate = stats.get('mistake_rate', 0)
     blunder_phases = stats.get('blunder_phases', {})
     blunder_contexts = stats.get('blunder_contexts', {})
     
@@ -53,10 +60,15 @@ def build_career_coaching_prompt(
     conversion_rate = stats.get('conversion_rate', 0)
     winning_positions = conversion_stats.get('winning_positions', 0)
     converted_wins = conversion_stats.get('converted_wins', 0)
+    games_thrown = winning_positions - converted_wins
     
     # Rating cost analysis
     rating_cost_factors = stats.get('rating_cost_factors', {})
-    biggest_cost = stats.get('biggest_rating_cost', ('unknown', {'count': 0}))
+    
+    # Calculate estimated rating points lost
+    blunders_in_winning = rating_cost_factors.get('blunders_in_winning_pos', {})
+    endgame_collapses = rating_cost_factors.get('endgame_collapses', {})
+    missed_wins = rating_cost_factors.get('missed_wins', {})
     
     # Opening outcomes
     opening_outcomes = stats.get('opening_outcomes', {})
@@ -64,166 +76,264 @@ def build_career_coaching_prompt(
     
     # Openings breakdown
     openings = stats.get('openings', {})
-    openings_summary = _format_openings_for_prompt(openings)
+    openings_table = _format_openings_table(openings)
     
     # Trend
     trend = stats.get('trend_summary', 'No trend data')
     
+    # Calculate blunder percentages
+    after_capture_pct = (blunder_contexts.get('after_capture', 0) / total_blunders * 100) if total_blunders > 0 else 0
+    in_winning_pct = (blunder_contexts.get('in_winning_position', 0) / total_blunders * 100) if total_blunders > 0 else 0
+    endgame_pct = (blunder_phases.get('endgame', 0) / total_blunders * 100) if total_blunders > 0 else 0
+    after_check_pct = (blunder_contexts.get('after_check', 0) / total_blunders * 100) if total_blunders > 0 else 0
+    
     # Build the data block
     data_block = f"""
-═══════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════
 PLAYER DATA: {player_name} ({player_rating or 'Unrated'})
-═══════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════
 
-RECORD: {wins}W - {losses}L - {draws}D ({total_games} games, {win_rate:.0%} win rate)
+📊 HIGH-LEVEL RESULTS
+┌─────────────────────────────────┬────────────┐
+│ Metric                          │ Value      │
+├─────────────────────────────────┼────────────┤
+│ Games analyzed                  │ {total_games:>10} │
+│ Win rate                        │ {win_rate*100:>9.0f}% │
+│ Winning positions reached (≥+1.5) │ {winning_positions:>10} │
+│ Wins from winning positions     │ {converted_wins:>10} │
+│ Conversion rate                 │ {conversion_rate:>9.0f}% │
+│ Games thrown away               │ {games_thrown:>10} │
+│ Blunders / 100 moves            │ {blunder_rate:>10.1f} │
+│ Mistakes / 100 moves            │ {mistake_rate:>10.1f} │
+└─────────────────────────────────┴────────────┘
 
-CONVERSION ANALYSIS:
-• Winning positions reached (≥+1.5): {winning_positions}
-• Successfully converted to wins: {converted_wins}
-• Conversion rate: {conversion_rate:.0f}%
-• Games thrown away: {winning_positions - converted_wins}
+🎯 BLUNDER CONTEXT ANALYSIS
+┌────────────────────────────────┬──────────┬─────────────┐
+│ Situation                      │ Blunders │ % of total  │
+├────────────────────────────────┼──────────┼─────────────┤
+│ After captures                 │ {blunder_contexts.get('after_capture', 0):>8} │ {after_capture_pct:>10.0f}% │
+│ In winning positions (≥+1.5)   │ {blunder_contexts.get('in_winning_position', 0):>8} │ {in_winning_pct:>10.0f}% │
+│ In endgame phase               │ {blunder_phases.get('endgame', 0):>8} │ {endgame_pct:>10.0f}% │
+│ After checks                   │ {blunder_contexts.get('after_check', 0):>8} │ {after_check_pct:>10.0f}% │
+│ Time pressure (move 35+)       │ {blunder_contexts.get('time_trouble_likely', 0):>8} │ {(blunder_contexts.get('time_trouble_likely', 0) / total_blunders * 100) if total_blunders > 0 else 0:>10.0f}% │
+└────────────────────────────────┴──────────┴─────────────┘
 
-PHASE CPL (Centipawn Loss):
-• Opening: {opening_cpl:.0f} CPL
-• Middlegame: {middlegame_cpl:.0f} CPL  
-• Endgame: {endgame_cpl:.0f} CPL
+♟️ PHASE PERFORMANCE
+┌─────────────┬─────────┬───────────────────────────────┐
+│ Phase       │ Avg CPL │ Phase Performance Index (PPI) │
+├─────────────┼─────────┼───────────────────────────────┤
+│ Opening     │ {opening_cpl:>7.0f} │ {ppi.get('opening', 0):>29.2f} │
+│ Middlegame  │ {middlegame_cpl:>7.0f} │ {ppi.get('middlegame', 0):>29.2f} │
+│ Endgame     │ {endgame_cpl:>7.0f} │ {ppi.get('endgame', 0):>29.2f} │
+└─────────────┴─────────┴───────────────────────────────┘
+(PPI: < 0.8 = strong, 0.8-1.0 = average, > 1.0 = weak)
 
-PHASE PERFORMANCE INDEX (1.0 = baseline, lower = better):
-• Opening PPI: {ppi.get('opening', 0):.2f}
-• Middlegame PPI: {ppi.get('middlegame', 0):.2f}
-• Endgame PPI: {ppi.get('endgame', 0):.2f}
+🎲 OPENING OUTCOMES (Eval @ move 15)
+{openings_table}
 
-BLUNDER DISTRIBUTION:
-• Total blunders: {total_blunders}
-• Blunder rate: {blunder_rate:.1f} per 100 moves
-• Opening blunders: {blunder_phases.get('opening', 0)}
-• Middlegame blunders: {blunder_phases.get('middlegame', 0)}
-• Endgame blunders: {blunder_phases.get('endgame', 0)}
+💰 RATING COST FACTORS (estimated)
+• Blunders in winning positions: {blunders_in_winning.get('count', 0)} occurrences (~{blunders_in_winning.get('estimated_points_lost', 0)} rating points lost)
+• Endgame collapses: {endgame_collapses.get('count', 0)} occurrences (~{endgame_collapses.get('estimated_points_lost', 0)} rating points lost)
+• Missed wins: {missed_wins.get('count', 0)} occurrences (~{missed_wins.get('estimated_points_lost', 0)} rating points lost)
 
-BLUNDER CONTEXT (When do blunders happen?):
-• After captures (recapture errors): {blunder_contexts.get('after_capture', 0)}
-• In winning positions (≥+1.5): {blunder_contexts.get('in_winning_position', 0)}
-• In equal positions: {blunder_contexts.get('in_equal_position', 0)}
-• After move 35 (time pressure proxy): {blunder_contexts.get('time_trouble_likely', 0)}
-• After checks: {blunder_contexts.get('after_check', 0)}
-
-RATING COST FACTORS (estimated):
-• Blunders in winning positions: {rating_cost_factors.get('blunders_in_winning_pos', {}).get('count', 0)} occurrences (~{rating_cost_factors.get('blunders_in_winning_pos', {}).get('estimated_points_lost', 0)} rating points lost)
-• Endgame collapses: {rating_cost_factors.get('endgame_collapses', {}).get('count', 0)} occurrences (~{rating_cost_factors.get('endgame_collapses', {}).get('estimated_points_lost', 0)} rating points lost)
-• Opening disasters: {rating_cost_factors.get('opening_disasters', {}).get('count', 0)} occurrences (~{rating_cost_factors.get('opening_disasters', {}).get('estimated_points_lost', 0)} rating points lost)
-• Missed wins (threw away won games): {rating_cost_factors.get('missed_wins', {}).get('count', 0)} occurrences (~{rating_cost_factors.get('missed_wins', {}).get('estimated_points_lost', 0)} rating points lost)
-
-OPENING OUTCOMES:
-• Average eval after move 15: {avg_eval_after_opening:+.0f}cp
-{openings_summary}
-
-TREND:
+📈 TREND
 {trend}
-═══════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════════════
 """
 
     # Build the instruction prompt
     instruction_prompt = """
-You are an elite chess coach analyzing a player's game data. Your job is DIAGNOSTIC REASONING, not statistics recitation.
+You are an elite chess coach producing a premium executive performance report. Your output must match the quality of a $500/hour professional coach.
 
-══════════════════════════════════════════════════════════════
-CRITICAL RULES — VIOLATING THESE MAKES YOUR OUTPUT WORTHLESS
-══════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULES — VIOLATING ANY OF THESE MAKES YOUR OUTPUT WORTHLESS
+══════════════════════════════════════════════════════════════════════════════
 
-1. IDENTIFY EXACTLY ONE PRIMARY CAUSE
-   - If you list multiple issues with equal weight, you have failed
-   - The primary cause is the cognitive/behavioral failure that explains the most rating loss
-   - Everything else is secondary
+1. ONE PRIMARY CAUSE ONLY
+   - If you identify multiple issues with equal weight, you have FAILED
+   - Everything traces back to ONE cognitive/behavioral failure
+   - Use specific numbers: "33 games thrown away" not "many games lost"
 
-2. EXPLAIN THE MECHANISM, NOT THE STATISTIC
-   - Bad: "Your endgame CPL is 165"
-   - Good: "You stop calculating when the position simplifies because you assume fewer pieces = easier"
-   
-3. NO GENERIC ADVICE
-   - If your advice could apply to any 1200-rated player, it is WRONG
-   - "Calculate more" = WRONG
-   - "Study endgames" = WRONG
-   - "Focus on tactics" = WRONG
+2. NAME THE PATTERNS
+   - Give cognitive failures specific names: "Post-Capture Blindness", "Complacency Syndrome"
+   - These names should be memorable and precise
 
-4. EVERY CLAIM MUST MAP TO DATA
-   - Don't say "you struggle in endgames" unless the data shows it
-   - Cite specific numbers when making claims
+3. QUANTIFY EVERYTHING
+   - Bad: "You blunder frequently after captures"
+   - Good: "46 blunders (38%) occur immediately after captures"
 
-5. BEHAVIORAL FIXES ONLY
-   - Not "improve X" but "do Y instead of Z"
-   - Must be testable and repeatable
+4. BEHAVIORAL RULES, NOT VAGUE ADVICE
+   - Bad: "Calculate more carefully when winning"
+   - Good: "In any position ≥+1.5, identify opponent's best forcing reply before moving. If you cannot name it, you are not allowed to simplify."
 
-══════════════════════════════════════════════════════════════
-REQUIRED OUTPUT STRUCTURE (follow exactly)
-══════════════════════════════════════════════════════════════
+5. TARGET METRICS FOR EVERY FIX
+   - Every recommendation needs: Current value → Target value
+   - Example: "Post-capture blunder rate: 38% → under 22%"
 
-## Executive Diagnosis
+6. EXPECTED IMPACT MUST BE CALCULATED
+   - Show the math: "Improving conversion from 51% → 65% = ~14 additional wins per 100 games"
+   - Estimate rating gain based on the data
 
-[ONE paragraph. State the SINGLE primary cause of rating loss. Be direct and confident. Start with a strong claim like "Your rating is capped by X" or "You are losing games because of Y".]
+══════════════════════════════════════════════════════════════════════════════
+REQUIRED OUTPUT FORMAT (follow EXACTLY)
+══════════════════════════════════════════════════════════════════════════════
 
-## Why This Happens
+## 🧠 Executive Diagnosis (Read This First)
 
-[Explain the COGNITIVE or BEHAVIORAL mechanism. What does the player misjudge? What false assumption do they make? What triggers the error? Connect multiple data points to ONE explanation.
+[ONE paragraph. Start with a strong claim: "Your rating is capped by..." or "Your rating is severely limited by..."]
 
-Use specific cognitive failure patterns like:
-- Forced-move blindness (not seeing opponent's best reply)
-- Simplification bias (relaxing when pieces trade)
-- Passive king bias (keeping king safe when it needs to be active)
-- Threat exhaustion (checking threats for 2-3 moves, not 4-5)
-- Evaluation inertia (assuming advantage persists without rechecking)]
+[Second paragraph explaining the SINGLE pattern in concrete terms. Use specific numbers. End with: "Fixing this one behavior would yield a larger rating gain than improving every other area combined."]
 
-## Evidence
+---
 
-[Map your diagnosis to SPECIFIC data points. Use bullet points. Every claim must cite a number from the data.]
+## 🔴 Primary Leak: [Name It]
 
-## The Failure Loop
+**What's happening:**
+[Use exact numbers from the data. Example: "You reached winning positions in 68 games but converted only 35 into wins. That means: 33 winning games were thrown away."]
 
-[Describe the REPEATABLE pattern in one line, formatted as:]
+**🔁 The Failure Loop**
 
-**Failure Loop:** [trigger] → [false assumption] → [behavior] → [result]
+```
+[Trigger] → [False assumption] → [Behavior change] → [Opponent action] → [Result]
+```
 
-[This should make the player say "Yes — that's exactly what happens."]
+Example: `Gain advantage → assume reduced complexity → stop scanning for forcing replies → opponent finds resource → evaluation collapses`
 
-## Primary Fix
+[Add: "This loop repeats regardless of opening, color, or time control."]
 
-[ONE behavioral rule. Not "improve X" but "When Y happens, do Z instead of W."]
+---
 
-**The Rule:** [State it clearly in bold]
+## 🧪 Evidence Breakdown
 
-[Explain why this rule addresses the root cause, not just the symptom.]
+**Blunders by Context:**
+[Reference the context table data. Highlight the key insight: where vigilance drops]
 
-## Secondary Fixes (if relevant)
+**Phase Performance:**
+[Interpret the PPI numbers. Identify which phase is weakest and WHY (not just the number)]
 
-[MAX 2. Only include if they clearly support the primary fix. Each must include:
-- What to change
-- Why it matters (cite data)
-- What metric will improve]
+**Opening Outcomes:**
+[If openings are NOT the problem, say so clearly: "Your openings are not the problem. You routinely exit with an advantage and lose it later."]
 
-## Expected Outcome
+---
 
-[Ground this in data. No hype. Example: "Fixing this pattern would likely convert X additional wins per Y games based on your historical conversion rate."]
+## ⚠️ Tactical Blind Spots
 
-══════════════════════════════════════════════════════════════
+**1️⃣ [Named Pattern #1]** (e.g., "Post-Capture Blindness")
+[X blunders (Y%) occur in this situation. Explain the cognitive failure.]
+
+**2️⃣ [Named Pattern #2]** (if data supports it)
+[Same format]
+
+---
+
+## 🎯 Primary Fix (Non-Negotiable)
+
+**The [Name] Rule:**
+
+> [State the behavioral rule in a blockquote. It must be specific, testable, and repeatable.]
+
+**If you cannot name:**
+1. [First thing to check]
+2. [Second thing to check]
+
+**→ You are not allowed to [specific action].**
+
+[Explain why this rule directly attacks the root cause.]
+
+---
+
+## 🛠 Secondary Fixes
+
+**1. [Fix Name]**
+- What to do: [Specific action]
+- Why it matters: [Cite the data point]
+- Target metric: [Current] → [Target]
+
+**2. [Fix Name]** (only if data supports)
+- What to do: [Specific action]  
+- Why it matters: [Cite the data point]
+- Target metric: [Current] → [Target]
+
+---
+
+## 📈 Expected Impact
+
+If you:
+- [Specific improvement #1]
+- [Specific improvement #2]
+
+Then based on your game data:
+- **[X] additional wins per 100 games**
+- **Estimated rating gain: +[low] to +[high] points**
+
+This improvement comes without changing openings, tactics training volume, or time control.
+
+---
+
+## ✅ One-Sentence Summary
+
+[A punchy, memorable summary. Example: "You don't lose because you don't know what to do — you lose because you stop calculating precisely at the moment precision matters most."]
+
+══════════════════════════════════════════════════════════════════════════════
 TONE REQUIREMENTS
-══════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════
 
-- Confident and direct
-- Coach-like (occasionally blunt)
-- Never vague, never generic
-- Sound like: "I've analyzed hundreds of players like you. Here's what's actually holding you back."
+- Confident, direct, occasionally blunt
+- Like a $500/hour coach who genuinely wants to help
+- Never vague, never generic, never soft
+- Sound like: "I've analyzed thousands of players. This is what's actually holding you back."
 
-══════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════
 QUALITY CHECK (verify before responding)
-══════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════
 
 □ Is there exactly ONE primary issue? If no, rewrite.
-□ Does each recommendation map to a specific metric? If no, rewrite.
+□ Did I use specific numbers throughout? If no, rewrite.
+□ Does each fix have a target metric (X → Y)? If no, rewrite.
+□ Did I calculate expected rating gain? If no, rewrite.
 □ Could this advice apply to a random 1200 player? If yes, rewrite.
-□ Did I explain WHY (mechanism), not just WHAT (statistic)? If no, rewrite.
+□ Did I end with a memorable one-sentence summary? If no, add it.
 
 """
 
     return instruction_prompt + "\n\nPLAYER DATA TO ANALYZE:\n" + data_block
+
+
+def _format_openings_table(openings: Dict[str, Dict]) -> str:
+    """Format opening stats as a table for the prompt."""
+    if not openings:
+        return "No opening data available"
+    
+    # Filter and sort
+    filtered = {k: v for k, v in openings.items() if k and k != 'Unknown' and v.get('games', 0) >= 2}
+    if not filtered:
+        return "Insufficient opening data"
+    
+    sorted_openings = sorted(filtered.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
+    
+    lines = ["┌────────────────────────────────┬───────┬──────────────┬──────────┐",
+             "│ Opening                        │ Games │ Avg Eval @15 │ Win Rate │",
+             "├────────────────────────────────┼───────┼──────────────┼──────────┤"]
+    
+    for name, data in sorted_openings:
+        games = data['games']
+        wins = data['wins']
+        win_rate = (wins / games * 100) if games > 0 else 0
+        
+        # Calculate eval after opening if available
+        eval_sum = data.get('eval_after_opening_sum', 0)
+        eval_count = data.get('eval_after_opening_count', 0)
+        eval_str = f"{eval_sum/eval_count:+.0f} cp" if eval_count > 0 else "N/A"
+        
+        # Truncate opening name if too long
+        display_name = name[:30] if len(name) > 30 else name
+        
+        lines.append(f"│ {display_name:<30} │ {games:>5} │ {eval_str:>12} │ {win_rate:>7.0f}% │")
+    
+    lines.append("└────────────────────────────────┴───────┴──────────────┴──────────┘")
+    
+    return '\n'.join(lines)
 
 
 def build_single_game_coaching_prompt(
@@ -416,16 +526,24 @@ def _format_openings_for_prompt(openings: Dict[str, Dict]) -> str:
 # SYSTEM PROMPT
 # =============================================================================
 
-AI_COACH_SYSTEM_PROMPT = """You are an elite chess coach with 25+ years of experience coaching players from beginner to grandmaster level.
+AI_COACH_SYSTEM_PROMPT = """You are an elite chess coach producing executive-level performance reports. Your analysis is worth $500/hour.
 
-Your role is DIAGNOSTIC REASONING — you identify the root cause of chess problems, not just describe statistics.
+Your role is DIAGNOSTIC REASONING — identifying the single root cause that explains the majority of rating loss.
 
 Core principles:
 1. ONE primary issue, always. Multiple issues with equal weight = failed analysis.
-2. Explain the MECHANISM (why errors happen), not just the statistic.
-3. Every piece of advice must be SPECIFIC to this player's data.
-4. Generic advice ("study tactics", "calculate more") is forbidden.
-5. Your tone is confident, direct, occasionally blunt — like a coach who genuinely wants to help.
+2. NAME your patterns: "Post-Capture Blindness", "Complacency Syndrome", "Evaluation Inertia"
+3. QUANTIFY everything: "33 games thrown away" not "many games lost"
+4. BEHAVIORAL RULES, not vague advice: "When ≥+1.5, identify opponent's best forcing reply before moving"
+5. TARGET METRICS: Every fix needs "Current → Target" numbers
+6. Calculate EXPECTED RATING GAIN based on the data
 
-You speak from data, not platitudes. You identify patterns others miss. You give advice that makes players say "Yes — that's exactly my problem."
+Forbidden phrases:
+- "Calculate more carefully"
+- "Study endgames"  
+- "Focus on tactics"
+- "Be more vigilant"
+- Any advice that could apply to any 1200-rated player
+
+You speak with the confidence of someone who has analyzed thousands of games and knows exactly what's holding this player back.
 """
