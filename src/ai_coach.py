@@ -58,6 +58,21 @@ def _ai_coach_model() -> str:
     return (os.getenv("AI_COACH_MODEL") or "gpt-5-mini").strip()
 
 
+def _model_supports_temperature(model: str) -> bool:
+    """Check if the model supports the temperature parameter.
+    
+    GPT-5 mini/nano and some other newer models don't support temperature.
+    """
+    model_lower = model.lower()
+    # GPT-5 mini and nano don't support temperature
+    if "gpt-5-mini" in model_lower or "gpt-5-nano" in model_lower:
+        return False
+    # o1/o3 models also don't support temperature
+    if model_lower.startswith("o1") or model_lower.startswith("o3"):
+        return False
+    return True
+
+
 def _estimate_cost_cents(tokens_used: int) -> int:
     """Best-effort cost estimate.
 
@@ -140,16 +155,21 @@ def generate_game_review(
     # Call the model for diagnostic reasoning
     try:
         client = _get_openai_client()
+        model = _ai_coach_model()
         
-        response = client.chat.completions.create(
-            model=_ai_coach_model(),
-            messages=[
+        # Build request kwargs (some models don't support temperature)
+        kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
                 {"role": "user", "content": coaching_prompt}
             ],
-            temperature=0.6,
-            max_completion_tokens=600,
-        )
+            "max_completion_tokens": 600,
+        }
+        if _model_supports_temperature(model):
+            kwargs["temperature"] = 0.6
+        
+        response = client.chat.completions.create(**kwargs)
         
         ai_analysis = response.choices[0].message.content
         tokens_used = response.usage.total_tokens
@@ -649,22 +669,38 @@ def generate_career_analysis(
         )
 
         client = _get_openai_client()
+        model = _ai_coach_model()
         
-        response = client.chat.completions.create(
-            model=_ai_coach_model(),
-            messages=[
+        # Build request kwargs (some models don't support temperature)
+        kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
                 {"role": "user", "content": coaching_prompt}
             ],
-            temperature=0.7,  # Allow some creativity in explanations
-            max_completion_tokens=2500,  # Increased for premium report format
-        )
+            "max_completion_tokens": 2500,
+        }
+        if _model_supports_temperature(model):
+            kwargs["temperature"] = 0.7
+        
+        response = client.chat.completions.create(**kwargs)
         
         analysis_text = response.choices[0].message.content
         tokens_used = response.usage.total_tokens
         cost_cents = _estimate_cost_cents(tokens_used)
 
-    except Exception:
+    except Exception as e:
+        # Log the actual error for debugging
+        import traceback
+        error_details = f"{type(e).__name__}: {str(e)[:200]}"
+        print(f"[AI Coach] Career analysis failed: {error_details}")
+        try:
+            import streamlit as st
+            # Store error in session state for UI display
+            st.session_state["_ai_coach_last_error"] = error_details
+        except Exception:
+            pass
+        
         # Fallback to data-driven analysis if ANY step above fails (including KeyError like 'losss')
         from src.data_driven_coach import generate_data_driven_analysis, format_analysis_for_display
 
@@ -802,15 +838,21 @@ CONVERSION: {stats.get('conversion_rate', 0):.0f}%
 Rewrite the above analysis in a natural coaching voice. Start with the most important finding.
 Do NOT add new information. Only rephrase what's there."""
 
-    response = client.chat.completions.create(
-        model=_ai_coach_model(),
-        messages=[
+    model = _ai_coach_model()
+    
+    # Build request kwargs (some models don't support temperature)
+    kwargs = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": "You are a chess coach who only speaks from data. Never add generic advice."},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.5,
-        max_completion_tokens=800,
-    )
+        "max_completion_tokens": 800,
+    }
+    if _model_supports_temperature(model):
+        kwargs["temperature"] = 0.5
+    
+    response = client.chat.completions.create(**kwargs)
     
     content = response.choices[0].message.content
     tokens_used = response.usage.total_tokens

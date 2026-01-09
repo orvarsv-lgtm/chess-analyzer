@@ -229,6 +229,10 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str, a
                         st.success(f"✅ AI Coach analysis complete! ({tokens} tokens, ~${cost/100:.2f})")
                     else:
                         st.success("✅ Analysis complete (fallback mode)")
+                        # Show error details if available
+                        last_error = st.session_state.get("_ai_coach_last_error")
+                        if last_error:
+                            st.warning(f"⚠️ AI error: {last_error}")
                     _render_career_analysis_result(result)
                     
                 except Exception as e:
