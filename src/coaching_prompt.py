@@ -389,7 +389,7 @@ GOOD sentence structure (always do this):
 
 ### Where It Shows Up
 
-[Write this as flowing prose, not a list. Connect the dots between 2-3 manifestations with specific data. For example: "This pattern explains why {X}% of your blunders happen after captures—you're seeing the forcing line but missing the quiet threat that follows. It also explains the {Y}-point CPL spike in your endgames: fewer pieces feels safer, so you stop checking."]
+[Write this as flowing prose, not a list. Connect the dots between 2-3 manifestations with specific data. For example: "This pattern explains why 45% of your blunders happen after captures—you're seeing the forcing line but missing the quiet threat that follows. It also explains the 20-point CPL spike in your endgames: fewer pieces feels safer, so you stop checking."]
 
 ### Why I'm Confident
 
@@ -409,7 +409,7 @@ GOOD sentence structure (always do this):
 
 ### What Your Moves Suggest You Believe
 
-[Frame this as inference from behavior: "Your move choices suggest you believe simplified positions are safer and require less vigilance. That assumption is costing you roughly {X} games out of every {Y} you play."]
+[Frame this as inference from behavior: "Your move choices suggest you believe simplified positions are safer and require less vigilance. That assumption is costing you roughly 3 games out of every 20 you play."]
 
 ### The Pattern That Repeats
 
@@ -425,11 +425,11 @@ This loop repeats regardless of opening, color, or opponent strength.
 
 ### Blunder Analysis
 
-[Write 2-3 sentences interpreting the blunder context data. Don't just list numbers—tell the story. "Nearly half your blunders ({X}%) happen in positions where you're already winning. That's not a calculation problem—it's a vigilance problem. You've mentally checked out before the game is actually over."]
+[Write 2-3 sentences interpreting the blunder context data. Don't just list numbers—tell the story. "Nearly half your blunders (47%) happen in positions where you're already winning. That's not a calculation problem—it's a vigilance problem. You've mentally checked out before the game is actually over."]
 
 ### Phase-by-Phase Performance
 
-[Interpret the CPL and PPI numbers. Explain what they mean in plain terms. "Your middlegame play is solid—a CPL of {X} is respectable for your rating. But watch what happens in the endgame: that number nearly doubles to {Y}. The pieces come off, and so does your concentration."]
+[Interpret the CPL and PPI numbers. Explain what they mean in plain terms. "Your middlegame play is solid—a CPL of 35 is respectable for your rating. But watch what happens in the endgame: that number nearly doubles to 68. The pieces come off, and so does your concentration."]
 
 ### Opening Assessment
 
@@ -441,7 +441,7 @@ This loop repeats regardless of opening, color, or opponent strength.
 
 {confidence_note}
 
-[If confidence is medium or low, specify which conclusions are solid vs tentative: "The diagnosis of premature closure is well-supported by the data. The specific trigger timing is less certain with only {X} games—I'd want to see another 20 games to confirm that pattern."]
+[If confidence is medium or low, specify which conclusions are solid vs tentative: "The diagnosis of premature closure is well-supported by the data. The specific trigger timing is less certain with only 15 games—I'd want to see another 20 games to confirm that pattern."]
 
 ---
 
@@ -487,7 +487,7 @@ These specific behaviors are hurting your results:
 
 **1. [Specific behavior to stop]**
 
-[Explain this as a coach would—connect it to the data and explain the consequence. "You're playing the first move that looks good instead of confirming there's nothing better. In your games, this habit shows up as {X} unnecessary blunders that a 5-second check would have caught. Each one costs you roughly {Y} rating points."]
+[Explain this as a coach would—connect it to the data and explain the consequence. "You're playing the first move that looks good instead of confirming there's nothing better. In your games, this habit shows up as 6 unnecessary blunders that a 5-second check would have caught. Each one costs you roughly 8 rating points."]
 
 **2. [Second behavior to stop]**
 
@@ -520,9 +520,9 @@ Based on this analysis, here's what to focus on for the next 4-6 weeks:
 ### What Success Looks Like
 
 In 50 games, if you follow this plan:
-- Your {specific metric} should improve from {current} to approximately {target}
-- You'll convert roughly {X} more winning positions
-- Expected rating gain: {recoverable_games * points_per_game} points (assuming 60-70% compliance)
+- Your key weakness metric should show measurable improvement
+- You'll convert more winning positions into actual wins
+- Expected rating gain: approximately {recoverable_games * points_per_game} points (assuming 60-70% compliance)
 
 ---
 
