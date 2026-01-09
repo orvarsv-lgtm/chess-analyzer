@@ -89,9 +89,10 @@ def generate_game_review(
     player_rating: Optional[int] = None,
 ) -> AICoachResponse:
     """
-    Generate data-driven coaching review for a single game.
+    Generate AI coaching review for a single game.
     
-    NO generic advice. Every claim backed by move data.
+    Uses GPT-4 for diagnostic reasoning about what decided the game
+    and what behavioral change would help.
     
     Args:
         game_data: Analyzed game data with moves, evals, phases
@@ -101,82 +102,139 @@ def generate_game_review(
     Returns:
         AICoachResponse with personalized insights
     """
-    from src.data_driven_coach import explain_single_game
+    from src.coaching_prompt import build_single_game_coaching_prompt, AI_COACH_SYSTEM_PROMPT
     
-    # Generate data-driven analysis
-    analysis = explain_single_game(game_data, player_color, player_rating)
+    # Build the coaching prompt with game data
+    coaching_prompt = build_single_game_coaching_prompt(
+        game_data=game_data,
+        player_color=player_color,
+        player_rating=player_rating,
+    )
     
-    # Extract key moments
+    # Call GPT-4 for diagnostic reasoning
+    try:
+        client = _get_openai_client()
+        
+        response = client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
+                {"role": "user", "content": coaching_prompt}
+            ],
+            temperature=0.6,
+            max_tokens=600,
+        )
+        
+        ai_analysis = response.choices[0].message.content
+        tokens_used = response.usage.total_tokens
+        cost_cents = int((tokens_used / 1000) * 3)
+        
+        # Parse the structured response
+        sections = _parse_game_coach_response(ai_analysis)
+        
+    except Exception as e:
+        # Fallback to data-driven analysis
+        from src.data_driven_coach import explain_single_game
+        
+        fallback = explain_single_game(game_data, player_color, player_rating)
+        sections = {
+            'summary': fallback.get('summary', 'Analysis unavailable'),
+            'key_moments': fallback.get('key_moments', []),
+            'opening': 'See phase CPL breakdown',
+            'strategy': fallback.get('analysis', ''),
+            'tactics': '',
+            'training': ['Review the game with an engine'],
+        }
+        tokens_used = 0
+        cost_cents = 0
+    
+    # Extract key moments from game data for display
+    moves_table = game_data.get('moves_table', [])
     key_moments = []
-    for km in analysis.get('key_moments', []):
-        key_moments.append({
-            'move': km.get('move'),
-            'advice': km.get('explanation', ''),
-        })
-    
-    # Build phase-specific advice from data
-    phase_cpl = analysis.get('phase_cpl', {})
-    opening_advice = ""
-    strategic_advice = ""
-    tactical_advice = ""
-    
-    # Opening advice based on actual data
-    opening_cpl = phase_cpl.get('opening', 0)
-    if opening_cpl > 50:
-        opening_advice = (
-            f"Opening CPL was {opening_cpl:.0f}, indicating early mistakes. "
-            f"Review the first 15 moves for where you deviated."
-        )
-    elif opening_cpl < 20:
-        opening_advice = f"Opening play was solid (CPL: {opening_cpl:.0f}). No major issues."
-    else:
-        opening_advice = f"Opening was acceptable (CPL: {opening_cpl:.0f})."
-    
-    # Strategic advice based on conversion
-    if analysis.get('had_winning_position') and analysis.get('result') != '1-0' and player_color == 'white':
-        strategic_advice = (
-            "You had a winning position but failed to convert. "
-            "When ahead, look for simplifying trades that preserve your advantage."
-        )
-    elif analysis.get('had_winning_position') and analysis.get('result') != '0-1' and player_color == 'black':
-        strategic_advice = (
-            "You had a winning position but failed to convert. "
-            "When ahead, look for simplifying trades that preserve your advantage."
-        )
-    
-    # Tactical advice based on blunders
-    biggest_swing = analysis.get('biggest_swing', {})
-    if biggest_swing.get('swing', 0) >= 200:
-        tactical_advice = (
-            f"The critical error was move {biggest_swing.get('move')} "
-            f"({biggest_swing.get('san')}) which lost {biggest_swing.get('swing')}cp. "
-            f"Best was {biggest_swing.get('best')}. Study this position."
-        )
-    elif analysis.get('blunders', 0) == 0:
-        tactical_advice = "No major tactical errors. Good calculation this game."
-    
-    # Training recommendations tied to data
-    training = []
-    if opening_cpl > 50:
-        training.append(f"Review opening: CPL was {opening_cpl:.0f}")
-    if phase_cpl.get('endgame', 0) > 100:
-        training.append(f"Endgame study: CPL was {phase_cpl.get('endgame', 0):.0f}")
-    if biggest_swing.get('swing', 0) >= 200:
-        training.append(f"Analyze move {biggest_swing.get('move')}: {biggest_swing.get('swing')}cp swing")
-    if not training:
-        training.append("Good game - review for patterns to repeat")
+    for move in moves_table:
+        if (move.get('mover') or move.get('color')) == player_color:
+            cp_loss = move.get('cp_loss', 0) or 0
+            if cp_loss >= 200:
+                move_num = move.get('move_num') or ((move.get('ply', 0) + 1) // 2)
+                key_moments.append({
+                    'move': move_num,
+                    'advice': f"{move.get('san', '?')} lost {cp_loss}cp (best: {move.get('best_move_san', '?')})",
+                })
     
     return AICoachResponse(
-        game_summary=analysis.get('summary', 'No analysis available.'),
-        key_moments=key_moments,
-        opening_advice=opening_advice,
-        strategic_advice=strategic_advice or "No strategic issues identified from this game.",
-        tactical_advice=tactical_advice or "Review blunders for tactical patterns.",
-        training_recommendations=training,
+        game_summary=sections.get('summary', 'No analysis available.'),
+        key_moments=key_moments[:5],
+        opening_advice=sections.get('opening', ''),
+        strategic_advice=sections.get('strategy', ''),
+        tactical_advice=sections.get('tactics', ''),
+        training_recommendations=sections.get('training', [])[:3],
         timestamp=datetime.now(),
-        cost_cents=0,  # No API call
-        tokens_used=0,
+        cost_cents=cost_cents,
+        tokens_used=tokens_used,
     )
+
+
+def _parse_game_coach_response(content: str) -> Dict[str, Any]:
+    """Parse the AI coach response for single game analysis."""
+    sections = {
+        'summary': '',
+        'opening': '',
+        'strategy': '',
+        'tactics': '',
+        'training': [],
+    }
+    
+    lines = content.split('\n')
+    current_section = None
+    current_content = []
+    
+    for line in lines:
+        lower = line.lower().strip()
+        
+        # Detect section headers
+        if 'what decided' in lower or 'turning point' in lower:
+            if current_section and current_content:
+                _store_game_section(sections, current_section, current_content)
+            current_section = 'summary'
+            current_content = []
+        elif 'why it happened' in lower or 'why this happened' in lower:
+            if current_section and current_content:
+                _store_game_section(sections, current_section, current_content)
+            current_section = 'strategy'
+            current_content = []
+        elif 'the lesson' in lower or 'takeaway' in lower:
+            if current_section and current_content:
+                _store_game_section(sections, current_section, current_content)
+            current_section = 'training'
+            current_content = []
+        elif line.strip() and not line.strip().startswith('#'):
+            current_content.append(line.strip())
+    
+    # Store last section
+    if current_section and current_content:
+        _store_game_section(sections, current_section, current_content)
+    
+    # Fallback if parsing fails
+    if not sections['summary'] and content:
+        sections['summary'] = content[:300] + '...' if len(content) > 300 else content
+    
+    return sections
+
+
+def _store_game_section(sections: Dict, section: str, content: List[str]) -> None:
+    """Store parsed game review section."""
+    text = '\n'.join(content).strip()
+    
+    if section == 'summary':
+        sections['summary'] = text
+    elif section == 'strategy':
+        sections['strategy'] = text
+    elif section == 'training':
+        # Split into list items
+        for line in content:
+            clean = line.strip().lstrip('-•*0123456789.) ')
+            if clean and len(clean) > 5:
+                sections['training'].append(clean)
 
 
 def generate_position_insight(
@@ -524,9 +582,13 @@ def generate_career_analysis(
     player_rating: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Generate comprehensive AI analysis of player's entire game history.
+    Generate comprehensive AI coaching analysis of player's entire game history.
     
-    This analyzes patterns, trends, and gives career-level coaching advice.
+    This uses GPT-4 as a DIAGNOSTIC REASONING layer that interprets the data,
+    identifies root causes, and provides behavioral interventions.
+    
+    The AI Coach is NOT a statistics printer — it's a coaching intelligence
+    that explains WHY patterns occur and what to do about them.
     
     Args:
         all_games: List of all analyzed games
@@ -539,29 +601,118 @@ def generate_career_analysis(
     # Aggregate statistics across all games
     stats = _aggregate_career_stats(all_games)
     
-    # Use the data-driven coaching engine instead of GPT-4
-    from src.data_driven_coach import generate_data_driven_analysis, format_analysis_for_display
+    # Import the coaching prompt builder
+    from src.coaching_prompt import (
+        build_career_coaching_prompt,
+        AI_COACH_SYSTEM_PROMPT,
+    )
     
-    # Generate analysis from data (no LLM call)
-    analysis_result = generate_data_driven_analysis(
+    # Build the sophisticated coaching prompt
+    coaching_prompt = build_career_coaching_prompt(
         stats=stats,
-        games=all_games,
         player_name=player_name,
         player_rating=player_rating,
     )
     
-    # Format for display
-    analysis_text = format_analysis_for_display(analysis_result)
+    # Call GPT-4 for diagnostic reasoning
+    try:
+        client = _get_openai_client()
+        
+        response = client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
+                {"role": "user", "content": coaching_prompt}
+            ],
+            temperature=0.7,  # Allow some creativity in explanations
+            max_tokens=1500,  # Enough for full structured output
+        )
+        
+        analysis_text = response.choices[0].message.content
+        tokens_used = response.usage.total_tokens
+        cost_cents = int((tokens_used / 1000) * 3)  # ~$0.03 per 1k tokens
+        
+    except Exception as e:
+        # Fallback to data-driven analysis if LLM fails
+        from src.data_driven_coach import generate_data_driven_analysis, format_analysis_for_display
+        
+        fallback_result = generate_data_driven_analysis(
+            stats=stats,
+            games=all_games,
+            player_name=player_name,
+            player_rating=player_rating,
+        )
+        analysis_text = f"⚠️ AI Coach unavailable. Showing data-driven analysis:\n\n{format_analysis_for_display(fallback_result)}"
+        tokens_used = 0
+        cost_cents = 0
+    
+    # Extract primary issue from the analysis text (look for Executive Diagnosis section)
+    primary_issue = _extract_primary_issue(analysis_text)
     
     return {
         'analysis': analysis_text,
         'stats': stats,
-        'tokens_used': 0,  # No API call
-        'cost_cents': 0,   # Free!
+        'tokens_used': tokens_used,
+        'cost_cents': cost_cents,
         'timestamp': datetime.now(),
-        'primary_issue': analysis_result.get('primary_issue', ''),
-        'data_sources': analysis_result.get('data_sources', []),
+        'primary_issue': primary_issue,
+        'data_sources': _get_data_sources_from_stats(stats),
     }
+
+
+def _extract_primary_issue(analysis_text: str) -> str:
+    """Extract the primary issue from the AI coach output."""
+    # Look for the Executive Diagnosis section
+    lines = analysis_text.split('\n')
+    in_diagnosis = False
+    diagnosis_lines = []
+    
+    for line in lines:
+        if 'executive diagnosis' in line.lower() or '## executive' in line.lower():
+            in_diagnosis = True
+            continue
+        if in_diagnosis:
+            if line.startswith('##'):  # Next section
+                break
+            if line.strip():
+                diagnosis_lines.append(line.strip())
+    
+    if diagnosis_lines:
+        # Take the first substantial sentence
+        text = ' '.join(diagnosis_lines)
+        # Try to extract the key phrase
+        if 'capped by' in text.lower():
+            idx = text.lower().find('capped by')
+            return text[idx:idx+50].split('.')[0]
+        elif 'losing games because' in text.lower():
+            idx = text.lower().find('losing games because')
+            return text[idx:idx+60].split('.')[0]
+        else:
+            return text[:80] + '...' if len(text) > 80 else text
+    
+    return "Analysis complete"
+
+
+def _get_data_sources_from_stats(stats: Dict[str, Any]) -> List[str]:
+    """Generate list of data sources used in the analysis."""
+    sources = []
+    
+    if stats.get('conversion_rate'):
+        sources.append(f"conversion_rate={stats['conversion_rate']:.0f}%")
+    if stats.get('total_blunders'):
+        sources.append(f"total_blunders={stats['total_blunders']}")
+    if stats.get('blunder_rate'):
+        sources.append(f"blunder_rate={stats['blunder_rate']:.1f}")
+    
+    blunder_phases = stats.get('blunder_phases', {})
+    if blunder_phases:
+        worst_phase = max(blunder_phases.items(), key=lambda x: x[1])
+        sources.append(f"worst_blunder_phase={worst_phase[0]}({worst_phase[1]})")
+    
+    if stats.get('endgame_cpl'):
+        sources.append(f"endgame_cpl={stats['endgame_cpl']:.0f}")
+    
+    return sources[:5]  # Top 5 sources
 
 
 def generate_career_analysis_with_llm(

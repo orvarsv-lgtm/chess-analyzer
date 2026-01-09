@@ -163,14 +163,15 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
     
     # Show what will be analyzed
     st.info(f"""
-    🎯 **Data-Driven Analysis**
+    🧠 **AI Diagnostic Reasoning**
     
-    Every insight is backed by your actual game data:
-    - What's actually deciding your games (eval swings, blunder patterns)
-    - Where you're losing rating points (with specific numbers)
-    - Concrete goals tied to your weaknesses
+    The AI Coach analyzes your data to identify:
+    - **ONE primary cause** of your rating plateau (not a list of issues)
+    - **Why it happens** — the cognitive/behavioral mechanism
+    - **The failure loop** — the exact pattern you repeat
+    - **ONE behavioral fix** — not "study more" but a concrete rule
     
-    _No generic advice. No "study Capablanca." Just your data._
+    _This is diagnostic coaching, not statistics recitation._
     """)
     
     # Cache key for career analysis
@@ -213,13 +214,13 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str) -
                     # Cache the result
                     st.session_state[cache_key] = result
                     
-                    # Note: Now using data-driven analysis (no API cost)
+                    # Note: Now using GPT-4 for diagnostic reasoning
                     tokens = result.get('tokens_used', 0)
                     cost = result.get('cost_cents', 0)
                     if tokens > 0:
-                        st.success(f"✅ Career analysis complete! ({tokens} tokens, ~${cost/100:.2f})")
+                        st.success(f"✅ AI Coach analysis complete! ({tokens} tokens, ~${cost/100:.2f})")
                     else:
-                        st.success("✅ Career analysis complete! (Data-driven, no API cost)")
+                        st.success("✅ Analysis complete (fallback mode)")
                     _render_career_analysis_result(result)
                     
                 except Exception as e:
