@@ -148,7 +148,7 @@ def generate_game_review(
                 {"role": "user", "content": coaching_prompt}
             ],
             temperature=0.6,
-            max_tokens=600,
+            max_completion_tokens=600,
         )
         
         ai_analysis = response.choices[0].message.content
@@ -657,7 +657,7 @@ def generate_career_analysis(
                 {"role": "user", "content": coaching_prompt}
             ],
             temperature=0.7,  # Allow some creativity in explanations
-            max_tokens=2500,  # Increased for premium report format
+            max_completion_tokens=2500,  # Increased for premium report format
         )
         
         analysis_text = response.choices[0].message.content
@@ -809,7 +809,7 @@ Do NOT add new information. Only rephrase what's there."""
             {"role": "user", "content": prompt}
         ],
         temperature=0.5,
-        max_tokens=800,
+        max_completion_tokens=800,
     )
     
     content = response.choices[0].message.content
