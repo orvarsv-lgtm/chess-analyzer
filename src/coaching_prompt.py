@@ -159,49 +159,60 @@ def build_career_coaching_prompt(
     valid_diagnoses = []
     diagnosis_reasoning = []
     
+    # Human-readable diagnosis descriptions (not codes!)
+    diagnosis_descriptions = {
+        'endgame_vigilance': "You stop checking for threats once pieces come off the board",
+        'capture_tunnel_vision': "After captures, you focus on the obvious continuation and miss quiet moves",
+        'premature_relaxation': "You mentally check out once you're winning, before the game is actually over",
+        'calculation_fatigue': "Your accuracy drops sharply in the later stages of the game",
+        'threat_blindness': "You consistently miss your opponent's best replies",
+        'risk_aversion': "You avoid complications when winning and let opponents escape",
+    }
+    
     # Rule 1: Endgame vigilance failure
     if endgame_pct > 50 or (endgame_cpl > middlegame_cpl * 1.3 and endgame_pct > 30):
-        valid_diagnoses.append('ENDGAME_VIGILANCE_DECAY')
-        diagnosis_reasoning.append(f"Endgame blunders={endgame_pct:.0f}% of total, endgame CPL={endgame_cpl:.0f} vs middlegame CPL={middlegame_cpl:.0f}")
+        valid_diagnoses.append('endgame_vigilance')
+        diagnosis_reasoning.append(f"endgame blunders make up {endgame_pct:.0f}% of total, endgame accuracy drops significantly vs middlegame")
     
     # Rule 2: Post-capture recalculation failure
     if after_capture_pct > 35:
-        valid_diagnoses.append('RECAPTURE_TUNNEL_VISION')
-        diagnosis_reasoning.append(f"After-capture blunders={after_capture_pct:.0f}% of total")
+        valid_diagnoses.append('capture_tunnel_vision')
+        diagnosis_reasoning.append(f"{after_capture_pct:.0f}% of blunders happen right after captures")
     
     # Rule 3: Complacency / premature relaxation
     if in_winning_pct > 30 and conversion_rate < 60:
-        valid_diagnoses.append('PREMATURE_CLOSURE')
-        diagnosis_reasoning.append(f"Blunders in winning positions={in_winning_pct:.0f}%, conversion rate={conversion_rate:.0f}%")
+        valid_diagnoses.append('premature_relaxation')
+        diagnosis_reasoning.append(f"{in_winning_pct:.0f}% of blunders occur in already-winning positions, only {conversion_rate:.0f}% conversion rate")
     
     # Rule 4: Calculation fatigue (late-game accuracy drop)
     if time_trouble_pct > 30 or (endgame_cpl > opening_cpl * 2 and endgame_pct > 40):
-        valid_diagnoses.append('CALCULATION_FATIGUE')
-        diagnosis_reasoning.append(f"Time trouble blunders={time_trouble_pct:.0f}%, endgame CPL={endgame_cpl:.0f} vs opening CPL={opening_cpl:.0f}")
+        valid_diagnoses.append('calculation_fatigue')
+        diagnosis_reasoning.append(f"accuracy drops sharply in later moves")
     
     # Rule 5: Threat blindness (general vigilance)
     if blunder_rate > 4.0 and after_capture_pct < 30 and endgame_pct < 40:
-        valid_diagnoses.append('THREAT_BLINDNESS')
-        diagnosis_reasoning.append(f"High blunder rate={blunder_rate:.1f}/100 moves, distributed across contexts")
+        valid_diagnoses.append('threat_blindness')
+        diagnosis_reasoning.append(f"high blunder rate ({blunder_rate:.1f}/100 moves) spread across all phases")
     
     # Rule 6: Loss aversion / passivity (high draws, missed wins)
     draw_rate = (draws / total_games * 100) if total_games > 0 else 0
     if draw_rate > 20 or (missed_wins.get('count', 0) > winning_positions * 0.3 if winning_positions > 0 else False):
-        valid_diagnoses.append('LOSS_AVERSION_PARALYSIS')
-        diagnosis_reasoning.append(f"Draw rate={draw_rate:.0f}%, missed wins={missed_wins.get('count', 0)}")
+        valid_diagnoses.append('risk_aversion')
+        diagnosis_reasoning.append(f"high draw rate ({draw_rate:.0f}%) or many missed wins")
     
     # If no strong signal, default to most common pattern
     if not valid_diagnoses:
         if endgame_pct >= max(after_capture_pct, in_winning_pct, time_trouble_pct):
-            valid_diagnoses.append('ENDGAME_VIGILANCE_DECAY')
+            valid_diagnoses.append('endgame_vigilance')
         elif in_winning_pct >= max(after_capture_pct, endgame_pct, time_trouble_pct):
-            valid_diagnoses.append('PREMATURE_CLOSURE')
+            valid_diagnoses.append('premature_relaxation')
         else:
-            valid_diagnoses.append('THREAT_BLINDNESS')
-        diagnosis_reasoning.append("No dominant pattern; defaulting to highest blunder context")
+            valid_diagnoses.append('threat_blindness')
+        diagnosis_reasoning.append("no dominant pattern; using highest blunder context")
     
-    # Format for prompt
-    valid_diagnoses_str = ', '.join(valid_diagnoses)
+    # Format as natural language for prompt
+    valid_diagnoses_natural = [diagnosis_descriptions.get(d, d) for d in valid_diagnoses]
+    valid_diagnoses_str = ' OR '.join(valid_diagnoses_natural)
     diagnosis_reasoning_str = '; '.join(diagnosis_reasoning)
     
     # Determine ONE Rule context requirement
@@ -303,282 +314,87 @@ Recoverable games: {recoverable_games} (approximately {recoverable_games * point
 
     # Build the instruction prompt
     instruction_prompt = f"""
-You are a veteran chess coach with decades of experience. You've trained club players, masters, and professionals. You speak plainly, cut straight to the issue, and don't waste words. When something is fine, you say so and move on. When something is costing them games, you tell them directly—no hedging.
+You are a veteran chess coach with decades of experience. You speak plainly, cut straight to the issue, and don't waste words. When something is fine, you say so. When something is costing them games, you tell them directly.
 
-Your job is to write a performance report that reads like it came from a respected coach, not a computer. Be specific. Be human. Be authoritative.
+Write a performance report that sounds like a real coach talking to their student. Be specific, be human, be authoritative.
 
 ================================================================================
 SEVERITY: {severity} | CONFIDENCE: {confidence}
 
-Match your tone to severity:
+Match your tone:
 - CRITICAL: Be blunt. This is costing real rating points.
-- SIGNIFICANT: Be direct. This needs work.
+- SIGNIFICANT: Be direct. This needs attention.
 - MODERATE: Be matter-of-fact. Room for improvement, not urgent.
 ================================================================================
 
 ================================================================================
-CRITICAL GUIDELINES
+IMPORTANT RULES
 ================================================================================
 
-1. DIAGNOSIS MUST FIT THE DATA
-   Your root cause must come from: {valid_diagnoses_str}
-   The reasoning: {diagnosis_reasoning_str}
+1. DESCRIBE THE PROBLEM IN PLAIN ENGLISH
+   The data suggests this issue: {valid_diagnoses_str}
+   Supporting evidence: {diagnosis_reasoning_str}
    
-   Valid failure patterns:
-   - ENDGAME_VIGILANCE_DECAY: Stops scanning for threats once pieces come off—feels "safer"
-   - RECAPTURE_TUNNEL_VISION: After captures, sees only forcing moves, misses quiet threats
-   - PREMATURE_CLOSURE: Decides the game is won and stops calculating
-   - CALCULATION_FATIGUE: Accuracy drops after move 30-35, mental stamina issue
-   - THREAT_BLINDNESS: Consistently fails to spot opponent's best reply
-   - LOSS_AVERSION_PARALYSIS: Avoids risk when winning, draws games that should be wins
+   Describe this in your own words as a coach would. DO NOT use technical codes,
+   ALL_CAPS labels, or programming-style names. Write naturally.
+   
+   WRONG: "Root cause: RECAPTURE_TUNNEL_VISION"
+   RIGHT: "Here's what's happening: after you capture a piece, you're locking onto the obvious continuation and missing quieter threats."
 
-2. ROOT CAUSE VS MANIFESTATIONS
-   The root cause is a mental habit. The manifestations are where it shows up.
-   Wrong: "Your endgame is weak"
-   Right: "You stop scanning for threats once pieces come off"
+2. NO CODE, NO TECHNICAL JARGON
+   - Never use ALL_CAPS diagnostic labels
+   - Never use underscores in descriptions
+   - Never write "Root cause:" followed by a technical term
+   - Explain everything like you're talking to the player face-to-face
 
-3. THE ONE RULE MUST TARGET THE REAL PROBLEM
-   Your main recommendation must specifically apply in: {one_rule_context}
+3. FOCUS YOUR ADVICE ON: {one_rule_context}
    That's where {dominant_error_pct:.0f}% of rating loss happens.
-   A generic rule that applies everywhere is useless.
 
 4. USE REAL NUMBERS
-   Quote specific stats. Don't say "often" when you can say "in 7 of 12 games."
-   Expected rating gain: {recoverable_games} recoverable games x {points_per_game} points = approximately {recoverable_games * points_per_game} points
+   Quote specific stats from the data. Say "in 35 of your 100 games" not "often."
 
-5. TELL THEM WHAT TO STOP
-   Negative constraints stick better than positive advice.
-   "Stop trading pieces when ahead unless you've checked for counterplay."
-
-6. NAME THE TRIGGER
-   Identify the exact moment they fall apart.
-   Example: "Your accuracy drops within 3-5 moves of the first major trade."
-
-7. EXPLAIN WHY YOU RULED OUT ALTERNATIVES
-   If multiple diagnoses seem possible, explain what breaks the tie.
+5. EXPLAIN WHY OTHER EXPLANATIONS DON'T FIT
+   If you mention ruling something out, explain it conversationally.
 
 ================================================================================
-OUTPUT FORMAT (use Markdown formatting)
+OUTPUT FORMAT
 ================================================================================
 
-Use Markdown headers (# ## ###), **bold**, and formatting to create a professional, readable report. 
-Write like a confident coach speaking to their student—complete sentences, natural flow, no robotic structures.
-No emojis. No jargon a club player wouldn't understand.
+Write in flowing prose with Markdown headers. No bullet lists for the main analysis.
+Sound like a coach, not a computer printout.
 
-BAD sentence structure (never do this):
-"Stop rushing your moves in the endgame. Because: Your CPL is higher."
+**Start with a brief summary** (2-3 sentences on what's holding them back)
 
-GOOD sentence structure (always do this):
-"You're rushing your endgame moves, and it's costing you games. Your average centipawn loss jumps from 35 in the middlegame to 78 in the endgame—that's a massive drop in accuracy exactly when precision matters most."
+**Then explain the pattern** (what's actually happening in their games, in plain terms)
 
----
+**Then give them ONE clear thing to focus on** (specific to {one_rule_context})
 
-# Performance Report for {player_name}
+**Then a brief training suggestion** (concrete, actionable)
 
-## The Bottom Line
-
-[Two strong paragraphs. Open with a direct statement about what's holding them back. Be specific—use numbers. Second paragraph should explain why this single issue matters more than anything else they could work on. End with conviction: "Fix this, and you'll see results within weeks."]
-
----
-
-## The Diagnosis
-
-### What's Actually Happening
-
-[Name the root cause from the valid taxonomy. Then explain it like you're sitting across from them: what's going on in their head when this happens? Why does their brain do this? 3-4 sentences that make them nod and say "that's exactly what happens to me."]
-
-### Where It Shows Up
-
-[Write this as flowing prose, not a list. Connect the dots between 2-3 manifestations with specific data. For example: "This pattern explains why 45% of your blunders happen after captures—you're seeing the forcing line but missing the quiet threat that follows. It also explains the 20-point CPL spike in your endgames: fewer pieces feels safer, so you stop checking."]
-
-### Why I'm Confident
-
-[Explain what ruled out alternatives. Write it conversationally: "I considered whether this might be calculation fatigue, but your accuracy holds steady through move 35. The collapse happens specifically when you reach a winning position, not when you're tired. That points clearly to premature closure."]
-
----
-
-## Your Chess Profile
-
-### The Type of Player You Are
-
-[A paragraph describing their playing style based on the data. Are they an aggressive attacker who overextends? A solid defender who can't convert? A calculator who burns out? Paint a picture they recognize.]
-
-### The Moment It Falls Apart
-
-[Be specific about the trigger with timing. Not "in the endgame" but "within 3-5 moves after the first major piece trade" or "immediately after reaching +2.0 evaluation." This should be precise enough that they can watch for it.]
-
-### What Your Moves Suggest You Believe
-
-[Frame this as inference from behavior: "Your move choices suggest you believe simplified positions are safer and require less vigilance. That assumption is costing you roughly 3 games out of every 20 you play."]
-
-### The Pattern That Repeats
-
-Describe the failure loop as a narrative:
-
-**Trigger:** [Specific situation] → **False belief:** [What they assume] → **Behavior change:** [What they do differently] → **Opponent exploits:** [What happens] → **Result:** [Outcome]
-
-This loop repeats regardless of opening, color, or opponent strength.
-
----
-
-## The Evidence
-
-### Blunder Analysis
-
-[Write 2-3 sentences interpreting the blunder context data. Don't just list numbers—tell the story. "Nearly half your blunders (47%) happen in positions where you're already winning. That's not a calculation problem—it's a vigilance problem. You've mentally checked out before the game is actually over."]
-
-### Phase-by-Phase Performance
-
-[Interpret the CPL and PPI numbers. Explain what they mean in plain terms. "Your middlegame play is solid—a CPL of 35 is respectable for your rating. But watch what happens in the endgame: that number nearly doubles to 68. The pieces come off, and so does your concentration."]
-
-### Opening Assessment
-
-[Be honest. If openings aren't the problem, say so directly: "Your opening preparation is fine. You're leaving the first 15 moves with a slight advantage in most games. The problem isn't how you start—it's what you do with the advantage you've built."]
-
----
-
-## Confidence Level: {confidence}
-
-{confidence_note}
-
-[If confidence is medium or low, specify which conclusions are solid vs tentative: "The diagnosis of premature closure is well-supported by the data. The specific trigger timing is less certain with only 15 games—I'd want to see another 20 games to confirm that pattern."]
-
----
-
-## What You Can Safely Ignore
-
-This is just as important as knowing what to work on. Right now, don't spend time on:
-
-**Skip opening study for now.** Your openings are producing fine positions. Memorizing more theory won't help when you're giving games away in the endgame.
-
-**Don't add tactics puzzles.** Your tactical vision is adequate—you're finding the right moves in the middlegame. The issue is attention, not pattern recognition.
-
-[Add 1-2 more specific to their data, explaining WHY each area isn't their bottleneck]
-
----
-
-## The One Rule
-
-**If you remember nothing else from this report, remember this:**
-
-> [State a specific, binary rule that applies in {one_rule_context}. Make it something they can literally ask themselves yes/no during a game. Example: "Before every move in a winning position, I must identify my opponent's single best try to complicate the position."]
-
-**Why this works:** [2-3 sentences on the psychological mechanism. "This rule works because it forces active threat-scanning exactly when your brain wants to coast. By making it a conscious checkpoint, you override the automatic 'I'm winning, relax' response that's causing the blunders."]
-
----
-
-## The 5-Second Pre-Move Check
-
-In {one_rule_context}, pause and ask yourself:
-
-1. **[First question—specific to the diagnosed root cause]** 
-   [Brief explanation of why this question matters]
-
-2. **[Second question]**
-   [Brief explanation]
-
-If you can't answer both questions clearly, you haven't looked hard enough. Take another 10 seconds.
-
----
-
-## Habits to Break
-
-These specific behaviors are hurting your results:
-
-**1. [Specific behavior to stop]**
-
-[Explain this as a coach would—connect it to the data and explain the consequence. "You're playing the first move that looks good instead of confirming there's nothing better. In your games, this habit shows up as 6 unnecessary blunders that a 5-second check would have caught. Each one costs you roughly 8 rating points."]
-
-**2. [Second behavior to stop]**
-
-[Same format—specific behavior, connection to data, consequence in their terms]
-
----
-
-## Your Training Plan
-
-Based on this analysis, here's what to focus on for the next 4-6 weeks:
-
-### Priority 1: [Main focus area]
-
-**The goal:** [Specific, measurable target—e.g., "Reduce endgame blunders from 3.2 per 100 moves to under 2.0"]
-
-**How to train this:**
-- **During games:** [Specific in-game practice—e.g., "Spend 5 extra seconds on every move after move 35, specifically scanning for your opponent's threats"]
-- **Study method:** [Specific training activity—e.g., "Review your last 10 endgames, find the move where concentration slipped, and write down what you should have checked"]
-- **Recommended resource:** [Specific book, course, or exercise type—e.g., "Dvoretsky's Endgame Manual, Chapter 1—not for theory, but for practicing the habit of precise calculation when pieces are few"]
-
-**Time investment:** [Realistic estimate—e.g., "15 minutes post-game review + 20 minutes endgame study 3x per week"]
-
-### Priority 2: [Secondary focus if applicable]
-
-**The goal:** [Measurable target]
-
-**How to train this:**
-- [Specific methods as above]
-
-### What Success Looks Like
-
-In 50 games, if you follow this plan:
-- Your key weakness metric should show measurable improvement
-- You'll convert more winning positions into actual wins
-- Expected rating gain: approximately {recoverable_games * points_per_game} points (assuming 60-70% compliance)
-
----
-
-## Expected Results
-
-**The math:** You're currently throwing away {recoverable_games} games out of {total_games}. At your rating level, each recovered game is worth roughly {points_per_game} points. That's approximately **{recoverable_games * points_per_game} rating points** you're leaving on the table.
-
-**The timeline:** Most players see noticeable improvement within 30-50 games of focused practice. The habit takes about 3 weeks to become automatic.
-
-**Confidence: {confidence.lower()}** — {confidence_note}
-
----
-
-## Remember This
-
-[A single punchy sentence they can repeat to themselves. Make it memorable and specific to their issue. Not generic motivation—a concrete reminder of their specific fix. Example: "The game isn't over at +3. Find their trick first."]
+Keep the total response to about 600-800 words. Quality over quantity.
 
 ================================================================================
-WRITING STYLE
+WRITING EXAMPLES
 ================================================================================
 
-Severity: {severity}
+BAD (robotic, uses codes):
+"Root cause: ENDGAME_VIGILANCE_DECAY. After exchanges you stop scanning. This manifests as elevated CPL in positions with reduced material."
 
-{"This is costing them real games and real rating points. Be direct and unsparing—they need to hear this clearly. Don't soften the message, but stay constructive." if severity == "CRITICAL" else "This needs attention. Be clear and direct about the problem while remaining encouraging about the fix." if severity == "SIGNIFICANT" else "This is improvement territory, not crisis. Be matter-of-fact and constructive. Acknowledge what's working before addressing what isn't."}
+GOOD (natural coaching voice):
+"Here's what I'm seeing: once the pieces start coming off the board, you relax. Your brain registers 'fewer pieces = safer position' and you stop looking for trouble. But that's exactly when your opponents find their chances. In your last 50 games, your accuracy drops by nearly 40% once you reach an endgame."
 
-**Voice:** You're a respected coach who's worked with hundreds of players. You've seen this exact pattern before. You know what fixes it. You're confident because you have the data to back it up.
+BAD (list-heavy, fragmented):
+"Issues identified:
+- Endgame blunders: 45%
+- Post-capture errors: 35%
+- Conversion failures: 12"
 
-**Sentence structure:** Write complete, flowing sentences. Never use "Because:" as a sentence starter. Connect cause and effect naturally: "You're doing X, which leads to Y, and that's why Z happens."
-
-**Specificity:** Every claim needs a number. Not "you often blunder in the endgame" but "you blunder 2.3 times per 100 moves in the endgame, compared to 0.8 in the middlegame."
-
-**Training recommendations:** Be specific enough that they could start today. Not "study endgames" but "Spend 15 minutes reviewing your last 5 endgames. For each one, find the exact move where your accuracy dropped and write down what you should have checked."
-
-**Formatting:** Use Markdown. # for main headers, ## for sections, ### for subsections, **bold** for emphasis, > for key rules they should remember.
-
-FORBIDDEN:
-- "Calculate more carefully" / "Think longer" / "Be more patient"
-- "Study endgames" / "Practice tactics" / "Focus on..."
-- Sentence fragments like "Because: [reason]" or "Why: [explanation]"  
-- Repeating the same statistic in multiple sections
-- Generic advice that could apply to any player
-- Robotic or templated language
+GOOD (narrative flow):
+"The numbers tell a clear story. Nearly half your blunders happen in the endgame, and another third come right after captures. You're not making random mistakes—there's a pattern here, and it's fixable."
 
 ================================================================================
-FINAL CHECK
-================================================================================
 
-Before responding, verify:
-- Does every section read like a human coach wrote it? Read it aloud—does it sound natural?
-- Are all recommendations specific enough to act on today?
-- Did you connect every claim to a specific data point?
-- Does the one rule specifically target {one_rule_context}?
-- Would a different experienced coach reach the same diagnosis from this data?
-- Is there a concrete training plan with time estimates?
-- Did you avoid ALL the forbidden phrases and sentence structures?
-
+Now write the analysis for {player_name}. Remember: sound like a coach, not a computer.
 """
 
     return instruction_prompt + "\n\nPLAYER DATA TO ANALYZE:\n" + data_block
