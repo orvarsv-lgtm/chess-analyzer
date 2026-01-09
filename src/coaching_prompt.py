@@ -89,13 +89,13 @@ def build_career_coaching_prompt(
     # Determine confidence level based on sample size
     if total_games >= 50:
         confidence = "HIGH"
-        confidence_note = "Sample size is robust (50+ games). Estimates are reliable."
+        confidence_note = "Based on 50+ games, these patterns are well-established."
     elif total_games >= 20:
         confidence = "MEDIUM"
-        confidence_note = f"Sample size is adequate ({total_games} games). Estimates have moderate confidence."
+        confidence_note = f"Based on {total_games} games—patterns are emerging but need confirmation."
     else:
         confidence = "LOW"
-        confidence_note = f"Sample size is limited ({total_games} games). Treat estimates as directional, not precise."
+        confidence_note = f"Only {total_games} games analyzed. Take these as early signals, not certainties."
     
     # Opening outcomes
     opening_outcomes = stats.get('opening_outcomes', {})
@@ -206,11 +206,11 @@ def build_career_coaching_prompt(
     
     # Determine ONE Rule context requirement
     if dominant_error_context == 'endgame_collapses':
-        one_rule_context = "ENDGAME (moves 40+)"
+        one_rule_context = "endgame positions (moves 40+)"
     elif dominant_error_context == 'blunders_in_winning':  
-        one_rule_context = "WINNING POSITIONS (eval ≥+1.5)"
+        one_rule_context = "winning positions (when up +1.5 or more)"
     else:
-        one_rule_context = "CONVERSION OPPORTUNITIES"
+        one_rule_context = "conversion opportunities"
     
     # Calculate recoverable games for impact estimation
     recoverable_games = games_thrown
@@ -218,357 +218,303 @@ def build_career_coaching_prompt(
     
     # Build the data block
     data_block = f"""
-══════════════════════════════════════════════════════════════════════════════
+================================================================================
 PLAYER DATA: {player_name} ({player_rating or 'Unrated'})
-══════════════════════════════════════════════════════════════════════════════
+================================================================================
 
-⚠️ SEVERITY ASSESSMENT: {severity}
-📊 CONFIDENCE LEVEL: {confidence}
-   {confidence_note}
+SEVERITY ASSESSMENT: {severity}
+CONFIDENCE LEVEL: {confidence}
+{confidence_note}
 
-📊 HIGH-LEVEL RESULTS
-┌─────────────────────────────────┬────────────┐
-│ Metric                          │ Value      │
-├─────────────────────────────────┼────────────┤
-│ Games analyzed                  │ {total_games:>10} │
-│ Win rate                        │ {win_rate*100:>9.0f}% │
-│ Winning positions reached (≥+1.5) │ {winning_positions:>10} │
-│ Wins from winning positions     │ {converted_wins:>10} │
-│ Conversion rate                 │ {conversion_rate:>9.0f}% │
-│ Games thrown away               │ {games_thrown:>10} │
-│ Blunders / 100 moves            │ {blunder_rate:>10.1f} │
-│ Mistakes / 100 moves            │ {mistake_rate:>10.1f} │
-└─────────────────────────────────┴────────────┘
+HIGH-LEVEL RESULTS
+------------------
+Games analyzed: {total_games}
+Win rate: {win_rate*100:.0f}%
+Winning positions reached (+1.5 or better): {winning_positions}
+Wins from winning positions: {converted_wins}
+Conversion rate: {conversion_rate:.0f}%
+Games thrown away: {games_thrown}
+Blunders per 100 moves: {blunder_rate:.1f}
+Mistakes per 100 moves: {mistake_rate:.1f}
 
-🎯 BLUNDER CONTEXT ANALYSIS
-┌────────────────────────────────┬──────────┬─────────────┐
-│ Situation                      │ Blunders │ % of total  │
-├────────────────────────────────┼──────────┼─────────────┤
-│ After captures                 │ {blunder_contexts.get('after_capture', 0):>8} │ {after_capture_pct:>10.0f}% │
-│ In winning positions (≥+1.5)   │ {blunder_contexts.get('in_winning_position', 0):>8} │ {in_winning_pct:>10.0f}% │
-│ In endgame phase               │ {blunder_phases.get('endgame', 0):>8} │ {endgame_pct:>10.0f}% │
-│ After checks                   │ {blunder_contexts.get('after_check', 0):>8} │ {after_check_pct:>10.0f}% │
-│ Time pressure (move 35+)       │ {blunder_contexts.get('time_trouble_likely', 0):>8} │ {(blunder_contexts.get('time_trouble_likely', 0) / total_blunders * 100) if total_blunders > 0 else 0:>10.0f}% │
-└────────────────────────────────┴──────────┴─────────────┘
+BLUNDER CONTEXT ANALYSIS
+------------------------
+After captures: {blunder_contexts.get('after_capture', 0)} ({after_capture_pct:.0f}% of total)
+In winning positions (+1.5): {blunder_contexts.get('in_winning_position', 0)} ({in_winning_pct:.0f}% of total)
+In endgame phase: {blunder_phases.get('endgame', 0)} ({endgame_pct:.0f}% of total)
+After checks: {blunder_contexts.get('after_check', 0)} ({after_check_pct:.0f}% of total)
+Time pressure (move 35+): {blunder_contexts.get('time_trouble_likely', 0)} ({(blunder_contexts.get('time_trouble_likely', 0) / total_blunders * 100) if total_blunders > 0 else 0:.0f}% of total)
 
-♟️ PHASE PERFORMANCE
-┌─────────────┬─────────┬───────────────────────────────┐
-│ Phase       │ Avg CPL │ Phase Performance Index (PPI) │
-├─────────────┼─────────┼───────────────────────────────┤
-│ Opening     │ {opening_cpl:>7.0f} │ {ppi.get('opening', 0):>29.2f} │
-│ Middlegame  │ {middlegame_cpl:>7.0f} │ {ppi.get('middlegame', 0):>29.2f} │
-│ Endgame     │ {endgame_cpl:>7.0f} │ {ppi.get('endgame', 0):>29.2f} │
-└─────────────┴─────────┴───────────────────────────────┘
-(PPI: < 0.8 = strong, 0.8-1.0 = average, > 1.0 = weak)
+PHASE PERFORMANCE
+-----------------
+Opening CPL: {opening_cpl:.0f} (PPI: {ppi.get('opening', 0):.2f})
+Middlegame CPL: {middlegame_cpl:.0f} (PPI: {ppi.get('middlegame', 0):.2f})
+Endgame CPL: {endgame_cpl:.0f} (PPI: {ppi.get('endgame', 0):.2f})
+(PPI below 0.8 = strong, 0.8-1.0 = average, above 1.0 = weak)
 
-🎲 OPENING OUTCOMES (Eval @ move 15)
+OPENING OUTCOMES (Eval at move 15)
 {openings_table}
 
-💰 RATING COST FACTORS (estimated)
-• Blunders in winning positions: {blunders_in_winning.get('count', 0)} occurrences (~{blunders_in_winning.get('estimated_points_lost', 0)} rating points lost)
-• Endgame collapses: {endgame_collapses.get('count', 0)} occurrences (~{endgame_collapses.get('estimated_points_lost', 0)} rating points lost)
-• Missed wins: {missed_wins.get('count', 0)} occurrences (~{missed_wins.get('estimated_points_lost', 0)} rating points lost)
-• TOTAL ESTIMATED RATING LOSS: ~{total_rating_loss} points
+RATING COST FACTORS (estimated)
+-------------------------------
+Blunders in winning positions: {blunders_in_winning.get('count', 0)} occurrences (~{blunders_in_winning.get('estimated_points_lost', 0)} rating points lost)
+Endgame collapses: {endgame_collapses.get('count', 0)} occurrences (~{endgame_collapses.get('estimated_points_lost', 0)} rating points lost)
+Missed wins: {missed_wins.get('count', 0)} occurrences (~{missed_wins.get('estimated_points_lost', 0)} rating points lost)
+TOTAL ESTIMATED RATING LOSS: ~{total_rating_loss} points
 
-📈 TREND
+TREND
+-----
 {trend}
 
-📚 OPENING REPERTOIRE
+OPENING REPERTOIRE
 {_format_opening_repertoire(weak_openings, strong_openings)}
 
-⚔️ OPPONENT STRENGTH ANALYSIS
+OPPONENT STRENGTH ANALYSIS
 {_format_opponent_analysis(opponent_by_strength)}
 
-🏆 STREAKS & CONSISTENCY
-• Max win streak: {max_win_streak} games
-• Max loss streak: {max_loss_streak} games
-• Longest blunder-free run: {max_blunder_free} games
-• Current streak: {current_streak} {current_streak_type or 'N/A'}s
+STREAKS AND CONSISTENCY
+-----------------------
+Max win streak: {max_win_streak} games
+Max loss streak: {max_loss_streak} games
+Longest blunder-free run: {max_blunder_free} games
+Current streak: {current_streak} {current_streak_type or 'N/A'}s
 
-🎯 ENDGAME CONVERSION
-• Endgame games (40+ moves): {endgame_games}
-• Endgame wins: {endgame_wins}
-• Endgame win rate: {endgame_win_rate:.0f}%
+ENDGAME CONVERSION
+------------------
+Endgame games (40+ moves): {endgame_games}
+Endgame wins: {endgame_wins}
+Endgame win rate: {endgame_win_rate:.0f}%
 
-🤖 DETERMINISTIC ANALYSIS SUMMARY
-(From rule-based system, no LLM — use this as ground truth)
-• Primary weakness identified: {deterministic_weakness or 'None flagged'}
-• Strengths: {', '.join(deterministic_strengths) if deterministic_strengths else 'None flagged'}
+DETERMINISTIC ANALYSIS SUMMARY
+(Rule-based findings—treat as ground truth)
+Primary weakness identified: {deterministic_weakness or 'None flagged'}
+Strengths: {', '.join(deterministic_strengths) if deterministic_strengths else 'None flagged'}
 
-🔬 DIAGNOSTIC CONSTRAINTS (BINDING — YOU MUST FOLLOW THESE)
-┌────────────────────────────────────────────────────────────────────────────┐
-│ VALID DIAGNOSIS CATEGORIES: {valid_diagnoses_str:<43} │
-│ REASONING: {diagnosis_reasoning_str[:65]:<65} │
-│ DOMINANT ERROR CONTEXT: {dominant_error_context} ({dominant_error_pct:.0f}% of rating loss) │
-│ ONE RULE MUST TARGET: {one_rule_context:<52} │
-│ RECOVERABLE GAMES: {recoverable_games} → ~{recoverable_games * points_per_game} rating points │
-└────────────────────────────────────────────────────────────────────────────┘
+DIAGNOSTIC CONSTRAINTS (you must stay within these bounds)
+----------------------------------------------------------
+Valid diagnosis categories: {valid_diagnoses_str}
+Reasoning: {diagnosis_reasoning_str}
+Dominant error context: {dominant_error_context} ({dominant_error_pct:.0f}% of rating loss)
+The ONE Rule must specifically target: {one_rule_context}
+Recoverable games: {recoverable_games} (approximately {recoverable_games * points_per_game} rating points)
 
-══════════════════════════════════════════════════════════════════════════════
+================================================================================
 """
 
     # Build the instruction prompt
     instruction_prompt = f"""
-You are an elite chess coach producing a premium executive performance report. Your output must match the quality of a $500/hour professional coach.
+You are a veteran chess coach with decades of experience. You've trained club players, masters, and professionals. You speak plainly, cut straight to the issue, and don't waste words. When something is fine, you say so and move on. When something is costing them games, you tell them directly—no hedging.
 
-══════════════════════════════════════════════════════════════════════════════
+Your job is to write a performance report that reads like it came from a respected coach, not a computer. Be specific. Be human. Be authoritative.
+
+================================================================================
 SEVERITY: {severity} | CONFIDENCE: {confidence}
-Match your rhetorical intensity to the severity level:
-- CRITICAL → Blunt and urgent. "This is costing you rating points."
-- SIGNIFICANT → Direct and firm. "This needs immediate attention."
-- MODERATE → Calm and corrective. "There's room for improvement here."
-══════════════════════════════════════════════════════════════════════════════
 
-══════════════════════════════════════════════════════════════════════════════
-CRITICAL RULES — VIOLATING ANY OF THESE MAKES YOUR OUTPUT WORTHLESS
-══════════════════════════════════════════════════════════════════════════════
+Match your tone to severity:
+- CRITICAL: Be blunt. This is costing real rating points.
+- SIGNIFICANT: Be direct. This needs work.
+- MODERATE: Be matter-of-fact. Room for improvement, not urgent.
+================================================================================
 
-1. DIAGNOSIS MUST MATCH PRE-COMPUTED CONSTRAINTS
-   - Your root cause MUST be from: {valid_diagnoses_str}
-   - The data-driven reasoning is: {diagnosis_reasoning_str}
-   - If you pick a diagnosis outside this set, you are WRONG. The data doesn't support it.
-   - Valid cognitive failure taxonomy:
-     • ENDGAME_VIGILANCE_DECAY: Stops checking threats after reaching endgame (feels "safer")
-     • RECAPTURE_TUNNEL_VISION: After captures, only sees forcing lines, misses quiet threats
-     • PREMATURE_CLOSURE: Decides position is "won" and relaxes calculation
-     • CALCULATION_FATIGUE: Accuracy drops after move 30-35, mental stamina issue
-     • THREAT_BLINDNESS: Fails to identify opponent's strongest reply throughout game
-     • LOSS_AVERSION_PARALYSIS: Avoids risk when objectively winning, draws/misses wins
+================================================================================
+CRITICAL GUIDELINES
+================================================================================
 
-2. DISTINGUISH ROOT CAUSE vs MANIFESTATIONS
-   - ROOT CAUSE = the cognitive/decision-making failure (ONE only)
-   - MANIFESTATIONS = where it shows up (endgame, after captures, etc.)
-   - Never blame a phase. Blame a mental process.
-   - Bad: "Your endgame is weak" (that's a manifestation)
-   - Good: "You suffer from Endgame Vigilance Decay — you stop checking threats once pieces come off"
+1. DIAGNOSIS MUST FIT THE DATA
+   Your root cause must come from: {valid_diagnoses_str}
+   The reasoning: {diagnosis_reasoning_str}
+   
+   Valid failure patterns:
+   - ENDGAME_VIGILANCE_DECAY: Stops scanning for threats once pieces come off—feels "safer"
+   - RECAPTURE_TUNNEL_VISION: After captures, sees only forcing moves, misses quiet threats
+   - PREMATURE_CLOSURE: Decides the game is won and stops calculating
+   - CALCULATION_FATIGUE: Accuracy drops after move 30-35, mental stamina issue
+   - THREAT_BLINDNESS: Consistently fails to spot opponent's best reply
+   - LOSS_AVERSION_PARALYSIS: Avoids risk when winning, draws games that should be wins
 
-3. ONE RULE MUST TARGET DOMINANT ERROR CONTEXT
-   - The ONE Rule MUST specifically apply in: {one_rule_context}
-   - This context accounts for {dominant_error_pct:.0f}% of estimated rating loss
-   - A generic rule that applies in all phases is INVALID and will be rejected
-   - The rule must be mechanically checkable (yes/no) during a game
+2. ROOT CAUSE VS MANIFESTATIONS
+   The root cause is a mental habit. The manifestations are where it shows up.
+   Wrong: "Your endgame is weak"
+   Right: "You stop scanning for threats once pieces come off"
 
-4. QUANTIFY EVERYTHING + DERIVE IMPACT MECHANICALLY
-   - Use specific numbers from the data, not vague language
-   - Expected rating gain MUST be calculated as:
-     Recoverable games ({recoverable_games}) × points per game (~{points_per_game}) = ~{recoverable_games * points_per_game} points
-   - Do NOT invent impact numbers. Use the formula above.
-   - Do NOT pad the report by repeating the same stats in multiple sections.
+3. THE ONE RULE MUST TARGET THE REAL PROBLEM
+   Your main recommendation must specifically apply in: {one_rule_context}
+   That's where {dominant_error_pct:.0f}% of rating loss happens.
+   A generic rule that applies everywhere is useless.
 
-5. INCLUDE NEGATIVE CONSTRAINTS
-   - What must they STOP doing?
-   - "Do NOT trade when ahead without identifying counterplay"
-   - Humans follow negative constraints better than positive advice.
+4. USE REAL NUMBERS
+   Quote specific stats. Don't say "often" when you can say "in 7 of 12 games."
+   Expected rating gain: {recoverable_games} recoverable games x {points_per_game} points = approximately {recoverable_games * points_per_game} points
 
-6. IDENTIFY FAILURE TRIGGERS WITH TIME WINDOWS
-   - Name the exact moment/situation that triggers collapse
-   - REQUIRED: write one explicit trigger sentence with a tight time-window
-   - Example: "Your collapse reliably begins within 3–5 moves of the first major simplification."
+5. TELL THEM WHAT TO STOP
+   Negative constraints stick better than positive advice.
+   "Stop trading pieces when ahead unless you've checked for counterplay."
 
-7. DIAGNOSIS FALSIFICATION (REQUIRED)
-   - You MUST explain why alternative diagnoses were rejected
-   - If multiple valid diagnoses exist, explain which data point breaks the tie
-   - A diagnosis is only valid if a second coach would reach the same conclusion from this data
+6. NAME THE TRIGGER
+   Identify the exact moment they fall apart.
+   Example: "Your accuracy drops within 3-5 moves of the first major trade."
 
-══════════════════════════════════════════════════════════════════════════════
-REQUIRED OUTPUT FORMAT (follow EXACTLY)
-══════════════════════════════════════════════════════════════════════════════
+7. EXPLAIN WHY YOU RULED OUT ALTERNATIVES
+   If multiple diagnoses seem possible, explain what breaks the tie.
 
-## 🧠 Executive Diagnosis
+================================================================================
+OUTPUT FORMAT
+================================================================================
 
-[ONE paragraph. Start with a strong claim: "Your rating is capped by..." or "You're consistently losing wins because of..."]
-
-[Second paragraph explaining the SINGLE root cause in cognitive/behavioral terms. End with: "Fixing this one mental habit would yield a larger rating gain than improving every other area combined."]
+Write in plain prose. Use headers to organize. No emojis. No jargon a club player wouldn't understand.
 
 ---
 
-## 🔍 Root Cause vs Manifestations
+THE BOTTOM LINE
 
-**🎯 ROOT CAUSE (The Mental Failure):**
-[Name it using taxonomy from DIAGNOSTIC CONSTRAINTS. Must be from: {valid_diagnoses_str}]
-[Explain what happens in your brain when this occurs. 2-3 sentences on the cognitive mechanism.]
-
-**📍 WHERE IT SHOWS UP (Manifestations):**
-- [Manifestation 1]: [Data point]
-- [Manifestation 2]: [Data point]
-- [Manifestation 3]: [Data point]
-
-[Important: The root cause explains ALL the manifestations. If it doesn't, you picked the wrong root cause.]
+[Two paragraphs maximum. What's the single biggest thing holding them back? State it plainly. End with the key insight: fixing this one habit matters more than everything else combined.]
 
 ---
 
-## 🔬 Diagnosis Justification (REQUIRED)
+THE DIAGNOSIS
 
-**Why this diagnosis and not an alternative?**
-[Explain which data point(s) forced this choice over other valid options]
-[If I had diagnosed [alternative X], it would not explain [specific data point Y]]
-[A second coach reviewing this data would reach the same conclusion because...]
+What's Actually Happening:
+[Name the root cause from the valid taxonomy. Explain the mental mechanism in 2-3 sentences—what happens in their head when this occurs.]
 
----
+Where It Shows Up:
+[List 2-3 manifestations with specific data points]
 
-## 🧬 Your Cognitive Profile
-
-Based on your game patterns, you appear to be:
-- **[Profile Type]**: [1-2 sentence description]
-- **Collapse Trigger (named + timed)**: [One sentence. Example: "Within 3–5 moves of the first simplification, your accuracy drops."]
-- **Inferred assumption (from move selection)**: [Phrase as inference, not mind-reading. Example: "Your move choices suggest you treat simplified positions as lower-risk and stop checking forcing replies."]
+Why I'm Confident in This Diagnosis:
+[Explain what data point ruled out alternative explanations]
 
 ---
 
-## 🔁 The Failure Loop
+YOUR PATTERN
 
-```
-[Trigger] → [False assumption] → [Behavior change] → [Opponent action] → [Result]
-```
+Based on these games:
+- Type: [Brief profile—are they a calculator who burns out? A risk-avoider who draws wins?]
+- When it breaks down: [Specific trigger with timing, e.g., "Within 3-5 moves after material comes off"]
+- The underlying assumption: [What their move choices suggest they believe, phrased as inference]
 
-This loop repeats regardless of opening, color, or time control.
-
----
-
-## 🧪 Evidence Breakdown
-
-**Blunders by Context:**
-[Reference specific numbers. Highlight the KEY insight.]
-
-**Phase Performance:**
-[Interpret PPI. Remember: the phase isn't the cause, it's where the cause shows up.]
-
-**Opening Outcomes:**
-[If openings are NOT the problem, say clearly: "Your openings are not the issue. You exit with an advantage and then throw it away."]
+The Failure Loop:
+[Trigger] leads to [False assumption] leads to [Behavior change] leads to [Opponent's response] leads to [Result]
 
 ---
 
-## 🎛 Confidence Calibration (Read Before Recommendations)
+THE EVIDENCE
 
-**Confidence level:** {confidence}
+Blunder Patterns:
+[Key insight from context analysis—what's the story the numbers tell?]
+
+Phase Performance:
+[Interpret the CPL/PPI numbers. Remember: the phase is where it shows up, not the cause.]
+
+Opening Outcomes:
+[If openings are fine, say so clearly: "Your openings aren't the problem—you're leaving the opening with an advantage and then giving it back."]
+
+---
+
+CONFIDENCE CHECK
+
+{confidence}
 {confidence_note}
 
-[If confidence is LOW: explicitly say which conclusions are strong vs tentative.]
+[If confidence is low, state which conclusions are solid vs. tentative]
 
 ---
 
-## 🚫 What NOT to Work On (Ignore This)
+WHAT TO IGNORE
 
-[Explicitly tell them what to SKIP. This is psychologically powerful.]
+[This is important. Tell them explicitly what NOT to work on.]
 
-- **Don't** [Area to ignore] — [Why it doesn't matter for them right now]
-- **Don't** [Area to ignore] — [Why it's not their bottleneck]
-
----
-
-## 🎯 The ONE Rule (If You Remember Nothing Else)
-
-> **[State the behavioral rule in a blockquote. MUST specifically target: {one_rule_context}]**
-
-**Context Requirement:** This rule MUST apply specifically in {one_rule_context} where {dominant_error_pct:.0f}% of your rating loss occurs.
-
-**Why This Works (Psychologically):**
-[Explain WHY this rule changes behavior at the cognitive level. Use concepts like: attention narrowing, threat scanning, loss aversion, premature closure, working memory limits.]
+- Don't worry about [area] — [why it's not the bottleneck right now]
+- Skip [area] for now — [why]
 
 ---
 
-## ⏱ Do This During the Game (5 seconds)
+THE ONE RULE
 
-[IMPORTANT: This check must be DERIVED from the diagnosed root cause, not generic.]
-[If root cause is ENDGAME_VIGILANCE_DECAY → check must be endgame-specific]
-[If root cause is PREMATURE_CLOSURE → check must trigger on eval ≥+1.5]
+If you remember nothing else from this report:
 
-In {one_rule_context}, before every move, ask:
-1) **[Diagnosis-specific question #1]**
-2) **[Diagnosis-specific question #2]**
+[State a specific, binary rule that applies in {one_rule_context}. It should be something they can check yes/no during a game.]
 
-Then apply the ONE Rule.
+Why this works: [Brief explanation of the psychological mechanism—1-2 sentences]
 
 ---
 
-## ❌ Things You Must STOP Doing
+THE 5-SECOND CHECK
 
-1. **STOP** [Negative constraint #1]
-   - Why: [Brief explanation tied to data]
+In {one_rule_context}, before every move:
+1. [First question—must be specific to the diagnosed root cause]
+2. [Second question]
 
-2. **STOP** [Negative constraint #2]
-   - Why: [Brief explanation tied to data]
-
----
-
-## 🛠 Secondary Adjustments (Only if they reinforce the ONE Rule)
-
-[IMPORTANT: These are not new domains. Each adjustment must directly support the ONE Rule and the root cause. If it cannot be explained as reinforcement, omit it.]
-
-**1. [Adjustment Name]**
-- What to do: [Specific action]
-- Why it matters: [Cite the data point]
-- Target metric: [Current] → [Target]
-
-**2. [Adjustment Name]** (only if data supports)
-- What to do: [Specific action]
-- Why it matters: [Cite the data point]
-- Target metric: [Current] → [Target]
+Then apply the rule above.
 
 ---
 
-## 📈 Expected Impact (Mechanically Derived)
+THINGS TO STOP
 
-**Impact Calculation (REQUIRED — do not invent numbers):**
-- Recoverable games per {total_games} analyzed: {recoverable_games}
-- Points per recovered game at this rating level: ~{points_per_game}
-- **Estimated rating gain: {recoverable_games} × {points_per_game} = ~{recoverable_games * points_per_game} points**
+1. Stop [specific behavior]
+   Because: [brief link to data]
 
-**Conditional Statement (REQUIRED):**
-"If you apply the ONE Rule consistently over the next ~50 games, the expected gain is +{int(recoverable_games * points_per_game * 0.6)} to +{recoverable_games * points_per_game} points, conditional on {int(60 + (total_games / 5))}% compliance."
-
-**Confidence: {confidence.lower()}** — {confidence_note}
-
-This improvement comes without changing openings, tactics training volume, or time control.
+2. Stop [specific behavior]
+   Because: [brief link to data]
 
 ---
 
-## ✅ One-Sentence Summary
+SUPPORTING ADJUSTMENTS
 
-[A punchy, memorable summary that captures the essence. This should be something they can repeat to themselves during a game.]
+[Only include if they directly support the main rule. Otherwise, skip this section.]
 
-**If you remember only ONE thing, remember this:**
-> [Restate the core insight in the most memorable way possible]
+1. [Adjustment name]
+   What to do: [Specific action]
+   Current: [stat] — Target: [stat]
 
-══════════════════════════════════════════════════════════════════════════════
-TONE REQUIREMENTS (calibrated to severity)
-══════════════════════════════════════════════════════════════════════════════
+---
 
-Current severity: {severity}
+EXPECTED IMPROVEMENT
 
-{"- Be blunt and direct. Use plain language; avoid theatrics." if severity == "CRITICAL" else "- Be firm but constructive. Keep it tight and specific." if severity == "SIGNIFICANT" else "- Be calm and corrective. Keep it concise and evidence-led."}
+If you follow the one rule consistently over your next 50 games:
 
-Style constraints:
-- Use metaphors sparingly (max 1 per section). Prefer direct, analytical phrasing.
-- Avoid repeating the same stats (counts/percentages) in multiple sections.
+- Recoverable games: {recoverable_games}
+- Points per recovered game at your rating: ~{points_per_game}
+- Expected gain: approximately {recoverable_games * points_per_game} points
+
+This assumes 60-70% compliance. The improvement comes without changing your openings or adding tactics drills.
+
+Confidence: {confidence.lower()}
+
+---
+
+ONE SENTENCE TO REMEMBER
+
+[A punchy, memorable line they can repeat to themselves during games]
+
+================================================================================
+TONE GUIDANCE
+================================================================================
+
+Severity: {severity}
+
+{"Be blunt. Don't soften the message. This is costing them real games." if severity == "CRITICAL" else "Be direct and constructive. Point clearly to the issue." if severity == "SIGNIFICANT" else "Be calm and factual. This is improvement territory, not crisis."}
 
 Sound like a coach who:
-- Has analyzed thousands of players
-- Knows exactly what's holding them back
+- Has seen this pattern hundreds of times
+- Knows exactly what to fix
 - Genuinely wants them to improve
-- Isn't afraid to be direct
+- Doesn't waste words on pleasantries
+- Gives specific advice, not generic platitudes
 
-══════════════════════════════════════════════════════════════════════════════
-QUALITY CHECK (verify before responding — ALL MUST PASS)
-══════════════════════════════════════════════════════════════════════════════
+Do NOT:
+- Use phrases like "calculate more," "be patient," "study endgames," "practice tactics"
+- Repeat the same numbers in multiple sections
+- Sound like a computer generating a report
+- Include anything that reads like a template
 
-DIAGNOSTIC RIGOR:
-□ Is my root cause from the valid taxonomy: {valid_diagnoses_str}? If no, REWRITE.
-□ Did I include Diagnosis Justification explaining why alternatives were rejected? If no, ADD IT.
-□ Would a second coach reach the SAME diagnosis from this data? If uncertain, STRENGTHEN REASONING.
-□ Does the root cause explain ALL manifestations? If some don't fit, WRONG DIAGNOSIS.
+================================================================================
+FINAL CHECK
+================================================================================
 
-ONE RULE COMPLIANCE:
-□ Does the ONE Rule specifically target {one_rule_context}? If no, REWRITE.
-□ Is the rule mechanically checkable (yes/no) during a game? If no, MAKE IT BINARY.
-□ Is the 5-second check derived from the diagnosed root cause, not generic? If generic, CUSTOMIZE.
-
-IMPACT DERIVATION:
-□ Did I use the formula: {recoverable_games} × {points_per_game} = ~{recoverable_games * points_per_game} points? If no, FIX.
-□ Did I include conditional compliance statement? If no, ADD IT.
-
-SECOND COACH TEST:
-□ Could a different elite coach, seeing only this data, produce a contradictory diagnosis? If YES, my diagnosis is underspecified. TIGHTEN IT.
+Before responding, verify:
+- Is the root cause from the valid taxonomy?
+- Does the one rule specifically target {one_rule_context}?
+- Would a different experienced coach reach the same conclusion from this data?
+- Does it read like a human coach wrote it?
 
 """
 
@@ -587,10 +533,7 @@ def _format_openings_table(openings: Dict[str, Dict]) -> str:
     
     sorted_openings = sorted(filtered.items(), key=lambda x: x[1]['games'], reverse=True)[:5]
     
-    lines = ["┌────────────────────────────────┬───────┬──────────────┬──────────┐",
-             "│ Opening                        │ Games │ Avg Eval @15 │ Win Rate │",
-             "├────────────────────────────────┼───────┼──────────────┼──────────┤"]
-    
+    lines = []
     for name, data in sorted_openings:
         games = data['games']
         wins = data['wins']
@@ -604,11 +547,9 @@ def _format_openings_table(openings: Dict[str, Dict]) -> str:
         # Truncate opening name if too long
         display_name = name[:30] if len(name) > 30 else name
         
-        lines.append(f"│ {display_name:<30} │ {games:>5} │ {eval_str:>12} │ {win_rate:>7.0f}% │")
+        lines.append(f"- {display_name}: {games} games, {win_rate:.0f}% wins, avg eval {eval_str}")
     
-    lines.append("└────────────────────────────────┴───────┴──────────────┴──────────┘")
-    
-    return '\n'.join(lines)
+    return '\n'.join(lines) if lines else "No significant opening data"
 
 
 def _format_opening_repertoire(weak_openings: list, strong_openings: list) -> str:
@@ -616,20 +557,20 @@ def _format_opening_repertoire(weak_openings: list, strong_openings: list) -> st
     lines = []
     
     if weak_openings:
-        lines.append("❌ Weak openings (<40% win rate, 3+ games):")
+        lines.append("Underperforming openings (below 40% win rate, 3+ games):")
         for opening in weak_openings:
-            lines.append(f"  • {opening['name']}: {opening['games']} games, {opening['win_rate']:.0f}% win rate")
+            lines.append(f"  - {opening['name']}: {opening['games']} games, {opening['win_rate']:.0f}% win rate")
     else:
-        lines.append("✓ No significantly weak openings detected")
+        lines.append("No significantly weak openings detected")
     
     lines.append("")
     
     if strong_openings:
-        lines.append("✅ Strong openings (≥60% win rate, 3+ games):")
+        lines.append("Strong openings (60%+ win rate, 3+ games):")
         for opening in strong_openings:
-            lines.append(f"  • {opening['name']}: {opening['games']} games, {opening['win_rate']:.0f}% win rate")
+            lines.append(f"  - {opening['name']}: {opening['games']} games, {opening['win_rate']:.0f}% win rate")
     else:
-        lines.append("• No standout strong openings detected")
+        lines.append("No standout strong openings detected")
     
     return '\n'.join(lines)
 
@@ -639,14 +580,12 @@ def _format_opponent_analysis(opponent_by_strength: dict) -> str:
     if not opponent_by_strength:
         return "No opponent rating data available"
     
-    lines = ["┌───────────────────┬───────┬──────────┬──────────┐",
-             "│ Opponent Level    │ Games │ Win Rate │ Analysis │",
-             "├───────────────────┼───────┼──────────┼──────────┤"]
+    lines = []
     
     labels = {
-        'lower_rated': 'Lower (-100+)',
-        'similar_rated': 'Similar (±100)',
-        'higher_rated': 'Higher (+100+)',
+        'lower_rated': 'Lower rated (-100+)',
+        'similar_rated': 'Similar rated (+/-100)',
+        'higher_rated': 'Higher rated (+100+)',
     }
     
     for key, label in labels.items():
@@ -656,18 +595,16 @@ def _format_opponent_analysis(opponent_by_strength: dict) -> str:
         
         # Analysis based on expected performance
         if key == 'lower_rated':
-            expected = 70  # Should win most vs weaker
-            analysis = "🟢 Good" if win_rate >= expected else "🔴 Leaking" if games >= 5 else "—"
+            expected = 70
+            note = "solid" if win_rate >= expected else "leaking points here" if games >= 5 else ""
         elif key == 'similar_rated':
-            expected = 50  # Should be around 50%
-            analysis = "🟢 OK" if 40 <= win_rate <= 60 else "🟡 Check" if games >= 5 else "—"
-        else:  # higher_rated
-            expected = 30  # Lower expected vs stronger
-            analysis = "🟢 Punching up" if win_rate >= expected else "🟡 Expected" if games >= 5 else "—"
+            expected = 50
+            note = "fine" if 40 <= win_rate <= 60 else "check this" if games >= 5 else ""
+        else:
+            expected = 30
+            note = "punching up well" if win_rate >= expected else "expected range" if games >= 5 else ""
         
-        lines.append(f"│ {label:<17} │ {games:>5} │ {win_rate:>7.0f}% │ {analysis:<8} │")
-    
-    lines.append("└───────────────────┴───────┴──────────┴──────────┘")
+        lines.append(f"- {label}: {games} games, {win_rate:.0f}% wins{' — ' + note if note else ''}")
     
     return '\n'.join(lines)
 
@@ -764,7 +701,7 @@ def build_single_game_coaching_prompt(
     blunders_str = ""
     if blunders:
         for b in blunders:
-            blunders_str += f"• Move {b['move']} ({b['phase']}): {b['san']} lost {b['cp_loss']}cp (best: {b['best']})\n"
+            blunders_str += f"- Move {b['move']} ({b['phase']}): {b['san']} lost {b['cp_loss']}cp (better: {b['best']})\n"
     else:
         blunders_str = "None"
     
@@ -773,55 +710,60 @@ def build_single_game_coaching_prompt(
     if eval_swings:
         for s in sorted(eval_swings, key=lambda x: abs(x['swing']), reverse=True)[:5]:
             direction = "lost" if s['swing'] > 0 else "gained"
-            swings_str += f"• Move {s['move']} ({s['phase']}): {s['san']} {direction} {abs(s['swing'])}cp\n"
+            swings_str += f"- Move {s['move']} ({s['phase']}): {s['san']} {direction} {abs(s['swing'])}cp\n"
     else:
         swings_str = "None significant"
     
     # Build prompt
     data_block = f"""
-═══════════════════════════════════════════════════════════════
+================================================================================
 SINGLE GAME ANALYSIS
-═══════════════════════════════════════════════════════════════
+================================================================================
 
 Opening: {opening}
 Player: {player_color.title()} ({player_rating or 'Unrated'})
 Result: {result} ({'Win' if is_win else 'Loss' if is_loss else 'Draw'})
 
-Had winning position (≥+1.5): {'Yes' if had_winning else 'No'}
-Had losing position (≤-1.5): {'Yes' if had_losing else 'No'}
+Had winning position (+1.5 or better): {'Yes' if had_winning else 'No'}
+Had losing position (-1.5 or worse): {'Yes' if had_losing else 'No'}
 
 PHASE CPL:
-• Opening: {avg_cpl['opening']:.0f}
-• Middlegame: {avg_cpl['middlegame']:.0f}
-• Endgame: {avg_cpl['endgame']:.0f}
+- Opening: {avg_cpl['opening']:.0f}
+- Middlegame: {avg_cpl['middlegame']:.0f}
+- Endgame: {avg_cpl['endgame']:.0f}
 
-BLUNDERS (≥200cp loss):
+BLUNDERS (200+cp loss):
 {blunders_str}
 
 BIGGEST EVAL SWINGS:
 {swings_str}
-═══════════════════════════════════════════════════════════════
+================================================================================
 """
 
     instruction = """
-You are a chess coach reviewing a single game. Provide focused, actionable feedback.
+You are a chess coach reviewing one of your student's games. Give them honest, specific feedback.
 
-RULES:
-1. Identify the SINGLE MOVE or DECISION that most determined the outcome
-2. Explain WHY that error happened (cognitive mechanism, not just "miscalculation")
-3. Give ONE specific lesson to take away from this game
-4. Be direct and specific — no generic advice
+Guidelines:
+1. Identify the single move or decision that most determined the outcome
+2. Explain WHY that error happened—what were they thinking, what did they miss
+3. Give ONE specific lesson from this game
+4. Be direct. If they played well, say so. If they threw it away, say that too.
 
-OUTPUT STRUCTURE:
+Write naturally, as if talking to the player after the game.
 
-## What Decided This Game
-[One sentence identifying the turning point]
+---
 
-## Why It Happened  
-[The cognitive/behavioral error that led to this mistake]
+What Decided This Game
 
-## The Lesson
-[One specific, actionable takeaway]
+[One clear sentence identifying the turning point]
+
+Why It Happened
+
+[The mental or chess error that led to this—not just "missed the tactic" but why they missed it]
+
+The Lesson
+
+[One specific, actionable takeaway from this game]
 """
 
     return instruction + "\n" + data_block
@@ -851,9 +793,9 @@ def _format_openings_for_prompt(openings: Dict[str, Dict]) -> str:
         # Calculate eval after opening if available
         eval_sum = data.get('eval_after_opening_sum', 0)
         eval_count = data.get('eval_after_opening_count', 0)
-        eval_str = f", avg eval@15: {eval_sum/eval_count:+.0f}" if eval_count > 0 else ""
+        eval_str = f", avg eval at move 15: {eval_sum/eval_count:+.0f}" if eval_count > 0 else ""
         
-        lines.append(f"• {name}: {games}g ({wins}W-{losses}L), CPL: {avg_cpl:.0f}, {blunders} blunders{eval_str}")
+        lines.append(f"- {name}: {games} games ({wins}W-{losses}L), CPL: {avg_cpl:.0f}, {blunders} blunders{eval_str}")
     
     return '\n'.join(lines)
 
@@ -862,34 +804,28 @@ def _format_openings_for_prompt(openings: Dict[str, Dict]) -> str:
 # SYSTEM PROMPT
 # =============================================================================
 
-AI_COACH_SYSTEM_PROMPT = """You are an elite chess performance coach who produces premium diagnostic reports with the depth of a sports psychologist.
+AI_COACH_SYSTEM_PROMPT = """You are a veteran chess coach who's spent decades working with players at all levels. You speak plainly, get to the point, and give advice that actually helps.
 
-Your role is NOT to print statistics. Your role is to:
-1. Identify the ONE ROOT CAUSE (cognitive/behavioral failure) — NOT a phase or symptom
-2. Distinguish root cause from MANIFESTATIONS (where it shows up)
-3. Profile the player's cognitive style (risk-averse, overconfident, etc.)
-4. Explain WHY this pattern occurs (attention, working memory, threat scanning failure)
-5. Provide BEHAVIORAL rules AND negative constraints ("STOP doing X")
-6. Identify the exact TRIGGER that causes collapse
-7. Calibrate confidence to sample size — don't overclaim on small data
-8. Project expected rating gains with honest uncertainty
+Your job is NOT to print statistics. Your job is to:
+1. Identify the ONE root cause—a mental habit or decision pattern, not a phase of the game
+2. Separate root cause from symptoms (where it shows up)
+3. Profile how they think during games
+4. Explain WHY this pattern happens
+5. Give them rules to follow AND things to STOP doing
+6. Find the exact moment things fall apart
+7. Be honest about confidence when sample size is small
+8. Estimate realistic improvement
 
-Communication constraints:
-- Prefer direct, analytical language over drama.
-- Avoid padding: do not repeat the same numbers (counts/percentages) across multiple sections.
-- When describing "beliefs" or "assumptions", phrase them as inference from behavior (e.g., "Your move choices suggest...") not mind-reading.
+You sound like a coach who:
+- Has seen this problem many times before
+- Knows exactly what to fix
+- Actually wants them to improve
+- Doesn't waste time on pleasantries
+- Gives specific advice, never generic platitudes
 
-You sound like a $500/hour executive coach who:
-- Has analyzed thousands of chess players
-- Cuts through noise to find the real mental issue
-- Is direct, specific, and calibrates intensity to severity
-- Explains the psychology behind the fix
-- Tells players what NOT to work on (huge psychological value)
-- Never says generic things like "study tactics" or "practice more"
-
-FORBIDDEN PHRASES (never use these):
+Never say:
 - "Calculate more carefully"
-- "Study endgames"  
+- "Study endgames"
 - "Focus on tactics"
 - "Practice more"
 - "Be more patient"
@@ -897,7 +833,7 @@ FORBIDDEN PHRASES (never use these):
 - "Consider all options"
 - "Be more vigilant"
 
-These phrases are worthless. Always provide specific, testable behavioral rules AND negative constraints instead.
+These are useless. Give them something specific they can actually do.
 
-REMEMBER: The phase isn't the cause. The mental process is the cause. The phase is just where it shows up.
+Remember: The phase of the game isn't the cause. The mental pattern is the cause. The phase is just where it shows up.
 """
