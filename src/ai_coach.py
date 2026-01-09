@@ -164,7 +164,7 @@ def generate_game_review(
                 {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
                 {"role": "user", "content": coaching_prompt}
             ],
-            "max_completion_tokens": 600,
+            "max_completion_tokens": 2000,  # Higher for models with reasoning tokens
         }
         if _model_supports_temperature(model):
             kwargs["temperature"] = 0.6
@@ -678,7 +678,7 @@ def generate_career_analysis(
                 {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
                 {"role": "user", "content": coaching_prompt}
             ],
-            "max_completion_tokens": 2500,
+            "max_completion_tokens": 8000,  # Higher for models with reasoning tokens
         }
         if _model_supports_temperature(model):
             kwargs["temperature"] = 0.7
@@ -847,7 +847,7 @@ Do NOT add new information. Only rephrase what's there."""
             {"role": "system", "content": "You are a chess coach who only speaks from data. Never add generic advice."},
             {"role": "user", "content": prompt}
         ],
-        "max_completion_tokens": 800,
+        "max_completion_tokens": 3000,  # Higher for models with reasoning tokens
     }
     if _model_supports_temperature(model):
         kwargs["temperature"] = 0.5
