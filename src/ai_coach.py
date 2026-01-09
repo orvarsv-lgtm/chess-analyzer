@@ -601,21 +601,21 @@ def generate_career_analysis(
     Returns:
         Dict with career analysis sections
     """
-    # Aggregate statistics across all games
-    stats = _aggregate_career_stats(all_games)
-    
-    # Merge in additional computed data from Analysis tab if available
-    if aggregated_data:
-        stats = _merge_aggregated_data_into_stats(stats, aggregated_data, all_games)
-    
-    # Import the coaching prompt builder
-    from src.coaching_prompt import (
-        build_career_coaching_prompt,
-        AI_COACH_SYSTEM_PROMPT,
-    )
-    
-    # Call GPT-4 for diagnostic reasoning, including prompt construction
     try:
+        # Aggregate statistics across all games
+        stats = _aggregate_career_stats(all_games)
+        
+        # Merge in additional computed data from Analysis tab if available
+        if aggregated_data:
+            stats = _merge_aggregated_data_into_stats(stats, aggregated_data, all_games)
+        
+        # Import the coaching prompt builder
+        from src.coaching_prompt import (
+            build_career_coaching_prompt,
+            AI_COACH_SYSTEM_PROMPT,
+        )
+        
+        # Build prompt and call GPT-4 for diagnostic reasoning
         coaching_prompt = build_career_coaching_prompt(
             stats=stats,
             player_name=player_name,
@@ -639,11 +639,12 @@ def generate_career_analysis(
         cost_cents = int((tokens_used / 1000) * 3)  # ~$0.03 per 1k tokens
 
     except Exception:
-        # Fallback to data-driven analysis if prompt construction or LLM fails
+        # Fallback to data-driven analysis if ANY step above fails (including KeyError like 'losss')
         from src.data_driven_coach import generate_data_driven_analysis, format_analysis_for_display
-        
+
+        fallback_stats = stats if 'stats' in locals() else _empty_career_stats()
         fallback_result = generate_data_driven_analysis(
-            stats=stats,
+            stats=fallback_stats,
             games=all_games,
             player_name=player_name,
             player_rating=player_rating,
