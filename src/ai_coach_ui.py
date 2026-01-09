@@ -7,6 +7,8 @@ Premium feature integration for GPT-powered coaching insights.
 import streamlit as st
 from typing import Any, Dict, List, Optional
 from datetime import datetime
+import io
+import re
 
 from src.ai_coach import (
     generate_game_review,
@@ -17,6 +19,113 @@ from src.ai_coach import (
     AICoachResponse,
 )
 
+
+def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, Any]) -> bytes:
+    """
+    Generate a PDF report from the AI Coach analysis.
+    
+    Args:
+        analysis_text: The markdown analysis text
+        player_name: Player's username
+        stats: Statistics dictionary
+        
+    Returns:
+        PDF file as bytes
+    """
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        # Return None if fpdf not installed
+        return None
+    
+    class PDF(FPDF):
+        def header(self):
+            self.set_font('Helvetica', 'B', 16)
+            self.cell(0, 10, 'Chess Coach Analysis Report', align='C', new_x='LMARGIN', new_y='NEXT')
+            self.ln(5)
+        
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Helvetica', 'I', 8)
+            self.cell(0, 10, f'Page {self.page_no()}', align='C')
+    
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # Title section
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.cell(0, 10, f'Player: {player_name}', new_x='LMARGIN', new_y='NEXT')
+    pdf.set_font('Helvetica', '', 10)
+    pdf.cell(0, 6, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(5)
+    
+    # Key stats
+    pdf.set_font('Helvetica', 'B', 12)
+    pdf.cell(0, 8, 'Key Statistics', new_x='LMARGIN', new_y='NEXT')
+    pdf.set_font('Helvetica', '', 10)
+    
+    total_games = stats.get('total_games', 0)
+    win_rate = stats.get('win_rate', 0)
+    conversion_rate = stats.get('conversion_rate', 0)
+    blunder_rate = stats.get('blunder_rate', 0)
+    
+    pdf.cell(0, 6, f'Games Analyzed: {total_games}', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 6, f'Win Rate: {win_rate:.0%}', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 6, f'Conversion Rate: {conversion_rate:.0f}%', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 6, f'Blunders per 100 moves: {blunder_rate:.1f}', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(8)
+    
+    # Analysis section
+    pdf.set_font('Helvetica', 'B', 12)
+    pdf.cell(0, 8, 'Analysis', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(3)
+    
+    # Process markdown text for PDF
+    # Remove markdown formatting for cleaner PDF
+    text = analysis_text
+    
+    # Split into lines and process
+    lines = text.split('\n')
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            pdf.ln(3)
+            continue
+        
+        # Handle headers
+        if line.startswith('## '):
+            pdf.ln(5)
+            pdf.set_font('Helvetica', 'B', 12)
+            header_text = line[3:].strip()
+            # Remove any remaining markdown
+            header_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', header_text)
+            header_text = re.sub(r'\*([^*]+)\*', r'\1', header_text)
+            pdf.cell(0, 8, header_text, new_x='LMARGIN', new_y='NEXT')
+            pdf.set_font('Helvetica', '', 10)
+            continue
+        
+        # Handle blockquotes (the ONE RULE)
+        if line.startswith('>'):
+            pdf.set_font('Helvetica', 'BI', 10)
+            quote_text = line[1:].strip()
+            quote_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', quote_text)
+            quote_text = re.sub(r'\*([^*]+)\*', r'\1', quote_text)
+            pdf.multi_cell(0, 6, f'  {quote_text}')
+            pdf.set_font('Helvetica', '', 10)
+            continue
+        
+        # Regular text - remove markdown formatting
+        clean_line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)  # Bold
+        clean_line = re.sub(r'\*([^*]+)\*', r'\1', clean_line)  # Italic
+        clean_line = re.sub(r'`([^`]+)`', r'\1', clean_line)  # Code
+        
+        pdf.set_font('Helvetica', '', 10)
+        pdf.multi_cell(0, 6, clean_line)
+    
+    # Return PDF as bytes
+    return pdf.output()
 
 def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
     """
@@ -271,6 +380,22 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     # Show the main analysis
     st.markdown("### 📊 Your Analysis")
     st.markdown(result.get('analysis', 'No analysis available'))
+    
+    # PDF Download button
+    analysis_text = result.get('analysis', '')
+    if analysis_text:
+        player_name = stats.get('player_name', 'Player')
+        pdf_bytes = _generate_pdf_report(analysis_text, player_name, stats)
+        if pdf_bytes:
+            st.download_button(
+                label="📥 Download Report as PDF",
+                data=pdf_bytes,
+                file_name=f"chess_coach_report_{player_name}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        else:
+            st.caption("_PDF download requires 'fpdf2' package. Install with: pip install fpdf2_")
     
     # Show data sources used
     data_sources = result.get('data_sources', [])
