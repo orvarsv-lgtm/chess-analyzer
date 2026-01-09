@@ -1,7 +1,7 @@
 """
 AI Coach Tab UI for Streamlit App
 
-Premium feature integration for GPT-4 powered coaching insights.
+Premium feature integration for GPT-powered coaching insights.
 """
 
 import streamlit as st
@@ -26,7 +26,7 @@ def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
         aggregated: Analyzed games data
     """
     st.header("🤖 AI Chess Coach")
-    st.caption("GPT-4 powered personalized coaching insights")
+    st.caption("GPT-powered personalized coaching insights")
     
     # Check if user has analyzed games
     games = aggregated.get("games", [])
@@ -222,7 +222,7 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str, a
                     # Cache the result
                     st.session_state[cache_key] = result
                     
-                    # Note: Now using GPT-4 for diagnostic reasoning
+                    # Note: Using the configured model for diagnostic reasoning
                     tokens = result.get('tokens_used', 0)
                     cost = result.get('cost_cents', 0)
                     if tokens > 0:
@@ -369,7 +369,7 @@ def _render_upgrade_prompt():
     st.markdown("""
     ### Why upgrade?
     
-    Get personalized coaching insights powered by GPT-4:
+    Get personalized coaching insights powered by GPT:
     
     - 🎯 **Natural language game reviews** - Understand exactly what went wrong and why
     - 📈 **Personalized training plans** - AI analyzes your weaknesses and suggests daily exercises

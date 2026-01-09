@@ -44,7 +44,10 @@ def _cache_key_for_games(games: List[dict]) -> str:
 
 
 def load_cached_puzzles(games: List[dict], max_age_hours: int = 24) -> List[Puzzle] | None:
-    """Load cached puzzles if available and fresh."""
+    """Load cached puzzles if available.
+
+    If max_age_hours <= 0, the cache never expires.
+    """
     try:
         cache_key = _cache_key_for_games(games)
         cache_file = _cache_dir() / f"puzzles_{cache_key}.json"
@@ -52,11 +55,12 @@ def load_cached_puzzles(games: List[dict], max_age_hours: int = 24) -> List[Puzz
         if not cache_file.exists():
             return None
         
-        # Check age
-        mtime = cache_file.stat().st_mtime
-        age_hours = (time.time() - mtime) / 3600
-        if age_hours > max_age_hours:
-            return None
+        # Check age (unless configured to never expire)
+        if int(max_age_hours) > 0:
+            mtime = cache_file.stat().st_mtime
+            age_hours = (time.time() - mtime) / 3600
+            if age_hours > max_age_hours:
+                return None
         
         with cache_file.open("r", encoding="utf-8") as f:
             data = json.load(f)

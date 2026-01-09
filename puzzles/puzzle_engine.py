@@ -300,6 +300,27 @@ def generate_puzzle_explanation(
     Returns:
         A descriptive explanation string
     """
+    def _ensure_check_language(explanation: str) -> str:
+        """Ensure the explanation mentions check/checkmate when applicable."""
+        try:
+            after = board.copy(stack=False)
+            after.push(best_move)
+        except Exception:
+            return explanation
+
+        lower = (explanation or "").lower()
+        if after.is_checkmate():
+            if "checkmate" in lower:
+                return explanation
+            prefix = "This is checkmate. "
+            return prefix + (explanation or "").lstrip()
+        if after.is_check():
+            if "check" in lower:
+                return explanation
+            prefix = "This gives check. "
+            return prefix + (explanation or "").lstrip()
+        return explanation
+
     # Try the new Stockfish-based explainer first (better quality)
     if USE_STOCKFISH_EXPLAINER:
         try:
@@ -310,18 +331,19 @@ def generate_puzzle_explanation(
                 phase=phase,
             )
             if explanation and explanation.strip():
-                return explanation
+                return _ensure_check_language(explanation)
         except Exception:
             pass  # Fall back to legacy explanation engine
     
     # Fallback to the legacy explanation engine
-    return generate_explanation_string(
+    explanation = generate_explanation_string(
         board=board,
         best_move=best_move,
         eval_loss_cp=eval_loss_cp,
         puzzle_type=puzzle_type,
         phase=phase,
     )
+    return _ensure_check_language(explanation)
 
 
 def generate_puzzle_explanation_detailed(

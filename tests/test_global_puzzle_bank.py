@@ -1,12 +1,14 @@
 import os
+import chess
 from puzzles.puzzle_types import Puzzle, Difficulty, PuzzleType
 from puzzles.global_puzzle_store import save_puzzles_to_global_bank, load_global_puzzles
 
 def test_global_puzzle_bank_roundtrip(tmp_path):
+    os.environ["PUZZLE_DATA_DIR"] = str(tmp_path)
     # Setup: create a dummy puzzle
     p = Puzzle(
         puzzle_id="test_1",
-        fen="8/8/8/8/8/8/8/8 w - - 0 1",
+        fen=chess.STARTING_FEN,
         side_to_move="white",
         best_move_san="e4",
         played_move_san="d4",

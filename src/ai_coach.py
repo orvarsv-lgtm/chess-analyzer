@@ -1,7 +1,7 @@
 """
-AI Coach - GPT-4 Powered Chess Coaching Insights
+AI Coach - GPT Powered Chess Coaching Insights
 
-Premium feature that provides natural language coaching using OpenAI's GPT-4.
+Premium feature that provides natural language coaching using OpenAI's GPT models.
 Analyzes games, positions, and patterns to give personalized improvement advice.
 
 Revenue Model:
@@ -10,7 +10,7 @@ Revenue Model:
 - Serious ($19.99/mo): 5 AI reviews/month
 - Coach ($49.99/mo): Unlimited AI reviews
 
-Cost: ~$0.03-$0.05 per game review (GPT-4 Turbo API)
+Cost: Depends on the configured model and output length.
 """
 
 from __future__ import annotations
@@ -48,6 +48,32 @@ def _get_api_key():
 
 # API client will be initialized lazily
 _openai_client = None
+
+
+def _ai_coach_model() -> str:
+    """Primary model for AI Coach reports.
+
+    Override with env var AI_COACH_MODEL.
+    """
+    return (os.getenv("AI_COACH_MODEL") or "gpt-5-mini").strip()
+
+
+def _estimate_cost_cents(tokens_used: int) -> int:
+    """Best-effort cost estimate.
+
+    To avoid hard-coding pricing (which varies by model and can change), the rate is
+    configurable via AI_COACH_COST_PER_1K_TOKENS_CENTS. If unset/invalid, returns 0.
+    """
+    raw = (os.getenv("AI_COACH_COST_PER_1K_TOKENS_CENTS") or "").strip()
+    if not raw:
+        return 0
+    try:
+        rate = float(raw)
+    except ValueError:
+        return 0
+    if rate <= 0:
+        return 0
+    return int((tokens_used / 1000.0) * rate)
 
 
 def _get_openai_client():
@@ -91,7 +117,7 @@ def generate_game_review(
     """
     Generate AI coaching review for a single game.
     
-    Uses GPT-4 for diagnostic reasoning about what decided the game
+    Uses a GPT model for diagnostic reasoning about what decided the game
     and what behavioral change would help.
     
     Args:
@@ -111,12 +137,12 @@ def generate_game_review(
         player_rating=player_rating,
     )
     
-    # Call GPT-4 for diagnostic reasoning
+    # Call the model for diagnostic reasoning
     try:
         client = _get_openai_client()
         
         response = client.chat.completions.create(
-            model="gpt-4-turbo-preview",
+            model=_ai_coach_model(),
             messages=[
                 {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
                 {"role": "user", "content": coaching_prompt}
@@ -127,7 +153,7 @@ def generate_game_review(
         
         ai_analysis = response.choices[0].message.content
         tokens_used = response.usage.total_tokens
-        cost_cents = int((tokens_used / 1000) * 3)
+        cost_cents = _estimate_cost_cents(tokens_used)
         
         # Parse the structured response
         sections = _parse_game_coach_response(ai_analysis)
@@ -255,7 +281,7 @@ def generate_position_insight(
         best_move_san: Best move
         played_move_san: Move that was played
         phase: Game phase
-    
+                model=_ai_coach_model(),
     Returns:
         Short natural language explanation (2-3 sentences)
     """
@@ -459,7 +485,7 @@ def _format_performance_for_prompt(perf: Dict[str, Any]) -> str:
 
 
 def _parse_coach_response(content: str) -> Dict[str, Any]:
-    """Parse GPT-4 response into structured format."""
+    """Parse the model response into structured format."""
     
     parsed = {
         'summary': '',
@@ -585,7 +611,7 @@ def generate_career_analysis(
     """
     Generate comprehensive AI coaching analysis of player's entire game history.
     
-    This uses GPT-4 as a DIAGNOSTIC REASONING layer that interprets the data,
+    This uses a GPT model as a DIAGNOSTIC REASONING layer that interprets the data,
     identifies root causes, and provides behavioral interventions.
     
     The AI Coach is NOT a statistics printer — it's a coaching intelligence
@@ -615,7 +641,7 @@ def generate_career_analysis(
             AI_COACH_SYSTEM_PROMPT,
         )
         
-        # Build prompt and call GPT-4 for diagnostic reasoning
+        # Build prompt and call the model for diagnostic reasoning
         coaching_prompt = build_career_coaching_prompt(
             stats=stats,
             player_name=player_name,
@@ -625,7 +651,7 @@ def generate_career_analysis(
         client = _get_openai_client()
         
         response = client.chat.completions.create(
-            model="gpt-4-turbo-preview",
+            model=_ai_coach_model(),
             messages=[
                 {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
                 {"role": "user", "content": coaching_prompt}
@@ -636,7 +662,7 @@ def generate_career_analysis(
         
         analysis_text = response.choices[0].message.content
         tokens_used = response.usage.total_tokens
-        cost_cents = int((tokens_used / 1000) * 3)  # ~$0.03 per 1k tokens
+        cost_cents = _estimate_cost_cents(tokens_used)
 
     except Exception:
         # Fallback to data-driven analysis if ANY step above fails (including KeyError like 'losss')
@@ -728,9 +754,9 @@ def generate_career_analysis_with_llm(
     player_rating: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Generate AI analysis using GPT-4 for natural language polish.
+    Generate AI analysis using a GPT model for natural language polish.
     
-    This version uses the data-driven analysis as input to GPT-4,
+    This version uses the data-driven analysis as input to the configured model,
     which just polishes the prose (not generates new content).
     
     Use this for premium users who want more natural-sounding output.
@@ -748,7 +774,7 @@ def generate_career_analysis_with_llm(
         player_rating=player_rating,
     )
     
-    # Now use GPT-4 to polish the prose (NOT generate new content)
+    # Now use the model to polish the prose (NOT generate new content)
     prompt = f"""You are a chess coach. Below is a DATA-DRIVEN analysis of a player's games.
 
 Your job is to REWRITE this analysis in natural, conversational prose.
@@ -777,7 +803,7 @@ Rewrite the above analysis in a natural coaching voice. Start with the most impo
 Do NOT add new information. Only rephrase what's there."""
 
     response = client.chat.completions.create(
-        model="gpt-4-turbo-preview",
+        model=_ai_coach_model(),
         messages=[
             {"role": "system", "content": "You are a chess coach who only speaks from data. Never add generic advice."},
             {"role": "user", "content": prompt}
@@ -788,7 +814,7 @@ Do NOT add new information. Only rephrase what's there."""
     
     content = response.choices[0].message.content
     tokens_used = response.usage.total_tokens
-    cost_cents = int((tokens_used / 1000) * 3)
+    cost_cents = _estimate_cost_cents(tokens_used)
     
     return {
         'analysis': content,

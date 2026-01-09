@@ -2,7 +2,7 @@
 Coaching Prompt Engine - Elite Chess Coaching Prompts
 
 This module generates the prompts that turn raw chess analytics 
-into premium diagnostic coaching insights via GPT-4.
+into premium diagnostic coaching insights via GPT.
 
 The AI Coach produces executive-level performance reports that:
 - Distinguish ROOT CAUSE from MANIFESTATIONS

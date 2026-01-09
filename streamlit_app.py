@@ -13,6 +13,29 @@ import requests
 import streamlit as st
 import chess.pgn
 
+
+def _hydrate_env_from_streamlit_secrets() -> None:
+    """Copy selected Streamlit secrets into env vars.
+
+    Streamlit Community Cloud stores secrets in st.secrets, not necessarily as
+    process env vars. Our puzzle bank backend reads env vars so it can be used
+    from non-Streamlit modules.
+    """
+    try:
+        secrets = st.secrets
+    except Exception:
+        return
+
+    for k in ("PUZZLE_BANK_BACKEND", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
+        try:
+            if not os.getenv(k) and secrets.get(k):
+                os.environ[k] = str(secrets.get(k))
+        except Exception:
+            continue
+
+
+_hydrate_env_from_streamlit_secrets()
+
 from src.lichess_api import fetch_lichess_pgn
 from src.analytics import generate_coaching_report, CoachingSummary
 
@@ -1898,7 +1921,12 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         # Generate puzzles from analyzed games
         if "generated_puzzles" not in st.session_state:
             # Try loading from disk cache first
-            cached_puzzles = load_cached_puzzles(games, max_age_hours=24)
+            # Set PUZZLE_CACHE_MAX_AGE_HOURS=0 to make this cache never expire.
+            try:
+                cache_max_age_hours = int(os.getenv("PUZZLE_CACHE_MAX_AGE_HOURS", "24"))
+            except Exception:
+                cache_max_age_hours = 24
+            cached_puzzles = load_cached_puzzles(games, max_age_hours=cache_max_age_hours)
             
             if cached_puzzles:
                 st.session_state["generated_puzzles"] = cached_puzzles
@@ -2042,11 +2070,15 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     }
 
     # Save user's generated puzzles into the global bank (deduped).
+    # Avoid repeating the same save on every rerun.
     if source_mode == "My games":
-        try:
-            save_puzzles_to_global_bank(puzzles, source_user=focus_player)
-        except Exception:
-            pass
+        save_sig_key = "saved_global_puzzles_sig"
+        if st.session_state.get(save_sig_key) != games_sig:
+            try:
+                save_puzzles_to_global_bank(puzzles, source_user=focus_player)
+                st.session_state[save_sig_key] = games_sig
+            except Exception:
+                pass
 
     puzzle_defs = from_legacy_puzzles(filtered_puzzles, game_players=game_players)
     render_puzzle_trainer(puzzle_defs)
