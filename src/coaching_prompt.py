@@ -143,6 +143,78 @@ def build_career_coaching_prompt(
     in_winning_pct = (blunder_contexts.get('in_winning_position', 0) / total_blunders * 100) if total_blunders > 0 else 0
     endgame_pct = (blunder_phases.get('endgame', 0) / total_blunders * 100) if total_blunders > 0 else 0
     after_check_pct = (blunder_contexts.get('after_check', 0) / total_blunders * 100) if total_blunders > 0 else 0
+    time_trouble_pct = (blunder_contexts.get('time_trouble_likely', 0) / total_blunders * 100) if total_blunders > 0 else 0
+    
+    # === DIAGNOSTIC DECISION TREE (pre-computed) ===
+    # Determine the dominant error context (where most rating is lost)
+    rating_loss_breakdown = {
+        'endgame_collapses': endgame_collapses.get('estimated_points_lost', 0),
+        'blunders_in_winning': blunders_in_winning.get('estimated_points_lost', 0),
+        'missed_wins': missed_wins.get('estimated_points_lost', 0),
+    }
+    dominant_error_context = max(rating_loss_breakdown, key=rating_loss_breakdown.get)
+    dominant_error_pct = (rating_loss_breakdown[dominant_error_context] / total_rating_loss * 100) if total_rating_loss > 0 else 0
+    
+    # Determine valid diagnosis category based on data patterns
+    valid_diagnoses = []
+    diagnosis_reasoning = []
+    
+    # Rule 1: Endgame vigilance failure
+    if endgame_pct > 50 or (endgame_cpl > middlegame_cpl * 1.3 and endgame_pct > 30):
+        valid_diagnoses.append('ENDGAME_VIGILANCE_DECAY')
+        diagnosis_reasoning.append(f"Endgame blunders={endgame_pct:.0f}% of total, endgame CPL={endgame_cpl:.0f} vs middlegame CPL={middlegame_cpl:.0f}")
+    
+    # Rule 2: Post-capture recalculation failure
+    if after_capture_pct > 35:
+        valid_diagnoses.append('RECAPTURE_TUNNEL_VISION')
+        diagnosis_reasoning.append(f"After-capture blunders={after_capture_pct:.0f}% of total")
+    
+    # Rule 3: Complacency / premature relaxation
+    if in_winning_pct > 30 and conversion_rate < 60:
+        valid_diagnoses.append('PREMATURE_CLOSURE')
+        diagnosis_reasoning.append(f"Blunders in winning positions={in_winning_pct:.0f}%, conversion rate={conversion_rate:.0f}%")
+    
+    # Rule 4: Calculation fatigue (late-game accuracy drop)
+    if time_trouble_pct > 30 or (endgame_cpl > opening_cpl * 2 and endgame_pct > 40):
+        valid_diagnoses.append('CALCULATION_FATIGUE')
+        diagnosis_reasoning.append(f"Time trouble blunders={time_trouble_pct:.0f}%, endgame CPL={endgame_cpl:.0f} vs opening CPL={opening_cpl:.0f}")
+    
+    # Rule 5: Threat blindness (general vigilance)
+    if blunder_rate > 4.0 and after_capture_pct < 30 and endgame_pct < 40:
+        valid_diagnoses.append('THREAT_BLINDNESS')
+        diagnosis_reasoning.append(f"High blunder rate={blunder_rate:.1f}/100 moves, distributed across contexts")
+    
+    # Rule 6: Loss aversion / passivity (high draws, missed wins)
+    draw_rate = (draws / total_games * 100) if total_games > 0 else 0
+    if draw_rate > 20 or (missed_wins.get('count', 0) > winning_positions * 0.3 if winning_positions > 0 else False):
+        valid_diagnoses.append('LOSS_AVERSION_PARALYSIS')
+        diagnosis_reasoning.append(f"Draw rate={draw_rate:.0f}%, missed wins={missed_wins.get('count', 0)}")
+    
+    # If no strong signal, default to most common pattern
+    if not valid_diagnoses:
+        if endgame_pct >= max(after_capture_pct, in_winning_pct, time_trouble_pct):
+            valid_diagnoses.append('ENDGAME_VIGILANCE_DECAY')
+        elif in_winning_pct >= max(after_capture_pct, endgame_pct, time_trouble_pct):
+            valid_diagnoses.append('PREMATURE_CLOSURE')
+        else:
+            valid_diagnoses.append('THREAT_BLINDNESS')
+        diagnosis_reasoning.append("No dominant pattern; defaulting to highest blunder context")
+    
+    # Format for prompt
+    valid_diagnoses_str = ', '.join(valid_diagnoses)
+    diagnosis_reasoning_str = '; '.join(diagnosis_reasoning)
+    
+    # Determine ONE Rule context requirement
+    if dominant_error_context == 'endgame_collapses':
+        one_rule_context = "ENDGAME (moves 40+)"
+    elif dominant_error_context == 'blunders_in_winning':  
+        one_rule_context = "WINNING POSITIONS (eval ≥+1.5)"
+    else:
+        one_rule_context = "CONVERSION OPPORTUNITIES"
+    
+    # Calculate recoverable games for impact estimation
+    recoverable_games = games_thrown
+    points_per_game = 10 if (player_rating or 1500) < 1500 else 7 if (player_rating or 1500) < 2000 else 5
     
     # Build the data block
     data_block = f"""
@@ -223,6 +295,15 @@ PLAYER DATA: {player_name} ({player_rating or 'Unrated'})
 • Primary weakness identified: {deterministic_weakness or 'None flagged'}
 • Strengths: {', '.join(deterministic_strengths) if deterministic_strengths else 'None flagged'}
 
+🔬 DIAGNOSTIC CONSTRAINTS (BINDING — YOU MUST FOLLOW THESE)
+┌────────────────────────────────────────────────────────────────────────────┐
+│ VALID DIAGNOSIS CATEGORIES: {valid_diagnoses_str:<43} │
+│ REASONING: {diagnosis_reasoning_str[:65]:<65} │
+│ DOMINANT ERROR CONTEXT: {dominant_error_context} ({dominant_error_pct:.0f}% of rating loss) │
+│ ONE RULE MUST TARGET: {one_rule_context:<52} │
+│ RECOVERABLE GAMES: {recoverable_games} → ~{recoverable_games * points_per_game} rating points │
+└────────────────────────────────────────────────────────────────────────────┘
+
 ══════════════════════════════════════════════════════════════════════════════
 """
 
@@ -242,43 +323,52 @@ Match your rhetorical intensity to the severity level:
 CRITICAL RULES — VIOLATING ANY OF THESE MAKES YOUR OUTPUT WORTHLESS
 ══════════════════════════════════════════════════════════════════════════════
 
-1. DISTINGUISH ROOT CAUSE vs MANIFESTATIONS
+1. DIAGNOSIS MUST MATCH PRE-COMPUTED CONSTRAINTS
+   - Your root cause MUST be from: {valid_diagnoses_str}
+   - The data-driven reasoning is: {diagnosis_reasoning_str}
+   - If you pick a diagnosis outside this set, you are WRONG. The data doesn't support it.
+   - Valid cognitive failure taxonomy:
+     • ENDGAME_VIGILANCE_DECAY: Stops checking threats after reaching endgame (feels "safer")
+     • RECAPTURE_TUNNEL_VISION: After captures, only sees forcing lines, misses quiet threats
+     • PREMATURE_CLOSURE: Decides position is "won" and relaxes calculation
+     • CALCULATION_FATIGUE: Accuracy drops after move 30-35, mental stamina issue
+     • THREAT_BLINDNESS: Fails to identify opponent's strongest reply throughout game
+     • LOSS_AVERSION_PARALYSIS: Avoids risk when objectively winning, draws/misses wins
+
+2. DISTINGUISH ROOT CAUSE vs MANIFESTATIONS
    - ROOT CAUSE = the cognitive/decision-making failure (ONE only)
    - MANIFESTATIONS = where it shows up (endgame, after captures, etc.)
    - Never blame a phase. Blame a mental process.
    - Bad: "Your endgame is weak" (that's a manifestation)
-   - Good: "You suffer from Premature Safety Bias — you stop calculating when you think you're 'safe'" (that's a root cause)
+   - Good: "You suffer from Endgame Vigilance Decay — you stop checking threats once pieces come off"
 
-2. NAME THE PATTERNS
-   - Give cognitive failures specific, memorable names
-   - Examples: "Post-Capture Blindness", "Complacency Syndrome", "Evaluation Inertia", "Threat Exhaustion", "Premature Closure"
+3. ONE RULE MUST TARGET DOMINANT ERROR CONTEXT
+   - The ONE Rule MUST specifically apply in: {one_rule_context}
+   - This context accounts for {dominant_error_pct:.0f}% of estimated rating loss
+   - A generic rule that applies in all phases is INVALID and will be rejected
+   - The rule must be mechanically checkable (yes/no) during a game
 
-3. QUANTIFY EVERYTHING + CALIBRATE CONFIDENCE
-   - Use specific numbers: "33 games thrown away" not "many games lost"
-   - Acknowledge sample size: "{total_games} games analyzed"
-   - If confidence is LOW, say: "Based on limited data, this pattern appears to..."
-    - Do NOT pad the report by repeating the same stats in multiple sections.
-      State the key numbers once (ideally in Evidence), then refer to them implicitly.
-
-4. BEHAVIORAL RULES, NOT VAGUE ADVICE
-   - Bad: "Calculate more carefully when winning"
-   - Good: "In any position ≥+1.5, identify opponent's best forcing reply before moving. If you cannot name it, you are not allowed to simplify."
+4. QUANTIFY EVERYTHING + DERIVE IMPACT MECHANICALLY
+   - Use specific numbers from the data, not vague language
+   - Expected rating gain MUST be calculated as:
+     Recoverable games ({recoverable_games}) × points per game (~{points_per_game}) = ~{recoverable_games * points_per_game} points
+   - Do NOT invent impact numbers. Use the formula above.
+   - Do NOT pad the report by repeating the same stats in multiple sections.
 
 5. INCLUDE NEGATIVE CONSTRAINTS
    - What must they STOP doing?
    - "Do NOT trade when ahead without identifying counterplay"
-   - "Do NOT push pawns in winning positions without checking tactics"
    - Humans follow negative constraints better than positive advice.
 
-6. IDENTIFY FAILURE TRIGGERS
-   - Name the exact moment/situation that triggers collapse:
-   - "First simplification", "First passed pawn", "Eval crosses +1.5", "Opponent plays unexpected defense"
-    - REQUIRED: write one explicit trigger sentence with a tight time-window.
-      Example: "Your collapse reliably begins within 3–5 moves of the first major simplification."
+6. IDENTIFY FAILURE TRIGGERS WITH TIME WINDOWS
+   - Name the exact moment/situation that triggers collapse
+   - REQUIRED: write one explicit trigger sentence with a tight time-window
+   - Example: "Your collapse reliably begins within 3–5 moves of the first major simplification."
 
-7. PROFILE THE PLAYER'S COGNITIVE STYLE
-   - Classify them: Risk-averse? Overconfident when ahead? Reactive under pressure? Pattern-based vs calculation-based?
-   - This is gold for self-awareness.
+7. DIAGNOSIS FALSIFICATION (REQUIRED)
+   - You MUST explain why alternative diagnoses were rejected
+   - If multiple valid diagnoses exist, explain which data point breaks the tie
+   - A diagnosis is only valid if a second coach would reach the same conclusion from this data
 
 ══════════════════════════════════════════════════════════════════════════════
 REQUIRED OUTPUT FORMAT (follow EXACTLY)
@@ -295,7 +385,7 @@ REQUIRED OUTPUT FORMAT (follow EXACTLY)
 ## 🔍 Root Cause vs Manifestations
 
 **🎯 ROOT CAUSE (The Mental Failure):**
-[Name it. Example: "Premature Safety Bias" or "Threat Exhaustion Syndrome"]
+[Name it using taxonomy from DIAGNOSTIC CONSTRAINTS. Must be from: {valid_diagnoses_str}]
 [Explain what happens in your brain when this occurs. 2-3 sentences on the cognitive mechanism.]
 
 **📍 WHERE IT SHOWS UP (Manifestations):**
@@ -304,6 +394,15 @@ REQUIRED OUTPUT FORMAT (follow EXACTLY)
 - [Manifestation 3]: [Data point]
 
 [Important: The root cause explains ALL the manifestations. If it doesn't, you picked the wrong root cause.]
+
+---
+
+## 🔬 Diagnosis Justification (REQUIRED)
+
+**Why this diagnosis and not an alternative?**
+[Explain which data point(s) forced this choice over other valid options]
+[If I had diagnosed [alternative X], it would not explain [specific data point Y]]
+[A second coach reviewing this data would reach the same conclusion because...]
 
 ---
 
@@ -359,7 +458,9 @@ This loop repeats regardless of opening, color, or time control.
 
 ## 🎯 The ONE Rule (If You Remember Nothing Else)
 
-> **[State the behavioral rule in a blockquote. Make it memorable, specific, testable.]**
+> **[State the behavioral rule in a blockquote. MUST specifically target: {one_rule_context}]**
+
+**Context Requirement:** This rule MUST apply specifically in {one_rule_context} where {dominant_error_pct:.0f}% of your rating loss occurs.
 
 **Why This Works (Psychologically):**
 [Explain WHY this rule changes behavior at the cognitive level. Use concepts like: attention narrowing, threat scanning, loss aversion, premature closure, working memory limits.]
@@ -368,9 +469,13 @@ This loop repeats regardless of opening, color, or time control.
 
 ## ⏱ Do This During the Game (5 seconds)
 
-Before every move in the error-prone phase/context identified above, ask:
-1) **What is my opponent threatening right now (forcing moves first)?**
-2) **If I'm wrong, what is the immediate refutation?**
+[IMPORTANT: This check must be DERIVED from the diagnosed root cause, not generic.]
+[If root cause is ENDGAME_VIGILANCE_DECAY → check must be endgame-specific]
+[If root cause is PREMATURE_CLOSURE → check must trigger on eval ≥+1.5]
+
+In {one_rule_context}, before every move, ask:
+1) **[Diagnosis-specific question #1]**
+2) **[Diagnosis-specific question #2]**
 
 Then apply the ONE Rule.
 
@@ -402,21 +507,17 @@ Then apply the ONE Rule.
 
 ---
 
-## 📈 Expected Impact
+## 📈 Expected Impact (Mechanically Derived)
 
-[Do NOT restate the same numbers already stated earlier. Refer back to them implicitly.]
+**Impact Calculation (REQUIRED — do not invent numbers):**
+- Recoverable games per {total_games} analyzed: {recoverable_games}
+- Points per recovered game at this rating level: ~{points_per_game}
+- **Estimated rating gain: {recoverable_games} × {points_per_game} = ~{recoverable_games * points_per_game} points**
 
-If you:
-- [Specific improvement #1]
-- [Specific improvement #2]
+**Conditional Statement (REQUIRED):**
+"If you apply the ONE Rule consistently over the next ~50 games, the expected gain is +{int(recoverable_games * points_per_game * 0.6)} to +{recoverable_games * points_per_game} points, conditional on {int(60 + (total_games / 5))}% compliance."
 
-Then based on your game data:
-- **[X] additional wins per 100 games** (confidence: {confidence.lower()})
-- **Estimated rating gain: +[low] to +[high] points**
-
-**Conditioning (protect credibility):**
-- Phrase impact as conditional on compliance and sample size.
-- Example: "If you follow this consistently over the next ~50 games, the expected gain is +[low] to +[high]."
+**Confidence: {confidence.lower()}** — {confidence_note}
 
 This improvement comes without changing openings, tactics training volume, or time control.
 
@@ -448,18 +549,26 @@ Sound like a coach who:
 - Isn't afraid to be direct
 
 ══════════════════════════════════════════════════════════════════════════════
-QUALITY CHECK (verify before responding)
+QUALITY CHECK (verify before responding — ALL MUST PASS)
 ══════════════════════════════════════════════════════════════════════════════
 
-□ Is there exactly ONE root cause? If no, rewrite.
-□ Did I distinguish root cause from manifestations? If no, rewrite.
-□ Did I name the cognitive profile and collapse trigger? If no, add them.
-□ Did I include "What NOT to work on"? If no, add it.
-□ Did I include negative constraints (STOP doing X)? If no, add them.
-□ Did I explain WHY the fix works psychologically? If no, add it.
-□ Did I calibrate confidence to sample size? If no, adjust.
-□ Could this advice apply to a random 1200 player? If yes, rewrite.
-□ Did I end with "If you remember only ONE thing"? If no, add it.
+DIAGNOSTIC RIGOR:
+□ Is my root cause from the valid taxonomy: {valid_diagnoses_str}? If no, REWRITE.
+□ Did I include Diagnosis Justification explaining why alternatives were rejected? If no, ADD IT.
+□ Would a second coach reach the SAME diagnosis from this data? If uncertain, STRENGTHEN REASONING.
+□ Does the root cause explain ALL manifestations? If some don't fit, WRONG DIAGNOSIS.
+
+ONE RULE COMPLIANCE:
+□ Does the ONE Rule specifically target {one_rule_context}? If no, REWRITE.
+□ Is the rule mechanically checkable (yes/no) during a game? If no, MAKE IT BINARY.
+□ Is the 5-second check derived from the diagnosed root cause, not generic? If generic, CUSTOMIZE.
+
+IMPACT DERIVATION:
+□ Did I use the formula: {recoverable_games} × {points_per_game} = ~{recoverable_games * points_per_game} points? If no, FIX.
+□ Did I include conditional compliance statement? If no, ADD IT.
+
+SECOND COACH TEST:
+□ Could a different elite coach, seeing only this data, produce a contradictory diagnosis? If YES, my diagnosis is underspecified. TIGHTEN IT.
 
 """
 
