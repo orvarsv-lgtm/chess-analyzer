@@ -614,15 +614,14 @@ def generate_career_analysis(
         AI_COACH_SYSTEM_PROMPT,
     )
     
-    # Build the sophisticated coaching prompt
-    coaching_prompt = build_career_coaching_prompt(
-        stats=stats,
-        player_name=player_name,
-        player_rating=player_rating,
-    )
-    
-    # Call GPT-4 for diagnostic reasoning
+    # Call GPT-4 for diagnostic reasoning, including prompt construction
     try:
+        coaching_prompt = build_career_coaching_prompt(
+            stats=stats,
+            player_name=player_name,
+            player_rating=player_rating,
+        )
+
         client = _get_openai_client()
         
         response = client.chat.completions.create(
@@ -638,9 +637,9 @@ def generate_career_analysis(
         analysis_text = response.choices[0].message.content
         tokens_used = response.usage.total_tokens
         cost_cents = int((tokens_used / 1000) * 3)  # ~$0.03 per 1k tokens
-        
-    except Exception as e:
-        # Fallback to data-driven analysis if LLM fails
+
+    except Exception:
+        # Fallback to data-driven analysis if prompt construction or LLM fails
         from src.data_driven_coach import generate_data_driven_analysis, format_analysis_for_display
         
         fallback_result = generate_data_driven_analysis(
