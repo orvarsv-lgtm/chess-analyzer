@@ -5,3 +5,4 @@ streamlit
 openai>=1.0.0
 python-dotenv
 fpdf2
+supabase
