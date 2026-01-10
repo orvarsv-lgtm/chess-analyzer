@@ -338,82 +338,80 @@ patterns with this little data.
         data_warning = ""
 
     # Build the instruction prompt
-    instruction_prompt = f"""
+     instruction_prompt = f"""
 You are a veteran chess coach with decades of experience. You speak plainly, cut straight to the issue, and don't waste words. When something is fine, you say so. When something is costing them games, you tell them directly.
 
-Write a performance report that sounds like a real coach talking to their student. Be specific, be human, be authoritative.
-{data_warning}
-================================================================================
-SEVERITY: {severity}
-
-Match your tone:
-- CRITICAL: Be blunt. This is costing real rating points.
-- SIGNIFICANT: Be direct. This needs attention.
-- MODERATE: Be matter-of-fact. Room for improvement, not urgent.
-================================================================================
+Write a **premium diagnostic chess coaching report**. Follow these rules strictly:
 
 ================================================================================
-IMPORTANT RULES
+**ROOT CAUSE SYNDROME**
 ================================================================================
-
-1. DESCRIBE THE PROBLEM IN PLAIN ENGLISH
-   The data suggests this issue: {valid_diagnoses_str}
-   Supporting evidence: {diagnosis_reasoning_str}
-   
-   Describe this in your own words as a coach would. DO NOT use technical codes,
-   ALL_CAPS labels, or programming-style names. Write naturally.
-   
-   WRONG: "Root cause: RECAPTURE_TUNNEL_VISION"
-   RIGHT: "Here's what's happening: after you capture a piece, you're locking onto the obvious continuation and missing quieter threats."
-
-2. NO CODE, NO TECHNICAL JARGON
-   - Never use ALL_CAPS diagnostic labels
-   - Never use underscores in descriptions
-   - Never write "Root cause:" followed by a technical term
-   - Explain everything like you're talking to the player face-to-face
-
-3. FOCUS YOUR ADVICE ON: {one_rule_context}
-   That's where {dominant_error_pct:.0f}% of rating loss happens.
-
-4. USE REAL NUMBERS
-   Quote specific stats from the data. Say "in 35 of your 100 games" not "often."
-
-5. EXPLAIN WHY OTHER EXPLANATIONS DON'T FIT
-   If you mention ruling something out, explain it conversationally.
+- **Name the root cause**: Assign a specific, memorable syndrome (e.g. “Post-Capture Vigilance Collapse”).
+- The syndrome name must be referenced **consistently and in bold** throughout the report.
 
 ================================================================================
-OUTPUT FORMAT
+**ROOT CAUSE vs MANIFESTATIONS**
 ================================================================================
+- Explicitly label what is **causal** (the syndrome) vs what is **symptomatic** (the manifestations).
+- Do **not** list statistics without tying them back to the root cause.
 
-Use rich Markdown formatting to make the report scannable and visually engaging:
+================================================================================
+**FAILURE LOOP**
+================================================================================
+- Include a clear loop: **Trigger → Belief → Behavior → Outcome**. This must appear as its own section, with each step in **bold**.
 
-**FORMATTING RULES:**
+================================================================================
+**THE ONE RULE**
+================================================================================
+- The ONE RULE must be **mechanically justified**: explain exactly how it interrupts the failure loop. Avoid motivational language; focus on cognitive interruption. Use **bold** for the rule and the mechanism.
+
+================================================================================
+**RATING IMPACT**
+================================================================================
+- Rating impact must feel **inevitable**. Frame rating recovery as “recoverable if behavior changes,” not hypothetical. Tie the math directly to the ONE RULE. Use **bold** for numbers and impact statements.
+
+================================================================================
+**MEMORABLE ENDING**
+================================================================================
+- End with a single, unforgettable sentence. The reader should remember one line even if they forget everything else. Use **bold** and formatting to make it stand out.
+
+================================================================================
+**FORMATTING RULES**
+================================================================================
 - Use ## for main section headers
-- Use **bold** for key insights, important numbers, and actionable advice
+- Use **bold** for key insights, syndrome names, important numbers, actionable advice, and all section labels
 - Use *italics* for emphasis on feelings, mental states, or soft observations
 - Use > blockquotes for the ONE RULE or key takeaway
 - Highlight critical stats inline: "Your endgame CPL is **78**—nearly double your middlegame."
 
-**STRUCTURE:**
+================================================================================
+**STRUCTURE**
+================================================================================
 
 ## The Big Picture
-(2-3 sentences summarizing what's holding them back. Bold the main issue.)
+**(Summarize what's holding them back. Bold the syndrome/root cause. Reference it by name.)**
 
-## What's Actually Happening
-(Explain the pattern in plain terms. Use *italics* for mental/emotional aspects like *"you're relaxing too early"* or *"tunnel vision kicks in"*. Bold key numbers.)
+## Root Cause vs Manifestations
+**(Explicitly separate the syndrome from its symptoms. List the syndrome in bold, then the manifestations with supporting stats.)**
 
-## The One Thing to Fix
+## The Failure Loop
+**(Lay out: Trigger → Belief → Behavior → Outcome. Each step in bold, with a short explanation.)**
+
+## The One Rule
 > **Your ONE rule: [specific, memorable rule they can follow]**
+**(Explain, in bold, how this rule mechanically interrupts the failure loop. No motivational language.)**
 
-(Explain why this rule addresses the root cause. Bold the action words.)
+## Rating Impact
+**(Show, with bold numbers, how much rating is recoverable if the rule is followed. Make the impact feel inevitable, not hypothetical.)**
 
 ## How to Practice This
-(Concrete training suggestion with **bold** on the specific exercise or method.)
+**(Concrete training suggestion with bold on the specific exercise or method.)**
 
-Keep the total response to about 600-800 words. Quality over quantity.
+## Unforgettable Ending
+**(One bold, memorable sentence that encapsulates the lesson.)**
 
 ================================================================================
-WRITING EXAMPLES
+**WRITING EXAMPLES**
 ================================================================================
 
 BAD (no formatting, robotic):
@@ -422,11 +420,32 @@ BAD (no formatting, robotic):
 GOOD (formatted, natural voice):
 "## The Big Picture
 
-Here's the uncomfortable truth: **you're giving away wins**. In your last 50 games, you reached a winning position 23 times but only converted 14 of them. That's nearly **40% of your advantages slipping away**.
+Here's the uncomfortable truth: **you're giving away wins due to Post-Capture Vigilance Collapse**. In your last 50 games, you reached a winning position 23 times but only converted 14 of them. That's nearly **40% of your advantages slipping away**.
 
-## What's Actually Happening
+## Root Cause vs Manifestations
 
-Once the pieces start coming off the board, *you relax*. Your brain registers 'fewer pieces = safer' and you stop looking for trouble. But that's exactly when your opponents find their chances. Your endgame CPL is **78**—compared to **42** in the middlegame."
+**Root Cause (Syndrome): Post-Capture Vigilance Collapse**
+**Manifestations:** After you capture, *tunnel vision* sets in and you miss threats. Your endgame CPL is **78**—compared to **42** in the middlegame.
+
+## The Failure Loop
+
+**Trigger:** Capturing a piece → **Belief:** "The danger is over" → **Behavior:** You stop scanning for threats → **Outcome:** Opponents find tactics and you lose the advantage.
+
+## The One Rule
+> **Your ONE rule: After every capture, force yourself to scan for quiet threats before moving on.**
+**This rule works because it directly interrupts the automatic relaxation that follows a capture, forcing your brain to re-engage with the position.**
+
+## Rating Impact
+
+**If you break this loop, you recover ~70 rating points—because these blunders are the only thing holding you back.**
+
+## How to Practice This
+
+**Set up your last 5 games after each capture and practice pausing to look for threats. Track how often you spot something new.**
+
+## Unforgettable Ending
+
+**Every piece you capture is a test—pass it, and your rating will follow.**
 
 ================================================================================
 
