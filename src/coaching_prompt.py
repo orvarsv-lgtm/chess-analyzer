@@ -338,7 +338,7 @@ patterns with this little data.
         data_warning = ""
 
     # Build the instruction prompt
-     instruction_prompt = f"""
+    instruction_prompt = f"""
 You are a veteran chess coach with decades of experience. You speak plainly, cut straight to the issue, and don't waste words. When something is fine, you say so. When something is costing them games, you tell them directly.
 
 Write a **premium diagnostic chess coaching report**. Follow these rules strictly:
