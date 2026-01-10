@@ -129,45 +129,39 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
     
     # Process markdown text for PDF - sanitize first
     text = _sanitize_for_pdf(analysis_text)
-    
-    # Split into lines and process
     lines = text.split('\n')
-    
     for line in lines:
         line = line.strip()
         if not line:
             pdf.ln(3)
             continue
-        
         # Handle headers
         if line.startswith('## '):
             pdf.ln(5)
             pdf.set_font('Helvetica', 'B', 12)
             header_text = line[3:].strip()
-            # Remove any remaining markdown
             header_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', header_text)
             header_text = re.sub(r'\*([^*]+)\*', r'\1', header_text)
-            pdf.cell(0, 8, header_text, new_x='LMARGIN', new_y='NEXT')
+            for chunk in _split_long_line(header_text):
+                pdf.multi_cell(0, 8, chunk)
             pdf.set_font('Helvetica', '', 10)
             continue
-        
         # Handle blockquotes (the ONE RULE)
         if line.startswith('>'):
             pdf.set_font('Helvetica', 'BI', 10)
             quote_text = line[1:].strip()
             quote_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', quote_text)
             quote_text = re.sub(r'\*([^*]+)\*', r'\1', quote_text)
-            pdf.multi_cell(0, 6, f'  {quote_text}')
+            for chunk in _split_long_line(quote_text):
+                pdf.multi_cell(0, 6, f'  {chunk}')
             pdf.set_font('Helvetica', '', 10)
             continue
-        
         # Regular text - remove markdown formatting
         clean_line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)  # Bold
         clean_line = re.sub(r'\*([^*]+)\*', r'\1', clean_line)  # Italic
         clean_line = re.sub(r'`([^`]+)`', r'\1', clean_line)  # Code
-        
-        pdf.set_font('Helvetica', '', 10)
-        pdf.multi_cell(0, 6, clean_line)
+        for chunk in _split_long_line(clean_line):
+            pdf.multi_cell(0, 6, chunk)
     
     # Return PDF as bytes
     return pdf.output()
