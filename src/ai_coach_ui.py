@@ -36,6 +36,76 @@ def _split_long_line(line, max_len=100):
         out.append(line)
     return out
 
+def _inject_breaks(text: str, max_len: int = 80) -> str:
+    """
+    Insert spaces into very long runs of non-space characters so FPDF can break them.
+    E.g. longFENorJSON -> longFENorJ S O N (with spaces every max_len chars)
+    """
+    def _chunk_match(m):
+        s = m.group(0)
+        # If token is extremely long, truncate to a placeholder to avoid FPDF errors
+        if len(s) > 300:
+            return f"<LONG_TOKEN_LEN_{len(s)}>"
+        parts = [s[i:i+max_len] for i in range(0, len(s), max_len)]
+        return " ".join(parts)
+
+    # Replace runs of non-space characters longer than max_len
+    return re.sub(r"\S{%d,}" % (max_len+1), _chunk_match, text)
+
+
+def _process_text_for_pdf(text: str, max_chunk: int = 80):
+    """
+    Sanitize and inject breaks/truncate ultra-long tokens. Returns processed text
+    and a list of placeholders created (as dicts with length info).
+    """
+    processed = _sanitize_for_pdf(text)
+    placeholders = []
+
+    # Find all runs of non-space chars and replace those > max_chunk
+    def _proc(m):
+        s = m.group(0)
+        if len(s) > 300:
+            placeholders.append({'placeholder': f'<LONG_TOKEN_LEN_{len(s)}>', 'length': len(s)})
+            return f'<LONG_TOKEN_LEN_{len(s)}>'
+        # Otherwise, inject break points every max_chunk
+        parts = [s[i:i+max_chunk] for i in range(0, len(s), max_chunk)]
+        return ' '.join(parts)
+
+    processed = re.sub(r"\S{%d,}".replace('%d', str(max_chunk+1)), _proc, processed)
+    # Also try the simpler injector for any remaining very long sequences
+    processed = _inject_breaks(processed, max_len=max_chunk)
+    return processed, placeholders
+
+
+def _safe_multi_cell(pdf, text: str, h: float):
+    """Write text with multi_cell but safely handle FPDFException by splitting further."""
+    from fpdf import errors as fpdf_errors
+    try:
+        pdf.multi_cell(0, h, text)
+        return
+    except Exception as e:
+        # If it's an FPDF line-break issue, try to split the text and write in parts
+        if isinstance(e, fpdf_errors.FPDFException) or 'Not enough horizontal space' in str(e):
+            if len(text) <= 10:
+                # can't reasonably split further; write a truncated placeholder
+                pdf.multi_cell(0, h, text[:10] + '...')
+                return
+            mid = len(text) // 2
+            # split at nearest space around mid if possible
+            left_idx = text.rfind(' ', 0, mid)
+            right_idx = text.find(' ', mid)
+            if left_idx != -1 and (mid - left_idx) < (right_idx - mid if right_idx!=-1 else 1e9):
+                split_at = left_idx
+            elif right_idx != -1:
+                split_at = right_idx
+            else:
+                split_at = mid
+            _safe_multi_cell(pdf, text[:split_at].strip(), h)
+            _safe_multi_cell(pdf, text[split_at:].strip(), h)
+            return
+        # otherwise re-raise
+        raise
+
 
 def _sanitize_for_pdf(text: str) -> str:
     """
@@ -101,7 +171,7 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
     class PDF(FPDF):
         def header(self):
             self.set_font('Helvetica', 'B', 16)
-            self.cell(0, 10, 'Chess Coach Analysis Report', align='C', new_x='LMARGIN', new_y='NEXT')
+            self.cell(0, 10, 'Chess Coach Analysis Report', align='C')
             self.ln(5)
         
         def footer(self):
@@ -118,14 +188,14 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
     
     # Title section
     pdf.set_font('Helvetica', 'B', 14)
-    pdf.cell(0, 10, f'Player: {player_name}', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 10, f'Player: {player_name}')
     pdf.set_font('Helvetica', '', 10)
-    pdf.cell(0, 6, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 6, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}')
     pdf.ln(5)
     
     # Key stats
     pdf.set_font('Helvetica', 'B', 12)
-    pdf.cell(0, 8, 'Key Statistics', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 8, 'Key Statistics')
     pdf.set_font('Helvetica', '', 10)
     
     total_games = stats.get('total_games', 0)
@@ -133,19 +203,19 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
     conversion_rate = stats.get('conversion_rate', 0)
     blunder_rate = stats.get('blunder_rate', 0)
     
-    pdf.cell(0, 6, f'Games Analyzed: {total_games}', new_x='LMARGIN', new_y='NEXT')
-    pdf.cell(0, 6, f'Win Rate: {win_rate:.0%}', new_x='LMARGIN', new_y='NEXT')
-    pdf.cell(0, 6, f'Conversion Rate: {conversion_rate:.0f}%', new_x='LMARGIN', new_y='NEXT')
-    pdf.cell(0, 6, f'Blunders per 100 moves: {blunder_rate:.1f}', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 6, f'Games Analyzed: {total_games}')
+    pdf.cell(0, 6, f'Win Rate: {win_rate:.0%}')
+    pdf.cell(0, 6, f'Conversion Rate: {conversion_rate:.0f}%')
+    pdf.cell(0, 6, f'Blunders per 100 moves: {blunder_rate:.1f}')
     pdf.ln(8)
     
     # Analysis section
     pdf.set_font('Helvetica', 'B', 12)
-    pdf.cell(0, 8, 'Analysis', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 8, 'Analysis')
     pdf.ln(3)
     
-    # Process markdown text for PDF - sanitize first
-    text = _sanitize_for_pdf(analysis_text)
+    # Process markdown text for PDF - sanitize, inject breaks, truncate ultra-long tokens
+    text, placeholders = _process_text_for_pdf(analysis_text, max_chunk=80)
     lines = text.split('\n')
     for line in lines:
         line = line.strip()
@@ -160,17 +230,17 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
             header_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', header_text)
             header_text = re.sub(r'\*([^*]+)\*', r'\1', header_text)
             for chunk in _split_long_line(header_text):
-                pdf.multi_cell(0, 8, chunk)
+                _safe_multi_cell(pdf, chunk, 8)
             pdf.set_font('Helvetica', '', 10)
             continue
         # Handle blockquotes (the ONE RULE)
         if line.startswith('>'):
-            pdf.set_font('Helvetica', 'BI', 10)
+            pdf.set_font('Helvetica', 'I', 10)
             quote_text = line[1:].strip()
             quote_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', quote_text)
             quote_text = re.sub(r'\*([^*]+)\*', r'\1', quote_text)
             for chunk in _split_long_line(quote_text):
-                pdf.multi_cell(0, 6, f'  {chunk}')
+                _safe_multi_cell(pdf, f'  {chunk}', 6)
             pdf.set_font('Helvetica', '', 10)
             continue
         # Regular text - remove markdown formatting
@@ -178,7 +248,18 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
         clean_line = re.sub(r'\*([^*]+)\*', r'\1', clean_line)  # Italic
         clean_line = re.sub(r'`([^`]+)`', r'\1', clean_line)  # Code
         for chunk in _split_long_line(clean_line):
-            pdf.multi_cell(0, 6, chunk)
+            _safe_multi_cell(pdf, chunk, 6)
+
+    # If we created placeholders for extremely long tokens, append an appendix
+    if placeholders:
+        pdf.add_page()
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.cell(0, 8, 'Appendix: Omitted Long Tokens')
+        pdf.ln(4)
+        pdf.set_font('Helvetica', '', 9)
+        for p in placeholders:
+            pdf.multi_cell(0, 6, f"{p['placeholder']}: original length {p['length']} characters")
+        pdf.ln(4)
     
     # Return PDF as bytes
     return pdf.output()
