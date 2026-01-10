@@ -20,6 +20,49 @@ from src.ai_coach import (
 )
 
 
+def _sanitize_for_pdf(text: str) -> str:
+    """
+    Replace Unicode characters with ASCII equivalents for PDF compatibility.
+    Helvetica font doesn't support many Unicode characters.
+    """
+    replacements = {
+        '—': '-',      # em-dash
+        '–': '-',      # en-dash
+        ''': "'",      # curly apostrophe
+        ''': "'",      # curly apostrophe
+        '"': '"',      # curly quote
+        '"': '"',      # curly quote
+        '…': '...',    # ellipsis
+        '≥': '>=',     # greater than or equal
+        '≤': '<=',     # less than or equal
+        '±': '+/-',    # plus-minus
+        '×': 'x',      # multiplication
+        '→': '->',     # arrow
+        '←': '<-',     # arrow
+        '↑': '^',      # up arrow
+        '↓': 'v',      # down arrow
+        '•': '*',      # bullet
+        '✓': '[x]',    # checkmark
+        '✅': '[OK]',  # green check
+        '⚠️': '[!]',   # warning
+        '🔴': '[!]',   # red circle
+        '🎯': '[>]',   # target
+        '📊': '',      # chart emoji
+        '📋': '',      # clipboard
+        '📄': '',      # document
+        '🧠': '',      # brain
+        '🚀': '',      # rocket
+        '🔄': '',      # refresh
+        '📥': '',      # download
+        'ℹ️': '[i]',   # info
+    }
+    for unicode_char, ascii_char in replacements.items():
+        text = text.replace(unicode_char, ascii_char)
+    # Remove any remaining non-ASCII characters
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    return text
+
+
 def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, Any]) -> bytes:
     """
     Generate a PDF report from the AI Coach analysis.
@@ -53,6 +96,9 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     
+    # Sanitize player name for PDF
+    player_name = _sanitize_for_pdf(player_name)
+    
     # Title section
     pdf.set_font('Helvetica', 'B', 14)
     pdf.cell(0, 10, f'Player: {player_name}', new_x='LMARGIN', new_y='NEXT')
@@ -81,9 +127,8 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
     pdf.cell(0, 8, 'Analysis', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(3)
     
-    # Process markdown text for PDF
-    # Remove markdown formatting for cleaner PDF
-    text = analysis_text
+    # Process markdown text for PDF - sanitize first
+    text = _sanitize_for_pdf(analysis_text)
     
     # Split into lines and process
     lines = text.split('\n')
