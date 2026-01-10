@@ -271,7 +271,8 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
         pdf.ln(4)
     
     # Return PDF as bytes
-    return pdf.output()
+    out = pdf.output(dest='S').encode('latin1')
+    return out
 
 def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
     """
@@ -532,7 +533,7 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     if analysis_text:
         player_name = stats.get('player_name', 'Player')
         pdf_bytes = _generate_pdf_report(analysis_text, player_name, stats)
-        if pdf_bytes:
+        if isinstance(pdf_bytes, bytes) and len(pdf_bytes) > 0:
             st.download_button(
                 label="📥 Download Report as PDF",
                 data=pdf_bytes,
@@ -541,7 +542,7 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
                 use_container_width=True,
             )
         else:
-            st.caption("_PDF download requires 'fpdf2' package. Install with: pip install fpdf2_")
+            st.caption("_PDF download failed. Please check your analysis and try again. If the problem persists, contact support._")
     
     # Show data sources used
     data_sources = result.get('data_sources', [])
