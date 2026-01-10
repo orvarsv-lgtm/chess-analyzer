@@ -272,10 +272,13 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
     
     # Return PDF as bytes
     out = pdf.output(dest='S')
+    # Defensive: always return bytes, never call encode on bytearray
     if isinstance(out, str):
         return out.encode('latin1')
-    if isinstance(out, (bytes, bytearray)):
+    if isinstance(out, bytearray):
         return bytes(out)
+    if isinstance(out, bytes):
+        return out
     return b''
 
 def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
