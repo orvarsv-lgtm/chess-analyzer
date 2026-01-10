@@ -271,8 +271,12 @@ def _generate_pdf_report(analysis_text: str, player_name: str, stats: Dict[str, 
         pdf.ln(4)
     
     # Return PDF as bytes
-    out = pdf.output(dest='S').encode('latin1')
-    return out
+    out = pdf.output(dest='S')
+    if isinstance(out, str):
+        return out.encode('latin1')
+    if isinstance(out, (bytes, bytearray)):
+        return bytes(out)
+    return b''
 
 def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
     """
