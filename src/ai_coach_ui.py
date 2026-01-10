@@ -71,7 +71,7 @@ def _process_text_for_pdf(text: str, max_chunk: int = 80):
         parts = [s[i:i+max_chunk] for i in range(0, len(s), max_chunk)]
         return ' '.join(parts)
 
-    processed = re.sub(r"\S{%d,}".replace('%d', str(max_chunk+1)), _proc, processed)
+    processed = re.sub(r"\S{%d,}" % (max_chunk+1), _proc, processed)
     # Also try the simpler injector for any remaining very long sequences
     processed = _inject_breaks(processed, max_len=max_chunk)
     return processed, placeholders
@@ -81,6 +81,11 @@ def _safe_multi_cell(pdf, text: str, h: float):
     """Write text with multi_cell but safely handle FPDFException by splitting further."""
     from fpdf import errors as fpdf_errors
     try:
+        # Ensure we're at left margin so multi_cell has full width available
+        try:
+            pdf.set_x(pdf.l_margin)
+        except Exception:
+            pass
         pdf.multi_cell(0, h, text)
         return
     except Exception as e:
@@ -88,6 +93,10 @@ def _safe_multi_cell(pdf, text: str, h: float):
         if isinstance(e, fpdf_errors.FPDFException) or 'Not enough horizontal space' in str(e):
             if len(text) <= 10:
                 # can't reasonably split further; write a truncated placeholder
+                try:
+                    pdf.set_x(pdf.l_margin)
+                except Exception:
+                    pass
                 pdf.multi_cell(0, h, text[:10] + '...')
                 return
             mid = len(text) // 2
