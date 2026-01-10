@@ -826,7 +826,6 @@ RULES:
 DATA ANALYSIS:
 {data_analysis['analysis']}
 
-PRIMARY ISSUE: {data_analysis.get('primary_issue', 'Unknown')}
 
 PLAYER: {player_name}
 RATING: {player_rating or 'Unknown'}
