@@ -20,6 +20,23 @@ from src.ai_coach import (
 )
 
 
+def _split_long_line(line, max_len=100):
+    # Splits a long line into chunks of max_len, breaking at spaces if possible
+    if len(line) <= max_len:
+        return [line]
+    out = []
+    while len(line) > max_len:
+        # Try to break at the last space before max_len
+        idx = line.rfind(' ', 0, max_len)
+        if idx == -1:
+            idx = max_len
+        out.append(line[:idx])
+        line = line[idx:].lstrip()
+    if line:
+        out.append(line)
+    return out
+
+
 def _sanitize_for_pdf(text: str) -> str:
     """
     Replace Unicode characters with ASCII equivalents for PDF compatibility.
