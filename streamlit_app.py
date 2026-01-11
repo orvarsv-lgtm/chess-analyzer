@@ -1867,34 +1867,10 @@ def main() -> None:
 
 
 def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
-    """Render analysis results with a stable selector including Puzzles.
+    """Render analysis results with sidebar navigation menu.
 
-    Streamlit tabs reset to the first tab on rerun. Since puzzle moves cause reruns,
-    we keep the user's selection stable via session_state.
+    Uses sidebar radio buttons for stable navigation that survives reruns.
     """
-    
-    # CSS to make the puzzle tab larger and more prominent
-    st.markdown("""
-    <style>
-    /* Make tabs larger and more visible */
-    div[data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    div[data-baseweb="tab-list"] button[data-baseweb="tab"] {
-        font-size: 1.2rem;
-        padding: 12px 24px;
-        font-weight: 600;
-    }
-    /* Highlight the puzzle tab specifically */
-    div[data-baseweb="tab-list"] button[data-baseweb="tab"]:nth-child(2) {
-        background-color: rgba(127, 166, 80, 0.15);
-        border-radius: 8px 8px 0 0;
-    }
-    div[data-baseweb="tab-list"] button[data-baseweb="tab"]:nth-child(2):hover {
-        background-color: rgba(127, 166, 80, 0.25);
-    }
-    </style>
-    """, unsafe_allow_html=True)
     
     # Build translated view options
     view_options = [
@@ -1915,14 +1891,18 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     if st.session_state.get("main_view") not in view_options:
         st.session_state["main_view"] = view_options[0]
 
-    view = st.radio(
-        "Main view",
-        options=view_options,
-        horizontal=False,
-        key="main_view",
-        label_visibility="collapsed",
-    )
+    # Sidebar navigation menu
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🧭 Navigation")
+        view = st.radio(
+            "Select view",
+            options=view_options,
+            key="main_view",
+            label_visibility="collapsed",
+        )
 
+    # Render selected view
     if t('tab_puzzles') in view:
         _render_puzzle_tab(aggregated)
     elif t('tab_ai_coach') in view:
