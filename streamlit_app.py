@@ -1916,6 +1916,18 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         horizontal=True,
         key="puzzle_source_mode",
     )
+
+    # Reset puzzle UI state when switching source to avoid leaking progress/ratings
+    prev_mode = st.session_state.get("puzzle_source_mode_prev")
+    if prev_mode != source_mode:
+        st.session_state.pop("puzzle_progress_v2", None)
+        st.session_state.pop("puzzle_solution_line_cache_v2", None)
+        st.session_state.pop("puzzle_solution_line_futures_v1", None)
+        st.session_state.pop("puzzle_solution_line_executor_v1", None)
+        st.session_state.pop("puzzle_rated_keys", None)
+        st.session_state.pop("puzzle_last_rating", None)
+        st.session_state.pop("puzzle_index", None)
+    st.session_state["puzzle_source_mode_prev"] = source_mode
     
     if source_mode == "My games":
         # Generate puzzles from analyzed games
