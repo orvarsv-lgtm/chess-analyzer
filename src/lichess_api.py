@@ -94,8 +94,10 @@ def parse_pgn(pgn_text, username):
         if not opening_hdr:
             opening_hdr = " ".join(moves_list[:4]) if moves_list else ""
 
-        # Classify opening based on moves
+        # Classify opening based on moves; fall back to PGN header when unknown
         opening_name = classify_opening(moves_pgn)
+        if not opening_name or opening_name == "Unknown":
+            opening_name = opening_hdr or "Unknown"
 
         game_info = {
             "color": color,
