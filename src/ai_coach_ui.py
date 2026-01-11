@@ -729,36 +729,35 @@ def _generate_and_display_review(
 
 
 def _render_ai_review(review: AICoachResponse):
-    """Render the AI coach review in a nice format."""
+    """Render the AI coach review in narrative format."""
     
-    # Game Summary
-    st.markdown("### 📝 Game Summary")
-    st.write(review.game_summary)
+    # 🧠 What Decided This Game
+    st.markdown("### 🧠 What Decided This Game")
+    st.write(review.what_decided)
     
-    # Key Moments
-    if review.key_moments:
-        st.markdown("### 🎯 Key Moments")
-        for i, moment in enumerate(review.key_moments, 1):
-            with st.expander(f"Critical Moment #{i} - Move {moment.get('move', '?')}", expanded=i==1):
-                st.write(moment.get('advice', ''))
+    # 🔍 The Turning Point
+    st.markdown("### 🔍 The Turning Point")
+    st.write(review.turning_point)
     
-    # Opening Advice
-    st.markdown("### 📚 Opening Advice")
-    st.info(review.opening_advice)
+    # ⚠️ What Changed After That
+    st.markdown("### ⚠️ What Changed After That")
+    st.write(review.what_changed)
     
-    # Strategic Advice
-    st.markdown("### ♟️ Strategic Advice")
-    st.info(review.strategic_advice)
+    # ♜ What Your Opponent Was Allowed To Do
+    st.markdown("### ♜ What Your Opponent Was Allowed To Do")
+    st.write(review.opponent_plan)
     
-    # Tactical Advice
-    st.markdown("### ⚡ Tactical Advice")
-    st.warning(review.tactical_advice)
+    # 🛑 What Would Have Helped
+    st.markdown("### 🛑 What Would Have Helped")
+    st.write(review.what_would_help)
     
-    # Training Recommendations
-    st.markdown("### 🎯 Training Recommendations")
-    st.markdown("Your AI coach suggests:")
-    for rec in review.training_recommendations:
-        st.markdown(f"- {rec}")
+    # 🎯 The Lesson From This Game
+    st.markdown("### 🎯 The Lesson From This Game")
+    st.info(review.lesson)
+    
+    # ✅ One-Sentence Summary
+    st.markdown("### ✅ One-Sentence Summary")
+    st.success(review.one_sentence)
     
     # Metadata
     with st.expander("ℹ️ Review Metadata", expanded=False):

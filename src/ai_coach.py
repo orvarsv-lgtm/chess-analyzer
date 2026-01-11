@@ -112,13 +112,14 @@ def _get_openai_client():
 
 @dataclass
 class AICoachResponse:
-    """Response from AI coach analysis."""
-    game_summary: str  # Overall game summary (2-3 sentences)
-    key_moments: List[Dict[str, Any]]  # Critical positions with advice
-    opening_advice: str  # Opening-specific feedback
-    strategic_advice: str  # Strategic patterns and plans
-    tactical_advice: str  # Tactical awareness feedback
-    training_recommendations: List[str]  # Specific things to practice
+    """Response from AI coach analysis - narrative style."""
+    what_decided: str  # What decided the game (narrative)
+    turning_point: str  # The critical moment/decision
+    what_changed: str  # Before/after the turning point
+    opponent_plan: str  # What opponent was allowed to do
+    what_would_help: str  # What approach was needed
+    lesson: str  # The key insight from this game
+    one_sentence: str  # One-sentence summary
     timestamp: datetime
     cost_cents: int  # API cost in cents
     tokens_used: int  # Total tokens consumed
@@ -132,8 +133,8 @@ def generate_game_review(
     """
     Generate AI coaching review for a single game.
     
-    Uses a GPT model for diagnostic reasoning about what decided the game
-    and what behavioral change would help.
+    Uses a GPT model for narrative-style diagnostic reasoning about 
+    what decided the game and what the player can learn.
     
     Args:
         game_data: Analyzed game data with moves, evals, phases
@@ -141,12 +142,12 @@ def generate_game_review(
         player_rating: Player's current rating (for context)
     
     Returns:
-        AICoachResponse with personalized insights
+        AICoachResponse with narrative insights
     """
-    from src.coaching_prompt import build_single_game_coaching_prompt, AI_COACH_SYSTEM_PROMPT
+    from src.coaching_prompt import AI_COACH_SYSTEM_PROMPT
     
     # Build the coaching prompt with game data
-    coaching_prompt = build_single_game_coaching_prompt(
+    coaching_prompt = _build_game_review_prompt(
         game_data=game_data,
         player_color=player_color,
         player_rating=player_rating,
@@ -164,10 +165,10 @@ def generate_game_review(
                 {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
                 {"role": "user", "content": coaching_prompt}
             ],
-            "max_completion_tokens": 2000,  # Higher for models with reasoning tokens
+            "max_completion_tokens": 2000,
         }
         if _model_supports_temperature(model):
-            kwargs["temperature"] = 0.6
+            kwargs["temperature"] = 0.7  # Slightly more creative for narrative
         
         response = client.chat.completions.create(**kwargs)
         
@@ -175,86 +176,75 @@ def generate_game_review(
         tokens_used = response.usage.total_tokens
         cost_cents = _estimate_cost_cents(tokens_used)
         
-        # Parse the structured response
-        sections = _parse_game_coach_response(ai_analysis)
+        # Parse the narrative response
+        sections = _parse_narrative_response(ai_analysis)
         
     except Exception as e:
-        # Fallback to data-driven analysis
-        from src.data_driven_coach import explain_single_game
+        # Fallback to basic analysis
+        result = game_data.get('result', '?')
+        is_win = (player_color == 'white' and result == '1-0') or (player_color == 'black' and result == '0-1')
+        is_loss = (player_color == 'white' and result == '0-1') or (player_color == 'black' and result == '1-0')
         
-        fallback = explain_single_game(game_data, player_color, player_rating)
         sections = {
-            'summary': fallback.get('summary', 'Analysis unavailable'),
-            'key_moments': fallback.get('key_moments', []),
-            'opening': 'See phase CPL breakdown',
-            'strategy': fallback.get('analysis', ''),
-            'tactics': '',
-            'training': ['Review the game with an engine'],
+            'what_decided': f"The game ended in a {'win' if is_win else 'loss' if is_loss else 'draw'}. (Detailed analysis unavailable)",
+            'turning_point': "Review the game in an engine to identify the turning point.",
+            'what_changed': "Unable to generate analysis at this time.",
+            'opponent_plan': "Review opponent's plan manually.",
+            'what_would_help': "Analyze the position with an engine.",
+            'lesson': "Every game is a learning opportunity.",
+            'one_sentence': "Review this game carefully.",
         }
         tokens_used = 0
         cost_cents = 0
     
-    # Extract key moments from game data for display
-    moves_table = game_data.get('moves_table', [])
-    key_moments = []
-    for move in moves_table:
-        mover = move.get('mover') or move.get('color') or ''
-        if mover == player_color:
-            cp_loss = move.get('cp_loss', 0) or move.get('actual_cp_loss', 0) or 0
-            if cp_loss >= 200:
-                ply = move.get('ply', 0) or 0
-                move_num = move.get('move_num') or ((ply + 1) // 2)
-                move_san = move.get('move_san') or move.get('san') or '?'
-                best_san = move.get('best_move_san') or move.get('best_san') or ''
-                advice = f"**{move_san}** lost {cp_loss}cp"
-                if best_san and best_san != '?':
-                    advice += f" (best: {best_san})"
-                key_moments.append({
-                    'move': move_num,
-                    'advice': advice,
-                })
-    
-    # If we got an AI response with actual content, use it
-    # Otherwise fall back to simpler summaries
-    summary = sections.get('summary', '')
-    if not summary:
-        # Generate a basic summary from the game result
-        result = game_data.get('result', '?')
-        opening = game_data.get('opening_name') or game_data.get('opening') or 'Unknown'
-        if result == '1-0':
-            outcome = "White won" if player_color == 'white' else "White won against you"
-        elif result == '0-1':
-            outcome = "You won as Black" if player_color == 'black' else "Black won against you"
-        else:
-            outcome = "The game ended in a draw"
-        total_blunders = len([m for m in key_moments if 'lost' in str(m.get('advice', ''))])
-        summary = f"{outcome}. Opening: {opening}. You had {total_blunders} significant inaccuracies (200+ cp loss)."
-    
     return AICoachResponse(
-        game_summary=summary,
-        key_moments=key_moments[:5],
-        opening_advice=sections.get('opening', '') or "Review the opening phase in an engine to compare with database games.",
-        strategic_advice=sections.get('strategy', '') or "Focus on the key moments identified above.",
-        tactical_advice=sections.get('tactics', '') or "Practice tactical puzzles based on the themes in this game.",
-        training_recommendations=sections.get('training', [])[:3] or ["Analyze this game move-by-move with an engine"],
+        what_decided=sections.get('what_decided', ''),
+        turning_point=sections.get('turning_point', ''),
+        what_changed=sections.get('what_changed', ''),
+        opponent_plan=sections.get('opponent_plan', ''),
+        what_would_help=sections.get('what_would_help', ''),
+        lesson=sections.get('lesson', ''),
+        one_sentence=sections.get('one_sentence', ''),
         timestamp=datetime.now(),
         cost_cents=cost_cents,
         tokens_used=tokens_used,
     )
 
 
-def _parse_game_coach_response(content: str) -> Dict[str, Any]:
-    """Parse the AI coach response for single game analysis."""
+def _parse_narrative_response(content: str) -> Dict[str, Any]:
+    """Parse the narrative AI coach response into sections."""
     sections = {
-        'summary': '',
-        'opening': '',
-        'strategy': '',
-        'tactics': '',
-        'training': [],
+        'what_decided': '',
+        'turning_point': '',
+        'what_changed': '',
+        'opponent_plan': '',
+        'what_would_help': '',
+        'lesson': '',
+        'one_sentence': '',
     }
     
     if not content:
         return sections
+    
+    # Section header patterns (emoji-based)
+    section_markers = [
+        ('🧠', 'what_decided'),
+        ('what decided', 'what_decided'),
+        ('🔍', 'turning_point'),
+        ('turning point', 'turning_point'),
+        ('⚠️', 'what_changed'),
+        ('what changed', 'what_changed'),
+        ('♜', 'opponent_plan'),
+        ('opponent', 'opponent_plan'),
+        ('allowed to do', 'opponent_plan'),
+        ('🛑', 'what_would_help'),
+        ('would have helped', 'what_would_help'),
+        ('🎯', 'lesson'),
+        ('the lesson', 'lesson'),
+        ('✅', 'one_sentence'),
+        ('one-sentence', 'one_sentence'),
+        ('summary', 'one_sentence'),
+    ]
     
     lines = content.split('\n')
     current_section = None
@@ -263,63 +253,32 @@ def _parse_game_coach_response(content: str) -> Dict[str, Any]:
     for line in lines:
         lower = line.lower().strip()
         
-        # Detect section headers (more flexible matching)
-        if any(x in lower for x in ['what decided', 'turning point', 'game summary', 'summary:', 'decisive moment', 'critical moment']):
+        # Check if this line is a section header
+        new_section = None
+        for marker, section_key in section_markers:
+            if marker in lower:
+                new_section = section_key
+                break
+        
+        if new_section:
+            # Save previous section
             if current_section and current_content:
-                _store_game_section(sections, current_section, current_content)
-            current_section = 'summary'
-            current_content = []
-        elif any(x in lower for x in ['why it happened', 'why this happened', 'root cause', 'analysis:', 'strategic', 'what went wrong']):
-            if current_section and current_content:
-                _store_game_section(sections, current_section, current_content)
-            current_section = 'strategy'
-            current_content = []
-        elif any(x in lower for x in ['opening', 'first moves']):
-            if current_section and current_content:
-                _store_game_section(sections, current_section, current_content)
-            current_section = 'opening'
-            current_content = []
-        elif any(x in lower for x in ['tactical', 'tactics', 'calculation']):
-            if current_section and current_content:
-                _store_game_section(sections, current_section, current_content)
-            current_section = 'tactics'
-            current_content = []
-        elif any(x in lower for x in ['the lesson', 'takeaway', 'recommendation', 'training', 'practice', 'improve']):
-            if current_section and current_content:
-                _store_game_section(sections, current_section, current_content)
-            current_section = 'training'
+                sections[current_section] = '\n'.join(current_content).strip()
+            current_section = new_section
             current_content = []
         elif line.strip() and not line.strip().startswith('#'):
+            # Content line
             current_content.append(line.strip())
     
-    # Store last section
+    # Save last section
     if current_section and current_content:
-        _store_game_section(sections, current_section, current_content)
+        sections[current_section] = '\n'.join(current_content).strip()
     
-    # Fallback if parsing finds nothing specific - use the whole content
-    if not any([sections['summary'], sections['strategy'], sections['opening']]):
-        # Just use the whole response as summary
-        clean_content = '\n'.join(l.strip() for l in lines if l.strip() and not l.strip().startswith('#'))
-        if clean_content:
-            sections['summary'] = clean_content[:1500] if len(clean_content) > 1500 else clean_content
+    # If parsing failed, put everything in what_decided
+    if not any(sections.values()):
+        sections['what_decided'] = content
     
     return sections
-
-
-def _store_game_section(sections: Dict, section: str, content: List[str]) -> None:
-    """Store parsed game review section."""
-    text = '\n'.join(content).strip()
-    
-    if section == 'summary':
-        sections['summary'] = text
-    elif section == 'strategy':
-        sections['strategy'] = text
-    elif section == 'training':
-        # Split into list items
-        for line in content:
-            clean = line.strip().lstrip('-•*0123456789.) ')
-            if clean and len(clean) > 5:
-                sections['training'].append(clean)
 
 
 def generate_position_insight(
@@ -340,7 +299,7 @@ def generate_position_insight(
         best_move_san: Best move
         played_move_san: Move that was played
         phase: Game phase
-                model=_ai_coach_model(),
+    
     Returns:
         Short natural language explanation (2-3 sentences)
     """
@@ -478,33 +437,65 @@ def _build_game_review_prompt(
             avg_cpl = sum(m.get('cp_loss', 0) for m in phase_moves) / len(phase_moves)
             phase_cpl[phase] = round(avg_cpl, 1)
     
-    prompt = f"""Analyze this chess game and provide coaching feedback.
+    # Determine game narrative context
+    is_win = (player_color == 'white' and result == '1-0') or (player_color == 'black' and result == '0-1')
+    is_loss = (player_color == 'white' and result == '0-1') or (player_color == 'black' and result == '1-0')
+    result_text = 'You won' if is_win else 'You lost' if is_loss else 'The game was drawn'
+    
+    prompt = f"""You are a chess coach writing a reflective, narrative review of your student's game. Tell the STORY of how this game was won or lost — not a list of errors, but the psychological and strategic arc.
 
-**Game Info:**
+**Game Context:**
 - Opening: {opening_name}
-- Player Color: {player_color.title()}
-- Player Rating: {player_rating or 'Unknown'}
-- Result: {result}
+- You played: {player_color.title()}
+- Result: {result_text}
+- Rating: {player_rating or 'Unknown'}
 
-**Performance Summary:**
-- Opening CPL: {phase_cpl.get('opening', 'N/A')}
-- Middlegame CPL: {phase_cpl.get('middlegame', 'N/A')}
-- Endgame CPL: {phase_cpl.get('endgame', 'N/A')}
+**What the engine found:**
+- Opening phase accuracy: {phase_cpl.get('opening', 'N/A')} average centipawn loss
+- Middlegame accuracy: {phase_cpl.get('middlegame', 'N/A')} average centipawn loss  
+- Endgame accuracy: {phase_cpl.get('endgame', 'N/A')} average centipawn loss
 
-**Major Blunders (≥200cp loss):**
+**Significant errors (for context only - don't just list these):**
 {_format_blunders(blunders)}
 
-**Instructions:**
-Provide a structured review with these sections:
+---
 
-1. **Game Summary** (2-3 sentences): Overall assessment of the game
-2. **Key Moments** (3-5 critical positions): For each, explain what happened and what should have been done
-3. **Opening Advice**: Specific feedback on the opening played
-4. **Strategic Advice**: Plans, piece placement, pawn structure insights
-5. **Tactical Advice**: Pattern recognition, calculation accuracy
-6. **Training Recommendations**: 3-5 specific things to practice
+**Write your review using these EXACT section headers:**
 
-Be specific, use chess terminology, and focus on improvement."""
+## 🧠 What Decided This Game
+[Open with a narrative hook. Was it decided by a blunder, or something subtler — a drift, a wrong plan, a moment of relaxation? Describe the position in human terms: Were you better? What did the position require? What actually happened?]
+
+## 🔍 The Turning Point
+[THE moment the game's character changed. What move or decision was it? What did the position look like before? What did this move allow your opponent to do? Use phrases like "From this move onward..."]
+
+## ⚠️ What Changed After That
+[Before/after contrast:
+**Before:** What were you doing? Creating pressure? Asking questions?
+**After:** What shifted? Reacting instead of acting? Moves became neutral?]
+
+## ♜ What Your Opponent Was Allowed To Do  
+[What simple plan did they get to execute? Why didn't they have to deviate? How did this lead to the result?]
+
+## 🛑 What Would Have Helped
+[Not "the computer move" but the TYPE of approach needed — a commitment, a restriction, a different mindset. Why was this approach needed?]
+
+## 🎯 The Lesson From This Game
+[One insight specific to THIS game. Frame it as wisdom: "This game didn't punish X. It punished Y."]
+
+## ✅ One-Sentence Summary
+[A powerful sentence capturing the essence. Examples:
+- "You gave your opponent time in a position where time was the only thing they needed."
+- "You played to not lose instead of playing to win."]
+
+---
+
+**STYLE:**
+- Short, punchy paragraphs. One idea each.
+- Narrative language: "the game drifted," "the position breathed," "the advantage evaporated"
+- Focus on STORY, not analysis
+- Avoid: excessive move notation, centipawn references, engine-speak
+- You may reference a move number once ("Move 28") but don't pepper the text
+- Be honest but not harsh. Insightful, not judgmental."""
     
     return prompt
 
