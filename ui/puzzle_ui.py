@@ -472,17 +472,20 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             _schedule_solution_line(nxt.fen, nxt_first, depth=depth)
             _harvest_solution_line(nxt.fen, nxt_first, depth=depth)
 
-    # Show source game metadata (if present)
-    if getattr(puzzle, "source_game_index", None):
-        white = (getattr(puzzle, "white", "") or "").strip() or "Unknown"
-        black = (getattr(puzzle, "black", "") or "").strip() or "Unknown"
-        render_puzzle_metadata(
-            {
-                "game_number": int(puzzle.source_game_index),
-                "username": white,
-                "opponent": black,
-            }
-        )
+    # Show source game metadata (if present). Only render player names if available;
+    # otherwise omit metadata to avoid showing "Unknown - Unknown".
+    src_idx = getattr(puzzle, "source_game_index", None)
+    if src_idx:
+        white = (getattr(puzzle, "white", "") or "").strip()
+        black = (getattr(puzzle, "black", "") or "").strip()
+        if white or black:
+            render_puzzle_metadata(
+                {
+                    "game_number": int(src_idx),
+                    "username": white or "",
+                    "opponent": black or "",
+                }
+            )
 
     # Use dynamic solution line (if player chose an alternate viable move)
     solution_moves = progress.active_solution_moves or cache.get(cache_key) or puzzle.solution_moves
