@@ -228,3 +228,12 @@ def render_load_analysis_ui() -> Optional[Dict[str, Any]]:
     
     with col2:
         if st.button("🗑️", key="delete_analysis_btn", help=t("delete")):
+            analysis_id = options[selected_idx][0]
+            success, msg = delete_analysis(user_id, analysis_id)
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    return None
