@@ -165,10 +165,21 @@ def generate_game_review(
             kwargs["temperature"] = 0.7  # Slightly more creative for narrative
         
         response = client.chat.completions.create(**kwargs)
-        
-        ai_analysis = response.choices[0].message.content
-        tokens_used = response.usage.total_tokens
+
+        ai_analysis = (response.choices[0].message.content or "").strip()
+        tokens_used = getattr(response.usage, "total_tokens", 0) or 0
         cost_cents = _estimate_cost_cents(tokens_used)
+
+        # Defensive fallback: some models/SDK responses can yield empty content
+        if not ai_analysis:
+            opening = game_data.get('opening_name') or game_data.get('opening') or 'Unknown'
+            result = game_data.get('result', '?')
+            ai_analysis = (
+                "## 🧠 Game Review\n\n"
+                "(The model returned an empty response. Please try again.)\n\n"
+                f"Opening: {opening}\n"
+                f"Result: {result}\n"
+            )
         
     except Exception as e:
         # Fallback to basic analysis

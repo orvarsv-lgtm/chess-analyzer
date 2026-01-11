@@ -732,7 +732,13 @@ def _render_ai_review(review: AICoachResponse):
     """Render the AI coach review as a narrative."""
     
     # Display the full narrative response with markdown rendering
-    st.markdown(review.narrative)
+    narrative = getattr(review, "narrative", "") or ""
+    narrative = narrative.strip()
+    if not narrative:
+        st.warning("⚠️ AI review returned empty content.")
+        st.info("Try generating again. If this persists, check server logs for errors from the OpenAI call.")
+    else:
+        st.markdown(narrative)
     
     # Metadata
     with st.expander("ℹ️ Review Metadata", expanded=False):
