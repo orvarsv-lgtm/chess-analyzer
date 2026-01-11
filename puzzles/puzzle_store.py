@@ -84,9 +84,13 @@ def from_legacy_puzzle(
         theme=p.puzzle_type.value,
         difficulty=_difficulty_to_int(p.difficulty),
         explanation=explanation or "Explanation unavailable for this puzzle.",
-        source_game_index=int(getattr(p, "source_game_index", 0) or 0) or None,
-        white=(game_players or {}).get(int(getattr(p, "source_game_index", 0) or 0), ("", ""))[0],
-        black=(game_players or {}).get(int(getattr(p, "source_game_index", 0) or 0), ("", ""))[1],
+         source_game_index=int(getattr(p, "source_game_index", 0) or 0) or None,
+         # Prefer origin names embedded in puzzle (if saved with global bank),
+         # otherwise map using current game_players (may be None for Other Users view).
+         white=(getattr(p, "origin_white", None)
+             or (game_players or {}).get(int(getattr(p, "source_game_index", 0) or 0), ("", ""))[0]),
+         black=(getattr(p, "origin_black", None)
+             or (game_players or {}).get(int(getattr(p, "source_game_index", 0) or 0), ("", ""))[1]),
     )
 
 

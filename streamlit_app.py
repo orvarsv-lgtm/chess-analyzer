@@ -2075,7 +2075,7 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         save_sig_key = "saved_global_puzzles_sig"
         if st.session_state.get(save_sig_key) != games_sig:
             try:
-                save_puzzles_to_global_bank(puzzles, source_user=focus_player)
+                save_puzzles_to_global_bank(puzzles, source_user=focus_player, game_players=game_players)
                 st.session_state[save_sig_key] = games_sig
             except Exception:
                 pass

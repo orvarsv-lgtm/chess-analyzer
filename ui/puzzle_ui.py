@@ -11,7 +11,7 @@ import streamlit as st
 
 from puzzles.puzzle_store import PuzzleDefinition
 from puzzles.solution_line import compute_solution_line
-from puzzles.global_puzzle_store import record_puzzle_rating
+from puzzles.global_puzzle_store import record_puzzle_rating, get_user_rated_keys
 from ui.chessboard_component import render_chessboard
 
 # Stockfish path (shared with the main analyzer when available)
@@ -759,6 +759,16 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 or getattr(puzzle, "puzzle_id", None)
                 or f"index_{progress.current_index}"
             )
+
+            # Determine current rater and preload their rated puzzle keys from backend
+            rater = (st.session_state.get("puzzle_rater") or "").strip() or None
+
+            if "puzzle_rated_keys" not in st.session_state:
+                try:
+                    rated = get_user_rated_keys(rater)
+                except Exception:
+                    rated = set()
+                st.session_state["puzzle_rated_keys"] = set(rated)
 
             rated = st.session_state.get("puzzle_rated_keys")
             if not isinstance(rated, set):

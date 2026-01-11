@@ -202,7 +202,9 @@ def _iter_jsonl(path: Path) -> Iterable[dict]:
         return []
 
 
-def save_puzzles_to_global_bank(puzzles: list[Puzzle], *, source_user: str | None) -> int:
+def save_puzzles_to_global_bank(
+    puzzles: list[Puzzle], *, source_user: str | None, game_players: dict[int, tuple[str, str]] | None = None
+) -> int:
     """Append puzzles to the global bank (deduped by puzzle_key).
 
     Returns number of newly added puzzles.
@@ -229,12 +231,23 @@ def save_puzzles_to_global_bank(puzzles: list[Puzzle], *, source_user: str | Non
                 continue
             if key in existing_keys:
                 continue
+            # Attach origin player names when available so UI can display correct source
+            puzzle_dict = p.to_dict()
+            try:
+                idx = int(getattr(p, "source_game_index", 0) or 0)
+            except Exception:
+                idx = 0
+            if game_players and idx and idx in game_players:
+                white_name, black_name = game_players.get(idx, ("", ""))
+                puzzle_dict["origin_white"] = white_name
+                puzzle_dict["origin_black"] = black_name
+
             to_insert.append(
                 {
                     "puzzle_key": key,
                     "source_user": source_user_norm,
                     "ts": now,
-                    "puzzle": p.to_dict(),
+                    "puzzle": puzzle_dict,
                 }
             )
             existing_keys.add(key)
@@ -360,6 +373,32 @@ def record_puzzle_rating(*, puzzle_key: str, rating: Rating, rater: str | None =
         return
 
 
+def get_user_rated_keys(rater: str | None) -> set[str]:
+    """Return set of puzzle_key strings that the given rater has rated.
+
+    Works with Supabase when configured, otherwise scans local JSONL ratings file.
+    """
+    r = (rater or "").strip()
+    if not r:
+        return set()
+
+    keys = set()
+    if _supabase_config():
+        rows = _supabase_fetch_all(table="puzzle_ratings", select="puzzle_key,rater", filters=[("rater", "eq", r)])
+        for obj in rows:
+            k = obj.get("puzzle_key")
+            if isinstance(k, str) and k:
+                keys.add(k)
+        return keys
+
+    for obj in _iter_jsonl(_global_ratings_path()):
+        if obj.get("rater") == r:
+            k = obj.get("puzzle_key")
+            if isinstance(k, str) and k:
+                keys.add(k)
+    return keys
+
+
 def load_global_puzzles(*, exclude_source_user: str | None = None) -> list[Puzzle]:
     exclude = (exclude_source_user or "").strip().lower() or None
 
@@ -386,8 +425,16 @@ def load_global_puzzles(*, exclude_source_user: str | None = None) -> list[Puzzl
             p = obj.get("puzzle")
             if not isinstance(p, dict):
                 continue
+
             try:
                 puzzle = Puzzle.from_dict(p)
+                # Preserve origin player names if stored in the record
+                origin_white = p.get("origin_white") if isinstance(p, dict) else None
+                origin_black = p.get("origin_black") if isinstance(p, dict) else None
+                if origin_white:
+                    setattr(puzzle, "origin_white", origin_white)
+                if origin_black:
+                    setattr(puzzle, "origin_black", origin_black)
                 try:
                     board = chess.Board(puzzle.fen)
                     if not puzzle.best_move_uci:
@@ -416,6 +463,13 @@ def load_global_puzzles(*, exclude_source_user: str | None = None) -> list[Puzzl
 
             try:
                 puzzle = Puzzle.from_dict(p)
+                # Preserve origin player names if stored in the record
+                origin_white = p.get("origin_white") if isinstance(p, dict) else None
+                origin_black = p.get("origin_black") if isinstance(p, dict) else None
+                if origin_white:
+                    setattr(puzzle, "origin_white", origin_white)
+                if origin_black:
+                    setattr(puzzle, "origin_black", origin_black)
                 # Validate that the puzzle is valid before adding it
                 # This catches issues like invalid FEN or SAN that would cause crashes later
                 try:
