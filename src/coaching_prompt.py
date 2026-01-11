@@ -549,159 +549,250 @@ def build_single_game_coaching_prompt(
     player_rating: Optional[int] = None,
 ) -> str:
     """
-    Build prompt for single game analysis.
+    Build prompt for single game analysis with full move-by-move context.
     
-    This provides move-by-move context for deeper analysis.
+    This creates a comprehensive game review that walks through the game
+    like a real coach would.
     """
     
     moves_table = game_data.get('moves_table', [])
     opening = game_data.get('opening_name') or game_data.get('opening', 'Unknown')
     result = game_data.get('result', '*')
+    white_name = game_data.get('white', 'White')
+    black_name = game_data.get('black', 'Black')
+    date = game_data.get('date', '')
     
-    # Collect key moments
+    # Collect comprehensive move data
+    all_moves = []
     blunders = []
-    phase_cpl = {'opening': [], 'middlegame': [], 'endgame': []}
-    eval_swings = []
-    prev_eval = 0
+    mistakes = []
+    phase_moves = {'opening': [], 'middlegame': [], 'endgame': []}
     
-    had_winning = False
-    had_losing = False
+    running_eval = 0
+    max_advantage = 0
+    min_advantage = 0
     
-    for move in moves_table:
+    for i, move in enumerate(moves_table):
         move_color = move.get('mover') or move.get('color')
         cp_loss = move.get('cp_loss', 0) or move.get('actual_cp_loss', 0) or 0
         phase = move.get('phase', 'middlegame')
-        move_num = move.get('move_num') or ((move.get('ply', 0) + 1) // 2)
-        san = move.get('san') or move.get('move_san', '?')
-        best_move = move.get('best_move_san', '?')
+        ply = move.get('ply', i + 1)
+        move_num = move.get('move_num') or ((ply + 1) // 2)
+        san = move.get('move_san') or move.get('san', '?')
+        best_move = move.get('best_move_san', '')
+        score_cp = move.get('score_cp')
         
-        # Track eval
-        eval_after = move.get('score_cp') or move.get('eval_after')
-        if eval_after is not None:
+        # Track evaluation from player's perspective
+        if score_cp is not None:
             try:
-                eval_val = int(eval_after)
+                eval_val = int(score_cp)
                 if player_color == 'black':
                     eval_val = -eval_val
+                running_eval = eval_val
                 
-                if eval_val >= 150:
-                    had_winning = True
-                if eval_val <= -150:
-                    had_losing = True
-                
-                # Track swings on our moves
-                if move_color == player_color:
-                    swing = prev_eval - eval_val
-                    if abs(swing) >= 100:
-                        eval_swings.append({
-                            'move': move_num,
-                            'san': san,
-                            'swing': swing,
-                            'phase': phase,
-                            'best': best_move,
-                        })
-                
-                prev_eval = eval_val
+                if eval_val > max_advantage:
+                    max_advantage = eval_val
+                if eval_val < min_advantage:
+                    min_advantage = eval_val
             except (TypeError, ValueError):
                 pass
         
+        # Store all moves
+        all_moves.append({
+            'num': move_num,
+            'ply': ply,
+            'color': move_color,
+            'san': san,
+            'cp_loss': cp_loss if move_color == player_color else 0,
+            'eval': running_eval,
+            'phase': phase,
+            'best': best_move,
+        })
+        
         if move_color != player_color:
             continue
+            
+        phase_moves[phase].append(cp_loss)
         
-        # Track phase CPL
-        phase_cpl[phase].append(cp_loss)
-        
-        # Track blunders
-        if cp_loss >= 200:
+        # Categorize errors
+        if cp_loss >= 300:
             blunders.append({
-                'move': move_num,
+                'move_num': move_num,
+                'san': san,
+                'cp_loss': cp_loss,
+                'phase': phase,
+                'best': best_move,
+                'eval_before': running_eval + cp_loss,
+                'eval_after': running_eval,
+            })
+        elif cp_loss >= 100:
+            mistakes.append({
+                'move_num': move_num,
                 'san': san,
                 'cp_loss': cp_loss,
                 'phase': phase,
                 'best': best_move,
             })
     
-    # Calculate averages
-    avg_cpl = {
-        'opening': sum(phase_cpl['opening']) / len(phase_cpl['opening']) if phase_cpl['opening'] else 0,
-        'middlegame': sum(phase_cpl['middlegame']) / len(phase_cpl['middlegame']) if phase_cpl['middlegame'] else 0,
-        'endgame': sum(phase_cpl['endgame']) / len(phase_cpl['endgame']) if phase_cpl['endgame'] else 0,
-    }
+    # Calculate phase averages
+    def avg(lst): return sum(lst) / len(lst) if lst else 0
+    opening_cpl = avg(phase_moves['opening'])
+    middlegame_cpl = avg(phase_moves['middlegame'])
+    endgame_cpl = avg(phase_moves['endgame'])
     
-    # Determine outcome
+    # Determine game narrative
     is_win = (player_color == 'white' and result == '1-0') or (player_color == 'black' and result == '0-1')
     is_loss = (player_color == 'white' and result == '0-1') or (player_color == 'black' and result == '1-0')
     
-    # Format blunders
-    blunders_str = ""
+    had_winning = max_advantage >= 150
+    had_losing = min_advantage <= -150
+    threw_win = had_winning and is_loss
+    
+    # Build annotated move list
+    def format_move_sequence(start_ply, end_ply):
+        sequence = []
+        for m in all_moves:
+            if start_ply <= m['ply'] <= end_ply:
+                marker = ""
+                if m['color'] == player_color and m['cp_loss'] >= 200:
+                    marker = "??"
+                elif m['color'] == player_color and m['cp_loss'] >= 100:
+                    marker = "?"
+                
+                if m['color'] == 'white':
+                    sequence.append(f"{m['num']}. {m['san']}{marker}")
+                else:
+                    if not sequence or not sequence[-1].startswith(str(m['num'])):
+                        sequence.append(f"{m['num']}... {m['san']}{marker}")
+                    else:
+                        sequence[-1] += f" {m['san']}{marker}"
+        return ' '.join(sequence)
+    
+    # Build critical moment context
+    critical_context = ""
     if blunders:
-        for b in blunders:
-            blunders_str += f"- Move {b['move']} ({b['phase']}): {b['san']} lost {b['cp_loss']}cp (better: {b['best']})\n"
-    else:
-        blunders_str = "None"
+        worst = max(blunders, key=lambda x: x['cp_loss'])
+        start = max(1, (worst['move_num'] - 3) * 2 - 1)
+        end = min(len(all_moves), (worst['move_num'] + 2) * 2)
+        critical_context = f"""
+CRITICAL MOMENT - Move {worst['move_num']}:
+You played: {worst['san']} (lost {worst['cp_loss']} centipawns)
+Better was: {worst['best'] or 'see engine'}
+Position before: {worst['eval_before']:+d}cp | Position after: {worst['eval_after']:+d}cp
+
+Moves around this moment:
+{format_move_sequence(start, end)}
+"""
     
-    # Format swings
-    swings_str = ""
-    if eval_swings:
-        for s in sorted(eval_swings, key=lambda x: abs(x['swing']), reverse=True)[:5]:
-            direction = "lost" if s['swing'] > 0 else "gained"
-            swings_str += f"- Move {s['move']} ({s['phase']}): {s['san']} {direction} {abs(s['swing'])}cp\n"
-    else:
-        swings_str = "None significant"
+    # Build full annotated game
+    annotated_moves = []
+    current_phase = 'opening'
+    for m in all_moves:
+        if m['phase'] != current_phase:
+            annotated_moves.append(f"\n[{m['phase'].upper()}]")
+            current_phase = m['phase']
+        
+        annotation = ""
+        if m['color'] == player_color:
+            if m['cp_loss'] >= 300:
+                annotation = f" ?? (-{m['cp_loss']}cp, best: {m['best']})"
+            elif m['cp_loss'] >= 100:
+                annotation = f" ? (-{m['cp_loss']}cp)"
+        
+        if m['color'] == 'white':
+            annotated_moves.append(f"{m['num']}. {m['san']}{annotation}")
+        else:
+            if annotated_moves and not annotated_moves[-1].startswith('[') and str(m['num']) in annotated_moves[-1].split('.')[0]:
+                annotated_moves[-1] += f" {m['san']}{annotation}"
+            else:
+                annotated_moves.append(f"{m['num']}... {m['san']}{annotation}")
     
-    # Build prompt
+    game_notation = ' '.join(annotated_moves)
+    
+    # Build comprehensive data block
     data_block = f"""
 ================================================================================
-SINGLE GAME ANALYSIS
+GAME REVIEW: {white_name} vs {black_name} ({date})
 ================================================================================
 
-Opening: {opening}
-Player: {player_color.title()} ({player_rating or 'Unrated'})
-Result: {result} ({'Win' if is_win else 'Loss' if is_loss else 'Draw'})
+**BASICS:**
+- Opening: {opening}
+- You played: {player_color.title()} (Rating: {player_rating or 'Unknown'})
+- Result: {result} — {'YOU WON' if is_win else 'YOU LOST' if is_loss else 'DRAW'}
+- Total moves: {len(all_moves) // 2}
 
-Had winning position (+1.5 or better): {'Yes' if had_winning else 'No'}
-Had losing position (-1.5 or worse): {'Yes' if had_losing else 'No'}
+**GAME TRAJECTORY:**
+- Your best position: {max_advantage:+d}cp {'(winning!)' if max_advantage > 200 else ''}
+- Your worst position: {min_advantage:+d}cp {'(losing)' if min_advantage < -200 else ''}
+{'⚠️ WARNING: You had a WINNING position but LOST the game!' if threw_win else ''}
 
-PHASE CPL:
-- Opening: {avg_cpl['opening']:.0f}
-- Middlegame: {avg_cpl['middlegame']:.0f}
-- Endgame: {avg_cpl['endgame']:.0f}
+**ACCURACY BY PHASE:**
+- Opening: {opening_cpl:.0f} CPL {'✓' if opening_cpl < 30 else '⚠️' if opening_cpl < 60 else '❌'}
+- Middlegame: {middlegame_cpl:.0f} CPL {'✓' if middlegame_cpl < 40 else '⚠️' if middlegame_cpl < 80 else '❌'}
+- Endgame: {endgame_cpl:.0f} CPL {'✓' if endgame_cpl < 30 else '⚠️' if endgame_cpl < 60 else '❌'}
 
-BLUNDERS (200+cp loss):
-{blunders_str}
+**ERRORS:**
+- Blunders (300+ cp): {len(blunders)}
+- Mistakes (100-299 cp): {len(mistakes)}
 
-BIGGEST EVAL SWINGS:
-{swings_str}
+{critical_context}
+
+**FULL GAME (annotated):**
+{game_notation}
 ================================================================================
 """
 
-    instruction = """
-You are a chess coach reviewing one of your student's games. Give them honest, specific feedback that sounds like you're sitting across from them at the board.
+    instruction = """You are a chess coach doing a detailed post-game review with your student. Walk through this game like you're sitting at the board together, pointing at specific moves.
 
-**Guidelines:**
-1. Identify the single move or decision that most determined the outcome
-2. Explain WHY that error happened—what were they thinking, what did they miss, what assumption led them astray
-3. Give ONE specific, actionable lesson from this game
-4. Be direct. If they played well, say so clearly. If they threw away a winning position, tell them plainly.
-
-Write in natural, flowing sentences. No fragments, no "Because:" structures. This should read like a conversation.
+**Write your response with these EXACT sections:**
 
 ---
 
-## What Decided This Game
+## 🎯 The Verdict
 
-[2-3 sentences identifying the critical moment. Name the move, the position, what went wrong. Be specific: "The game turned on move 34. You had a solid extra pawn and a clear plan to advance it, but Rxe4 let your opponent activate their rook with tempo."]
+[2-3 sentences: What kind of game was this? What's the main takeaway? Be direct - if they threw away a winning game, say so clearly.]
 
-## Why It Happened
+## 📖 The Game Story
 
-[A paragraph explaining the mental or positional error. Not just "you missed the tactic" but WHY you missed it. Were you focused on the wrong part of the board? Did you assume your opponent couldn't create counterplay? Did you relax because you were winning? Connect this to a pattern if visible.]
+Walk through the game phase by phase. **Reference specific move numbers.**
 
-## The Lesson
+### Opening
+[What was played? Did they get a playable position? Any early errors? Mention specific moves like "After 5.Bc4, you played 5...Nf6 which is perfectly fine, but 7...h6 was unnecessary."]
 
-[One concrete takeaway they can apply to future games. Not "be more careful" but something specific like "When you're up material in a rook endgame, check every rook move your opponent has—even the ones that look passive. Active rooks can turn a lost game around in two moves."]
+### Middlegame  
+[The meat of the game. What was the plan? Where did things go right or wrong? Be specific: "Move 18.Nd5 was excellent - you correctly identified the outpost. But on move 23..."]
 
-## One Thing to Practice
+### Endgame
+[If applicable. Technical handling, key decisions.]
 
-[A specific exercise based on this game: "Set up the position from move 30 and practice finding the winning plan. Then look at similar positions in your other recent games—this pattern of premature simplification has cost you before."]
+## ⚡ The Turning Point
+
+[THE critical moment. Be very specific:]
+
+**The Move:** [exact move and move number]
+**What Happened:** [what this move did to the position]  
+**What Was Better:** [the correct move and why]
+**Why You Played It:** [what mental pattern or assumption led to this - were you rushing? did you miss a threat? were you too focused on attack?]
+
+## 🎓 One Key Lesson
+
+[A single, specific, actionable lesson from this game. Not "calculate better" but something like "In positions where you have a space advantage, don't trade pieces - each trade helps your cramped opponent breathe."]
+
+## 📋 Your Assignment
+
+[One concrete thing to do:]
+1. **Study this position:** Set up the board at move [X] and find the winning plan
+2. **Practice this pattern:** [specific puzzle type or drill]
+3. **Watch for this:** In your next games, notice when [specific pattern from this game]
+
+---
+
+**CRITICAL INSTRUCTIONS:**
+- Reference specific moves by number throughout (e.g., "On move 14...")
+- Be direct and honest - this should feel like real coaching
+- Connect errors to mental patterns, not just "you missed it"
+- Write naturally, like you're talking to them
+- If they played well in parts, acknowledge that too
 """
 
     return instruction + "\n" + data_block
