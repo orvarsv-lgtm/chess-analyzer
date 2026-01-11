@@ -179,6 +179,12 @@ def render_load_analysis_ui() -> Optional[Dict[str, Any]]:
     
     Returns the loaded analysis data if user selects one, else None.
     """
+    # Import translation function
+    try:
+        from src.translations import t
+    except ImportError:
+        def t(key): return key
+    
     user = st.session_state.get("user")
     if not user:
         return None
@@ -189,20 +195,20 @@ def render_load_analysis_ui() -> Optional[Dict[str, Any]]:
 
     saved = list_saved_analyses(user_id)
     if not saved:
-        st.info("No saved analyses yet. Run an analysis to save it.")
+        st.info(t("no_saved_analyses"))
         return None
 
-    st.markdown("#### 📂 Your Saved Analyses")
+    st.markdown(f"#### 📂 {t('saved_analyses')}")
     
     # Format options
     options = []
     for s in saved:
         updated = s.get("updated_at", "")[:10]
-        label = f"{s['username']} ({s['num_games']} games, depth {s['analysis_depth']}) - {updated}"
+        label = f"{s['username']} ({s['num_games']} {t('games')}, {t('depth')} {s['analysis_depth']}) - {updated}"
         options.append((s["id"], label, s["username"]))
 
     selected_idx = st.selectbox(
-        "Select analysis to load",
+        t("load_analysis"),
         range(len(options)),
         format_func=lambda i: options[i][1],
         key="load_analysis_select",
@@ -211,23 +217,14 @@ def render_load_analysis_ui() -> Optional[Dict[str, Any]]:
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        if st.button("📥 Load Analysis", use_container_width=True, key="load_analysis_btn"):
+        if st.button(f"📥 {t('load_analysis')}", use_container_width=True, key="load_analysis_btn"):
             analysis_id = options[selected_idx][0]
             loaded = load_analysis(user_id, analysis_id)
             if loaded:
                 st.success(f"Loaded analysis for '{loaded['username']}'")
                 return loaded
             else:
-                st.error("Failed to load analysis.")
+                st.error(t("error"))
     
     with col2:
-        if st.button("🗑️", key="delete_analysis_btn", help="Delete this analysis"):
-            analysis_id = options[selected_idx][0]
-            success, msg = delete_analysis(user_id, analysis_id)
-            if success:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-
-    return None
+        if st.button("🗑️", key="delete_analysis_btn", help=t("delete")):

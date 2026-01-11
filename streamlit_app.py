@@ -77,6 +77,9 @@ from src.auth import render_auth_sidebar, get_current_user, is_logged_in, requir
 # Saved analyses (for logged-in users)
 from src.saved_analyses import save_analysis, render_load_analysis_ui
 
+# Translations
+from src.translations import t, render_language_selector
+
 # Puzzle module imports
 from puzzles import (
     Puzzle,
@@ -1471,10 +1474,11 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
 
 
 def main() -> None:
-    st.title("Chess Analyzer")
-    st.caption("Contact us: orvarsv@icloud.com")
+    st.title(t("app_title"))
+    st.caption(f"{t('contact_us')}: orvarsv@icloud.com")
 
-    # Render authentication sidebar
+    # Render language selector and authentication sidebar
+    render_language_selector()
     render_auth_sidebar()
 
     if "analysis_result" not in st.session_state:
@@ -1482,11 +1486,11 @@ def main() -> None:
     if "analysis_request" not in st.session_state:
         st.session_state["analysis_request"] = None
 
-    st.subheader("Inputs")
+    st.subheader(t("inputs"))
     
     # Load previous analysis option (for signed-in users)
     if is_logged_in():
-        with st.expander("📂 Load Previous Analysis", expanded=False):
+        with st.expander(f"📂 {t('load_previous_analysis')}", expanded=False):
             loaded = render_load_analysis_ui()
             if loaded:
                 # Restore the analysis result from saved data
@@ -1506,11 +1510,11 @@ def main() -> None:
         )
     else:
         st.caption(f"Opening database loaded: {len(openings_db)} rows")
-    source = st.radio("Source", ["Lichess username", "Chess.com PGN file"], horizontal=True)
-    max_games = st.slider("Max games", min_value=1, max_value=200, value=10, step=1)
+    source = st.radio(t("source"), [t("lichess_username"), t("chess_com_pgn")], horizontal=True)
+    max_games = st.slider(t("max_games"), min_value=1, max_value=200, value=10, step=1)
 
     analysis_depth = st.slider(
-        "Engine depth (recommended 15)",
+        t("engine_depth"),
         min_value=10,
         max_value=20,
         value=15,
@@ -1521,12 +1525,12 @@ def main() -> None:
     pgn_text: str = ""  # single canonical analysis input
     focus_player: str | None = None
 
-    if source == "Lichess username":
-        username = st.text_input("Lichess username")
+    if source == t("lichess_username"):
+        username = st.text_input(t("lichess_username"))
         focus_player = username.strip() if username else None
-        if st.button("Run analysis"):
+        if st.button(t("run_analysis")):
             if not username:
-                st.error("Please enter a username")
+                st.error(t("please_enter_username"))
                 return
             try:
                 pgn_text = fetch_lichess_pgn(username, max_games=max_games)
@@ -1892,34 +1896,49 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     </style>
     """, unsafe_allow_html=True)
     
+    # Build translated view options
+    view_options = [
+        f"📊 {t('tab_analysis')}",
+        f"🤖 {t('tab_ai_coach')}",
+        f"🎮 {t('tab_replayer')}",
+        f"📚 {t('tab_openings')}",
+        f"⚔️ Opponent Analysis",
+        f"🏆 Streaks",
+        f"♟️ {t('tab_puzzles')}",
+    ]
+    
     # Stable view selector (survives reruns)
     if "main_view" not in st.session_state:
-        st.session_state["main_view"] = "📊 Analysis"
+        st.session_state["main_view"] = view_options[0]
+    
+    # Handle language change - reset view if current selection invalid
+    if st.session_state.get("main_view") not in view_options:
+        st.session_state["main_view"] = view_options[0]
 
     view = st.radio(
         "Main view",
-        options=["📊 Analysis", "🤖 AI Coach", "🎮 Game Replayer", "📚 Opening Repertoire", "⚔️ Opponent Analysis", "🏆 Streaks", "♟️ Puzzles"],
+        options=view_options,
         horizontal=False,
         key="main_view",
         label_visibility="collapsed",
     )
 
-    if view == "♟️ Puzzles":
+    if t('tab_puzzles') in view:
         _render_puzzle_tab(aggregated)
-    elif view == "🤖 AI Coach":
+    elif t('tab_ai_coach') in view:
         # Gate AI Coach behind login
         if not is_logged_in():
-            st.warning("🔒 **Sign in required** to access the AI Coach.")
+            st.warning(f"🔒 **{t('sign_in')}** required to access the AI Coach.")
             st.info("Use the sidebar to sign in with your email.")
         else:
             render_ai_coach_tab(aggregated)
-    elif view == "🎮 Game Replayer":
+    elif t('tab_replayer') in view:
         _render_game_replayer_tab(aggregated)
-    elif view == "📚 Opening Repertoire":
+    elif t('tab_openings') in view:
         _render_opening_repertoire_tab(aggregated)
-    elif view == "⚔️ Opponent Analysis":
+    elif "Opponent" in view:
         _render_opponent_analysis_tab(aggregated)
-    elif view == "🏆 Streaks":
+    elif "Streak" in view:
         _render_streaks_tab(aggregated)
     else:
         _render_enhanced_ui(aggregated)
