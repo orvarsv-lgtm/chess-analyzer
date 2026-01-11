@@ -198,22 +198,45 @@ def generate_game_review(
     moves_table = game_data.get('moves_table', [])
     key_moments = []
     for move in moves_table:
-        if (move.get('mover') or move.get('color')) == player_color:
-            cp_loss = move.get('cp_loss', 0) or 0
+        mover = move.get('mover') or move.get('color') or ''
+        if mover == player_color:
+            cp_loss = move.get('cp_loss', 0) or move.get('actual_cp_loss', 0) or 0
             if cp_loss >= 200:
-                move_num = move.get('move_num') or ((move.get('ply', 0) + 1) // 2)
+                ply = move.get('ply', 0) or 0
+                move_num = move.get('move_num') or ((ply + 1) // 2)
+                move_san = move.get('move_san') or move.get('san') or '?'
+                best_san = move.get('best_move_san') or move.get('best_san') or ''
+                advice = f"**{move_san}** lost {cp_loss}cp"
+                if best_san and best_san != '?':
+                    advice += f" (best: {best_san})"
                 key_moments.append({
                     'move': move_num,
-                    'advice': f"{move.get('san', '?')} lost {cp_loss}cp (best: {move.get('best_move_san', '?')})",
+                    'advice': advice,
                 })
     
+    # If we got an AI response with actual content, use it
+    # Otherwise fall back to simpler summaries
+    summary = sections.get('summary', '')
+    if not summary:
+        # Generate a basic summary from the game result
+        result = game_data.get('result', '?')
+        opening = game_data.get('opening_name') or game_data.get('opening') or 'Unknown'
+        if result == '1-0':
+            outcome = "White won" if player_color == 'white' else "White won against you"
+        elif result == '0-1':
+            outcome = "You won as Black" if player_color == 'black' else "Black won against you"
+        else:
+            outcome = "The game ended in a draw"
+        total_blunders = len([m for m in key_moments if 'lost' in str(m.get('advice', ''))])
+        summary = f"{outcome}. Opening: {opening}. You had {total_blunders} significant inaccuracies (200+ cp loss)."
+    
     return AICoachResponse(
-        game_summary=sections.get('summary', 'No analysis available.'),
+        game_summary=summary,
         key_moments=key_moments[:5],
-        opening_advice=sections.get('opening', ''),
-        strategic_advice=sections.get('strategy', ''),
-        tactical_advice=sections.get('tactics', ''),
-        training_recommendations=sections.get('training', [])[:3],
+        opening_advice=sections.get('opening', '') or "Review the opening phase in an engine to compare with database games.",
+        strategic_advice=sections.get('strategy', '') or "Focus on the key moments identified above.",
+        tactical_advice=sections.get('tactics', '') or "Practice tactical puzzles based on the themes in this game.",
+        training_recommendations=sections.get('training', [])[:3] or ["Analyze this game move-by-move with an engine"],
         timestamp=datetime.now(),
         cost_cents=cost_cents,
         tokens_used=tokens_used,
@@ -230,6 +253,9 @@ def _parse_game_coach_response(content: str) -> Dict[str, Any]:
         'training': [],
     }
     
+    if not content:
+        return sections
+    
     lines = content.split('\n')
     current_section = None
     current_content = []
@@ -237,18 +263,28 @@ def _parse_game_coach_response(content: str) -> Dict[str, Any]:
     for line in lines:
         lower = line.lower().strip()
         
-        # Detect section headers
-        if 'what decided' in lower or 'turning point' in lower:
+        # Detect section headers (more flexible matching)
+        if any(x in lower for x in ['what decided', 'turning point', 'game summary', 'summary:', 'decisive moment', 'critical moment']):
             if current_section and current_content:
                 _store_game_section(sections, current_section, current_content)
             current_section = 'summary'
             current_content = []
-        elif 'why it happened' in lower or 'why this happened' in lower:
+        elif any(x in lower for x in ['why it happened', 'why this happened', 'root cause', 'analysis:', 'strategic', 'what went wrong']):
             if current_section and current_content:
                 _store_game_section(sections, current_section, current_content)
             current_section = 'strategy'
             current_content = []
-        elif 'the lesson' in lower or 'takeaway' in lower:
+        elif any(x in lower for x in ['opening', 'first moves']):
+            if current_section and current_content:
+                _store_game_section(sections, current_section, current_content)
+            current_section = 'opening'
+            current_content = []
+        elif any(x in lower for x in ['tactical', 'tactics', 'calculation']):
+            if current_section and current_content:
+                _store_game_section(sections, current_section, current_content)
+            current_section = 'tactics'
+            current_content = []
+        elif any(x in lower for x in ['the lesson', 'takeaway', 'recommendation', 'training', 'practice', 'improve']):
             if current_section and current_content:
                 _store_game_section(sections, current_section, current_content)
             current_section = 'training'
@@ -260,9 +296,12 @@ def _parse_game_coach_response(content: str) -> Dict[str, Any]:
     if current_section and current_content:
         _store_game_section(sections, current_section, current_content)
     
-    # Fallback if parsing fails
-    if not sections['summary'] and content:
-        sections['summary'] = content[:300] + '...' if len(content) > 300 else content
+    # Fallback if parsing finds nothing specific - use the whole content
+    if not any([sections['summary'], sections['strategy'], sections['opening']]):
+        # Just use the whole response as summary
+        clean_content = '\n'.join(l.strip() for l in lines if l.strip() and not l.strip().startswith('#'))
+        if clean_content:
+            sections['summary'] = clean_content[:1500] if len(clean_content) > 1500 else clean_content
     
     return sections
 
