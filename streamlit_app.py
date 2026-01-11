@@ -26,7 +26,7 @@ def _hydrate_env_from_streamlit_secrets() -> None:
     except Exception:
         return
 
-    for k in ("PUZZLE_BANK_BACKEND", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
+    for k in ("PUZZLE_BANK_BACKEND", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"):
         try:
             if not os.getenv(k) and secrets.get(k):
                 os.environ[k] = str(secrets.get(k))
@@ -70,6 +70,9 @@ from src.streak_detection import (
 
 # AI Coach imports
 from src.ai_coach_ui import render_ai_coach_tab, render_tier_selector_sidebar
+
+# Auth imports
+from src.auth import render_auth_sidebar, get_current_user, is_logged_in, require_auth
 
 # Puzzle module imports
 from puzzles import (
@@ -1467,6 +1470,9 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
 def main() -> None:
     st.title("Chess Analyzer (Remote Engine)")
 
+    # Render authentication sidebar
+    render_auth_sidebar()
+
     if "analysis_result" not in st.session_state:
         st.session_state["analysis_result"] = None
     if "analysis_request" not in st.session_state:
@@ -1847,7 +1853,12 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     if view == "♟️ Puzzles":
         _render_puzzle_tab(aggregated)
     elif view == "🤖 AI Coach":
-        render_ai_coach_tab(aggregated)
+        # Gate AI Coach behind login
+        if not is_logged_in():
+            st.warning("🔒 **Sign in required** to access the AI Coach.")
+            st.info("Use the sidebar to sign in with your email.")
+        else:
+            render_ai_coach_tab(aggregated)
     elif view == "🎮 Game Replayer":
         _render_game_replayer_tab(aggregated)
     elif view == "📚 Opening Repertoire":
@@ -1869,7 +1880,12 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     games = aggregated.get("games", [])
     focus_player = (aggregated.get("focus_player") or "").strip()
     # Used by the puzzle trainer UI for rating attribution.
-    st.session_state["puzzle_rater"] = focus_player
+    # Prefer logged-in user ID if available
+    user = get_current_user()
+    if user and user.get("id"):
+        st.session_state["puzzle_rater"] = user.get("id")
+    else:
+        st.session_state["puzzle_rater"] = focus_player
     
     if not games:
         st.info("No games analyzed yet. Run an analysis to generate puzzles!")
@@ -2085,12 +2101,14 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     # Avoid repeating the same save on every rerun.
     if source_mode == "My games":
         save_sig_key = "saved_global_puzzles_sig"
-        # Only persist to the shared global bank when we have a known username
-        # to attribute the puzzles. Avoid saving anonymous puzzles (source_user
-        # empty) which later appear under "Other users" for everyone.
-        if focus_player and st.session_state.get(save_sig_key) != games_sig:
+        # Determine source_user: prefer logged-in user ID, fallback to focus_player
+        user = get_current_user()
+        source_user = user.get("id") if user else focus_player
+        # Only persist to the shared global bank when we have a known user
+        # to attribute the puzzles. Avoid saving anonymous puzzles.
+        if source_user and st.session_state.get(save_sig_key) != games_sig:
             try:
-                save_puzzles_to_global_bank(puzzles, source_user=focus_player, game_players=game_players)
+                save_puzzles_to_global_bank(puzzles, source_user=source_user, game_players=game_players)
                 st.session_state[save_sig_key] = games_sig
             except Exception:
                 pass

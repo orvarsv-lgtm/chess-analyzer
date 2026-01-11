@@ -763,8 +763,14 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 or f"index_{progress.current_index}"
             )
 
-            # Determine current rater and preload their rated puzzle keys from backend
-            rater = (st.session_state.get("puzzle_rater") or "").strip() or None
+            # Determine current rater: prefer logged-in user, fallback to puzzle_rater session
+            user = st.session_state.get("user")
+            if user and user.get("id"):
+                rater = user.get("id")
+                rater_display = user.get("email", "User")
+            else:
+                rater = (st.session_state.get("puzzle_rater") or "").strip() or None
+                rater_display = rater
 
             if "puzzle_rated_keys" not in st.session_state:
                 try:
@@ -812,8 +818,6 @@ div[data-testid="stHorizontalBlock"] button p {
                     st.success(f"✓ You rated this puzzle: **{prev}**")
             else:
                 st.write("**How was this puzzle?**")
-
-            rater = (st.session_state.get("puzzle_rater") or "").strip() or None
 
             # Use 3 equal columns but with 'gap="small"' and strict CSS to prevent overflow
             col1, col2, col3 = st.columns(3, gap="small")
