@@ -729,35 +729,10 @@ def _generate_and_display_review(
 
 
 def _render_ai_review(review: AICoachResponse):
-    """Render the AI coach review in narrative format."""
+    """Render the AI coach review as a narrative."""
     
-    # 🧠 What Decided This Game
-    st.markdown("### 🧠 What Decided This Game")
-    st.write(review.what_decided)
-    
-    # 🔍 The Turning Point
-    st.markdown("### 🔍 The Turning Point")
-    st.write(review.turning_point)
-    
-    # ⚠️ What Changed After That
-    st.markdown("### ⚠️ What Changed After That")
-    st.write(review.what_changed)
-    
-    # ♜ What Your Opponent Was Allowed To Do
-    st.markdown("### ♜ What Your Opponent Was Allowed To Do")
-    st.write(review.opponent_plan)
-    
-    # 🛑 What Would Have Helped
-    st.markdown("### 🛑 What Would Have Helped")
-    st.write(review.what_would_help)
-    
-    # 🎯 The Lesson From This Game
-    st.markdown("### 🎯 The Lesson From This Game")
-    st.info(review.lesson)
-    
-    # ✅ One-Sentence Summary
-    st.markdown("### ✅ One-Sentence Summary")
-    st.success(review.one_sentence)
+    # Display the full narrative response with markdown rendering
+    st.markdown(review.narrative)
     
     # Metadata
     with st.expander("ℹ️ Review Metadata", expanded=False):

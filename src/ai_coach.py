@@ -113,13 +113,7 @@ def _get_openai_client():
 @dataclass
 class AICoachResponse:
     """Response from AI coach analysis - narrative style."""
-    what_decided: str  # What decided the game (narrative)
-    turning_point: str  # The critical moment/decision
-    what_changed: str  # Before/after the turning point
-    opponent_plan: str  # What opponent was allowed to do
-    what_would_help: str  # What approach was needed
-    lesson: str  # The key insight from this game
-    one_sentence: str  # One-sentence summary
+    narrative: str  # Full narrative coaching response
     timestamp: datetime
     cost_cents: int  # API cost in cents
     tokens_used: int  # Total tokens consumed
@@ -182,103 +176,29 @@ def generate_game_review(
     except Exception as e:
         # Fallback to basic analysis
         result = game_data.get('result', '?')
+        opening = game_data.get('opening_name') or game_data.get('opening') or 'Unknown'
         is_win = (player_color == 'white' and result == '1-0') or (player_color == 'black' and result == '0-1')
         is_loss = (player_color == 'white' and result == '0-1') or (player_color == 'black' and result == '1-0')
+        outcome = 'won' if is_win else 'lost' if is_loss else 'drew'
         
-        sections = {
-            'what_decided': f"The game ended in a {'win' if is_win else 'loss' if is_loss else 'draw'}. (Detailed analysis unavailable)",
-            'turning_point': "Review the game in an engine to identify the turning point.",
-            'what_changed': "Unable to generate analysis at this time.",
-            'opponent_plan': "Review opponent's plan manually.",
-            'what_would_help': "Analyze the position with an engine.",
-            'lesson': "Every game is a learning opportunity.",
-            'one_sentence': "Review this game carefully.",
-        }
+        ai_analysis = f"""## 🧠 Game Overview
+
+You {outcome} this game playing {player_color} in the {opening}.
+
+(Detailed AI analysis unavailable - please try again later)
+
+## 🎯 What To Do
+
+Review this game move-by-move with an engine to identify the key turning points."""
         tokens_used = 0
         cost_cents = 0
     
     return AICoachResponse(
-        what_decided=sections.get('what_decided', ''),
-        turning_point=sections.get('turning_point', ''),
-        what_changed=sections.get('what_changed', ''),
-        opponent_plan=sections.get('opponent_plan', ''),
-        what_would_help=sections.get('what_would_help', ''),
-        lesson=sections.get('lesson', ''),
-        one_sentence=sections.get('one_sentence', ''),
+        narrative=ai_analysis,
         timestamp=datetime.now(),
         cost_cents=cost_cents,
         tokens_used=tokens_used,
     )
-
-
-def _parse_narrative_response(content: str) -> Dict[str, Any]:
-    """Parse the narrative AI coach response into sections."""
-    sections = {
-        'what_decided': '',
-        'turning_point': '',
-        'what_changed': '',
-        'opponent_plan': '',
-        'what_would_help': '',
-        'lesson': '',
-        'one_sentence': '',
-    }
-    
-    if not content:
-        return sections
-    
-    # Section header patterns (emoji-based)
-    section_markers = [
-        ('🧠', 'what_decided'),
-        ('what decided', 'what_decided'),
-        ('🔍', 'turning_point'),
-        ('turning point', 'turning_point'),
-        ('⚠️', 'what_changed'),
-        ('what changed', 'what_changed'),
-        ('♜', 'opponent_plan'),
-        ('opponent', 'opponent_plan'),
-        ('allowed to do', 'opponent_plan'),
-        ('🛑', 'what_would_help'),
-        ('would have helped', 'what_would_help'),
-        ('🎯', 'lesson'),
-        ('the lesson', 'lesson'),
-        ('✅', 'one_sentence'),
-        ('one-sentence', 'one_sentence'),
-        ('summary', 'one_sentence'),
-    ]
-    
-    lines = content.split('\n')
-    current_section = None
-    current_content = []
-    
-    for line in lines:
-        lower = line.lower().strip()
-        
-        # Check if this line is a section header
-        new_section = None
-        for marker, section_key in section_markers:
-            if marker in lower:
-                new_section = section_key
-                break
-        
-        if new_section:
-            # Save previous section
-            if current_section and current_content:
-                sections[current_section] = '\n'.join(current_content).strip()
-            current_section = new_section
-            current_content = []
-        elif line.strip() and not line.strip().startswith('#'):
-            # Content line
-            current_content.append(line.strip())
-    
-    # Save last section
-    if current_section and current_content:
-        sections[current_section] = '\n'.join(current_content).strip()
-    
-    # If parsing failed, put everything in what_decided
-    if not any(sections.values()):
-        sections['what_decided'] = content
-    
-    return sections
 
 
 def generate_position_insight(
@@ -460,42 +380,30 @@ def _build_game_review_prompt(
 
 ---
 
-**Write your review using these EXACT section headers:**
+**Write a narrative review using emoji-headed sections. Choose sections that fit THIS game — not every game needs the same structure.**
 
-## 🧠 What Decided This Game
-[Open with a narrative hook. Was it decided by a blunder, or something subtler — a drift, a wrong plan, a moment of relaxation? Describe the position in human terms: Were you better? What did the position require? What actually happened?]
+Some example section headers you might use (pick 4-6 that fit):
+- 🧠 What Decided This Game
+- 🔍 The Turning Point  
+- ⚠️ What Changed After That
+- ♜ What Your Opponent Was Allowed To Do
+- 🛑 What Would Have Helped
+- ✨ What You Did Well
+- 💡 The Key Insight
+- 🎯 The Lesson From This Game
+- ✅ One-Sentence Summary
 
-## 🔍 The Turning Point
-[THE moment the game's character changed. What move or decision was it? What did the position look like before? What did this move allow your opponent to do? Use phrases like "From this move onward..."]
+**IMPORTANT GUIDELINES:**
+- Open with a narrative hook — what kind of game was this?
+- Focus on the STORY, not a list of moves or errors
+- Use short, punchy paragraphs. One idea each.
+- Use narrative language: "the game drifted," "the position breathed," "the advantage evaporated"
+- You may reference a move number briefly ("Move 28") but don't pepper the text with them
+- Avoid centipawn references and engine-speak
+- Be honest but not harsh. Insightful, not judgmental.
+- End with something memorable — a lesson, a summary, an insight
 
-## ⚠️ What Changed After That
-[Before/after contrast:
-**Before:** What were you doing? Creating pressure? Asking questions?
-**After:** What shifted? Reacting instead of acting? Moves became neutral?]
-
-## ♜ What Your Opponent Was Allowed To Do  
-[What simple plan did they get to execute? Why didn't they have to deviate? How did this lead to the result?]
-
-## 🛑 What Would Have Helped
-[Not "the computer move" but the TYPE of approach needed — a commitment, a restriction, a different mindset. Why was this approach needed?]
-
-## 🎯 The Lesson From This Game
-[One insight specific to THIS game. Frame it as wisdom: "This game didn't punish X. It punished Y."]
-
-## ✅ One-Sentence Summary
-[A powerful sentence capturing the essence. Examples:
-- "You gave your opponent time in a position where time was the only thing they needed."
-- "You played to not lose instead of playing to win."]
-
----
-
-**STYLE:**
-- Short, punchy paragraphs. One idea each.
-- Narrative language: "the game drifted," "the position breathed," "the advantage evaporated"
-- Focus on STORY, not analysis
-- Avoid: excessive move notation, centipawn references, engine-speak
-- You may reference a move number once ("Move 28") but don't pepper the text
-- Be honest but not harsh. Insightful, not judgmental."""
+The review should feel like wisdom from an experienced coach, not a computer printout."""
     
     return prompt
 
