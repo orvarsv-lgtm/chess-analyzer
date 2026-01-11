@@ -2080,7 +2080,10 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
             except Exception:
                 pass
 
-    puzzle_defs = from_legacy_puzzles(filtered_puzzles, game_players=game_players)
+    # When viewing other users' puzzles, avoid mapping missing origin names
+    # to the current user's `game_players` (which causes incorrect attribution).
+    gp_for_ui = game_players if source_mode == "My games" else None
+    puzzle_defs = from_legacy_puzzles(filtered_puzzles, game_players=gp_for_ui)
     render_puzzle_trainer(puzzle_defs)
 
 
