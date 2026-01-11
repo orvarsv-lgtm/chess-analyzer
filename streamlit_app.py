@@ -1694,6 +1694,8 @@ def main() -> None:
                     )
                     if success:
                         st.toast(msg, icon="💾")
+                    else:
+                        st.warning(f"⚠️ Could not save analysis: {msg}")
 
     else:
         st.caption(f"Build: {_get_build_id()}")
@@ -1839,6 +1841,8 @@ def main() -> None:
                     )
                     if success:
                         st.toast(msg, icon="💾")
+                    else:
+                        st.warning(f"⚠️ Could not save analysis: {msg}")
 
     req = st.session_state.get("analysis_request")
     if req:
