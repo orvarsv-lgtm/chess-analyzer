@@ -170,16 +170,9 @@ def generate_game_review(
         tokens_used = getattr(response.usage, "total_tokens", 0) or 0
         cost_cents = _estimate_cost_cents(tokens_used)
 
-        # Defensive fallback: some models/SDK responses can yield empty content
+        # Defensive fallback: if the model returns empty content, build a deterministic summary
         if not ai_analysis:
-            opening = game_data.get('opening_name') or game_data.get('opening') or 'Unknown'
-            result = game_data.get('result', '?')
-            ai_analysis = (
-                "## 🧠 Game Review\n\n"
-                "(The model returned an empty response. Please try again.)\n\n"
-                f"Opening: {opening}\n"
-                f"Result: {result}\n"
-            )
+            ai_analysis = _build_fallback_narrative(game_data, player_color, player_rating)
         
     except Exception as e:
         # Fallback to basic analysis
@@ -190,15 +183,7 @@ def generate_game_review(
         is_loss = (player_color == 'white' and result == '0-1') or (player_color == 'black' and result == '1-0')
         outcome = 'won' if is_win else 'lost' if is_loss else 'drew'
         
-        ai_analysis = f"""## 🧠 Game Overview
-
-You {outcome} this game playing {player_color} in the {opening}.
-
-(Detailed AI analysis unavailable - please try again later)
-
-## 🎯 What To Do
-
-Review this game move-by-move with an engine to identify the key turning points."""
+        ai_analysis = _build_fallback_narrative(game_data, player_color, player_rating)
         tokens_used = 0
         cost_cents = 0
     
@@ -208,6 +193,58 @@ Review this game move-by-move with an engine to identify the key turning points.
         cost_cents=cost_cents,
         tokens_used=tokens_used,
     )
+
+
+def _build_fallback_narrative(game_data: Dict[str, Any], player_color: str, player_rating: Optional[int] = None) -> str:
+    """Build a deterministic narrative when the model returns no content."""
+    opening = game_data.get('opening_name') or game_data.get('opening') or 'Unknown'
+    result = game_data.get('result', '?')
+    moves_table = game_data.get('moves_table', []) or []
+
+    # Collect player's blunders (cp_loss >= 200)
+    blunders = []
+    for move in moves_table:
+        mover = move.get('mover') or move.get('color')
+        if mover != player_color:
+            continue
+        cp_loss = move.get('cp_loss', 0) or move.get('actual_cp_loss', 0) or 0
+        if cp_loss >= 200:
+            move_num = move.get('move_num') or ((move.get('ply', 0) + 1) // 2)
+            san = move.get('move_san') or move.get('san') or '?'
+            best = move.get('best_move_san') or move.get('best_san') or ''
+            blunders.append((move_num, san, cp_loss, best))
+
+    blunder_lines = []
+    for move_num, san, cp_loss, best in blunders[:2]:
+        best_part = f" (best was {best})" if best else ""
+        blunder_lines.append(f"- Move {move_num}: {san} lost {cp_loss}cp{best_part}")
+
+    blunder_text = "\n".join(blunder_lines) if blunder_lines else "No major blunders recorded."
+
+    outcome = {
+        ('white', '1-0'): "You won as White",
+        ('black', '0-1'): "You won as Black",
+        ('white', '0-1'): "You lost as White",
+        ('black', '1-0'): "You lost as Black",
+    }.get((player_color, result), "The game ended in a draw")
+
+    rating_text = f" (Rating: {player_rating})" if player_rating else ""
+
+    return f"""## 🧠 Game Overview
+{outcome}{rating_text} in the {opening}.
+
+The AI model returned no content, so here's a quick summary you can use right away.
+
+## 🔍 Turning Points (from your side)
+{blunder_text}
+
+## 🎯 What To Do
+- Review these turning points with an engine.
+- Re-create the critical positions and find the better continuation.
+
+## ✅ One-Sentence Summary
+"You had to keep asking questions; once you stopped, the game slipped away."
+"""
 
 
 def generate_position_insight(
