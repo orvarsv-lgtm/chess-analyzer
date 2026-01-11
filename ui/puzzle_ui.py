@@ -795,7 +795,9 @@ div[data-testid="column"] button[kind="secondary"] {
     font-weight: 600;
     transition: all 0.2s;
     white-space: nowrap;
-    min-width: 100px;
+    min-width: 130px;
+    word-break: keep-all;
+    text-align: center;
 }
 div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
     transform: scale(1.05);
