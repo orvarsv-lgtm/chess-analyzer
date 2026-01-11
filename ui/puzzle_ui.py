@@ -785,17 +785,22 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             already = puzzle_key in rated
             
-            # Custom CSS for better-looking rating buttons - smaller text, wider columns
+            # Custom CSS for rating buttons - prevent overlap and ensure interaction
             st.markdown("""
 <style>
+div[data-testid="column"] {
+    display: flex;
+    justify-content: center;
+}
 div[data-testid="stHorizontalBlock"] button {
-    min-width: 110px !important;
-    padding: 0px !important;
-    height: 40px !important;
+    height: 38px !important;
+    padding: 0 4px !important;
+    margin: 0 !important;
 }
 div[data-testid="stHorizontalBlock"] button p {
-    font-size: 0.8rem !important;
-    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
     white-space: nowrap !important;
 }
 </style>
@@ -810,7 +815,8 @@ div[data-testid="stHorizontalBlock"] button p {
 
             rater = (st.session_state.get("puzzle_rater") or "").strip() or None
 
-            col1, col2, col3 = st.columns([1.3, 1, 1], gap="small")
+            # Use 3 equal columns but with 'gap="small"' and strict CSS to prevent overflow
+            col1, col2, col3 = st.columns(3, gap="small")
             # Ensure all rating buttons are always visible and update state correctly
             with col1:
                 dislike_clicked = st.button("👎 Dislike", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}")
