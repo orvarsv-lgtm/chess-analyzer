@@ -170,11 +170,9 @@ def generate_game_review(
         tokens_used = response.usage.total_tokens
         cost_cents = _estimate_cost_cents(tokens_used)
         
-        # Parse the narrative response
-        sections = _parse_narrative_response(ai_analysis)
-        
     except Exception as e:
         # Fallback to basic analysis
+        print(f"Error generating AI review: {e}")
         result = game_data.get('result', '?')
         opening = game_data.get('opening_name') or game_data.get('opening') or 'Unknown'
         is_win = (player_color == 'white' and result == '1-0') or (player_color == 'black' and result == '0-1')
