@@ -342,7 +342,7 @@ def _render_single_game_review(games: List[Dict], aggregated: Dict, user_id: str
         black = game.get('black', '?')
         result = game.get('result', '?')
         date = game.get('date', '?')
-        opening = game.get('opening_name', 'Unknown Opening')
+        opening = game.get('opening_name') or game.get('opening') or 'Unknown Opening'
         
         label = f"Game {i+1}: {white} vs {black} ({result}) - {opening} - {date}"
         game_options.append(label)
@@ -359,7 +359,7 @@ def _render_single_game_review(games: List[Dict], aggregated: Dict, user_id: str
     with st.expander("📋 Game Info", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Opening", selected_game.get('opening_name', 'Unknown'))
+            st.metric("Opening", selected_game.get('opening_name') or selected_game.get('opening') or 'Unknown')
         with col2:
             st.metric("Result", selected_game.get('result', '?'))
         with col3:

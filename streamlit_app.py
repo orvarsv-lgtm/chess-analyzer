@@ -74,6 +74,9 @@ from src.ai_coach_ui import render_ai_coach_tab, render_tier_selector_sidebar
 # Auth imports
 from src.auth import render_auth_sidebar, get_current_user, is_logged_in, require_auth
 
+# Saved analyses (for logged-in users)
+from src.saved_analyses import save_analysis, render_load_analysis_ui
+
 # Puzzle module imports
 from puzzles import (
     Puzzle,
@@ -1480,6 +1483,22 @@ def main() -> None:
         st.session_state["analysis_request"] = None
 
     st.subheader("Inputs")
+    
+    # Load previous analysis option (for signed-in users)
+    if is_logged_in():
+        with st.expander("📂 Load Previous Analysis", expanded=False):
+            loaded = render_load_analysis_ui()
+            if loaded:
+                # Restore the analysis result from saved data
+                st.session_state["analysis_result"] = loaded.get("analysis_data")
+                st.session_state["analysis_request"] = {
+                    "source": loaded.get("source", "lichess"),
+                    "max_games": loaded.get("num_games", 0),
+                    "loaded_from_save": True,
+                    "loaded_username": loaded.get("username", ""),
+                }
+                st.rerun()
+    
     if openings_db is None or openings_db.empty or not _OPENING_INDEX:
         st.warning(
             "Opening database is not loaded (or empty). "
@@ -1661,6 +1680,21 @@ def main() -> None:
             aggregated["focus_player"] = focus_player  # Pass through for analytics
             st.session_state["analysis_result"] = aggregated
 
+            # Auto-save for signed-in users
+            if is_logged_in():
+                user = get_current_user()
+                if user and user.get("id"):
+                    success, msg = save_analysis(
+                        user_id=user["id"],
+                        username=username,
+                        source="lichess",
+                        num_games=games_to_analyze,
+                        analysis_depth=int(analysis_depth),
+                        analysis_data=aggregated,
+                    )
+                    if success:
+                        st.toast(msg, icon="💾")
+
     else:
         st.caption(f"Build: {_get_build_id()}")
         uploaded_files = st.file_uploader(
@@ -1790,6 +1824,21 @@ def main() -> None:
             aggregated = _aggregate_postprocessed_results(aggregated_games)
             aggregated["focus_player"] = focus_player  # Pass through for analytics
             st.session_state["analysis_result"] = aggregated
+
+            # Auto-save for signed-in users (Chess.com PGN)
+            if is_logged_in() and focus_player:
+                user = get_current_user()
+                if user and user.get("id"):
+                    success, msg = save_analysis(
+                        user_id=user["id"],
+                        username=focus_player,
+                        source="chess.com",
+                        num_games=games_to_analyze,
+                        analysis_depth=int(analysis_depth),
+                        analysis_data=aggregated,
+                    )
+                    if success:
+                        st.toast(msg, icon="💾")
 
     req = st.session_state.get("analysis_request")
     if req:
