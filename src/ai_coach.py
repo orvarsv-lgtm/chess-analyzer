@@ -384,87 +384,138 @@ def _build_game_review_prompt(
     opening_name = game_data.get('opening_name', 'Unknown')
     result = game_data.get('result', 'Unknown')
     
-    # Find biggest mistakes (blunders)
+    # Find biggest mistakes (blunders) with more context
     blunders = []
     for move in moves_table:
-        if move.get('color') == player_color and move.get('cp_loss', 0) >= 200:
+        mover = move.get('mover') or move.get('color')
+        cp_loss = move.get('cp_loss', 0) or move.get('actual_cp_loss', 0) or 0
+        if mover == player_color and cp_loss >= 100:
             blunders.append({
-                'move_num': move.get('move_num'),
-                'san': move.get('san'),
-                'cp_loss': move.get('cp_loss'),
+                'move_num': move.get('move_num') or ((move.get('ply', 0) + 1) // 2),
+                'san': move.get('move_san') or move.get('san'),
+                'cp_loss': cp_loss,
                 'phase': move.get('phase'),
                 'best_move': move.get('best_move_san'),
             })
     
+    # Sort by cp_loss descending
+    blunders.sort(key=lambda x: x['cp_loss'], reverse=True)
+    
+    # Build full move list for context
+    move_list = []
+    for move in moves_table:
+        move_num = move.get('move_num') or ((move.get('ply', 0) + 1) // 2)
+        san = move.get('move_san') or move.get('san') or '?'
+        mover = move.get('mover') or move.get('color')
+        cp_loss = move.get('cp_loss', 0) or move.get('actual_cp_loss', 0) or 0
+        phase = move.get('phase', '')
+        
+        annotation = ""
+        if mover == player_color and cp_loss >= 200:
+            annotation = "??"
+        elif mover == player_color and cp_loss >= 100:
+            annotation = "?"
+        
+        if mover == 'white':
+            move_list.append(f"{move_num}. {san}{annotation}")
+        else:
+            if move_list and str(move_num) in move_list[-1]:
+                move_list[-1] += f" {san}{annotation}"
+            else:
+                move_list.append(f"{move_num}... {san}{annotation}")
+    
+    game_moves = ' '.join(move_list[:60])  # First 60 entries
+    
     # Calculate phase performance
     phase_cpl = {}
+    phase_move_count = {}
     for phase in ['opening', 'middlegame', 'endgame']:
-        phase_moves = [m for m in moves_table if m.get('phase') == phase and m.get('color') == player_color]
+        phase_moves = [m for m in moves_table if m.get('phase') == phase and (m.get('mover') or m.get('color')) == player_color]
         if phase_moves:
-            avg_cpl = sum(m.get('cp_loss', 0) for m in phase_moves) / len(phase_moves)
+            avg_cpl = sum(m.get('cp_loss', 0) or m.get('actual_cp_loss', 0) or 0 for m in phase_moves) / len(phase_moves)
             phase_cpl[phase] = round(avg_cpl, 1)
+            phase_move_count[phase] = len(phase_moves)
     
-    # Determine game narrative context
+    # Determine result
     is_win = (player_color == 'white' and result == '1-0') or (player_color == 'black' and result == '0-1')
     is_loss = (player_color == 'white' and result == '0-1') or (player_color == 'black' and result == '1-0')
     result_text = 'You won' if is_win else 'You lost' if is_loss else 'The game was drawn'
     
-    prompt = f"""You are a chess coach writing a reflective, narrative review of your student's game. Tell the STORY of how this game was won or lost — not a list of errors, but the psychological and strategic arc.
+    prompt = f"""You are a chess coach doing a detailed, analytical review of your student's game. Be SPECIFIC — every statement must be backed by a concrete example from the game.
 
-**Game Context:**
+**Game Data:**
 - Opening: {opening_name}
 - You played: {player_color.title()}
 - Result: {result_text}
 - Rating: {player_rating or 'Unknown'}
 
-**What the engine found:**
-- Opening phase accuracy: {phase_cpl.get('opening', 'N/A')} average centipawn loss
-- Middlegame accuracy: {phase_cpl.get('middlegame', 'N/A')} average centipawn loss  
-- Endgame accuracy: {phase_cpl.get('endgame', 'N/A')} average centipawn loss
+**Phase Performance:**
+- Opening: {phase_cpl.get('opening', 'N/A')} avg CPL ({phase_move_count.get('opening', 0)} moves)
+- Middlegame: {phase_cpl.get('middlegame', 'N/A')} avg CPL ({phase_move_count.get('middlegame', 0)} moves)
+- Endgame: {phase_cpl.get('endgame', 'N/A')} avg CPL ({phase_move_count.get('endgame', 0)} moves)
 
-**Significant errors (for context only - don't just list these):**
-{_format_blunders(blunders)}
+**Key Errors (sorted by severity):**
+{_format_blunders_detailed(blunders)}
+
+**Game Moves:**
+{game_moves}
 
 ---
 
-**Write a narrative review using emoji-headed sections. Choose sections that fit THIS game — not every game needs the same structure.**
+**Write an analytical review with these sections:**
 
-Some example section headers you might use (pick 4-6 that fit):
-- 🧠 What Decided This Game
-- 🔍 The Turning Point  
-- ⚠️ What Changed After That
-- ♜ What Your Opponent Was Allowed To Do
-- 🛑 What Would Have Helped
-- ✨ What You Did Well
-- 💡 The Key Insight
-- 🎯 The Lesson From This Game
-- ✅ One-Sentence Summary
+## 📊 Overview
+[2-3 sentences: What type of game was this? Mention the opening by name, the result, and the main theme (tactical, positional, endgame grind, etc.)]
 
-**IMPORTANT GUIDELINES:**
-- Open with a narrative hook — what kind of game was this?
-- Focus on the STORY, not a list of moves or errors
-- Use short, punchy paragraphs. One idea each.
-- Use narrative language: "the game drifted," "the position breathed," "the advantage evaporated"
-- You may reference a move number briefly ("Move 28") but don't pepper the text with them
-- Avoid centipawn references and engine-speak
-- Be honest but not harsh. Insightful, not judgmental.
-- End with something memorable — a lesson, a summary, an insight
+## 🔬 Phase-by-Phase Analysis
 
-The review should feel like wisdom from an experienced coach, not a computer printout."""
+### Opening (Moves 1-15)
+[Analyze the opening specifically. Did you follow theory? Where did you deviate? Was the deviation good or bad? **Cite specific moves**: "Your 7...h6 was unnecessary — the knight wasn't threatening anything, and this lost a tempo."]
+
+### Middlegame
+[What was the critical phase? What plans were available? What did you actually do? **Cite specific moves**: "After 18.Nd5, you had a strong outpost, but 20...Bxd5 traded off your best piece without compensation."]
+
+### Endgame (if applicable)
+[How was the endgame handled? Technical accuracy? **Cite specific moves** if there were errors.]
+
+## ❌ Critical Errors
+
+[For EACH significant error, explain:]
+1. **Move X: [move]** — What you played and why it was wrong
+2. **The problem**: What this move allowed or what it failed to prevent
+3. **Better was**: [best move] — and specifically WHY this was better
+4. **The pattern**: What thinking error led to this? (Missed threat? Wrong plan? Impatience?)
+
+## ✅ What You Did Well
+[Be specific! Don't say "you played solidly" — say "Your 12.Be3 correctly developed with tempo, attacking the queen." If nothing stands out, say so honestly.]
+
+## 🎯 One Thing to Work On
+[Based on THIS game, what's the ONE specific skill to practice? Not "tactics" but "calculating forcing sequences when ahead in material" or "recognizing when to trade pieces in a better position."]
+
+---
+
+**CRITICAL RULES:**
+- EVERY claim must cite a specific move number and move
+- NO vague statements like "you played well in the opening" without evidence
+- NO empty praise — if a phase was mediocre, say so
+- Compare what was played vs what was better
+- Explain the WHY, not just the WHAT
+- Be direct and analytical, not flowery"""
     
     return prompt
 
 
-def _format_blunders(blunders: List[Dict]) -> str:
-    """Format blunders for prompt."""
+def _format_blunders_detailed(blunders: List[Dict]) -> str:
+    """Format blunders with full detail for prompt."""
     if not blunders:
-        return "None (good job!)"
+        return "None — solid play throughout!"
     
     lines = []
-    for b in blunders[:5]:  # Top 5 worst
+    for b in blunders[:6]:  # Top 6 errors
+        severity = "BLUNDER" if b['cp_loss'] >= 200 else "Mistake"
+        best = b.get('best_move') or '?'
         lines.append(
-            f"- Move {b['move_num']} ({b['phase']}): Played {b['san']} "
-            f"(-{b['cp_loss']}cp). Best was {b.get('best_move', '?')}"
+            f"- Move {b['move_num']} ({b['phase']}): {b['san']} [{severity}: -{b['cp_loss']}cp] → Better: {best}"
         )
     return "\n".join(lines)
 
