@@ -1468,7 +1468,8 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
 
 
 def main() -> None:
-    st.title("Chess Analyzer (Remote Engine)")
+    st.title("Chess Analyzer")
+    st.caption("Contact us: orvarsv@icloud.com")
 
     # Render authentication sidebar
     render_auth_sidebar()
