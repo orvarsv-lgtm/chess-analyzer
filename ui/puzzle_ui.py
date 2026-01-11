@@ -789,13 +789,13 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             st.markdown("""
 <style>
 div[data-testid="column"] button[kind="secondary"] {
-    font-size: 1.05rem;
-    padding: 0.6rem 0.8rem;
+    font-size: 0.98rem;
+    padding: 0.6rem 0.9rem;
     border-radius: 0.5rem;
     font-weight: 600;
     transition: all 0.2s;
     white-space: nowrap;
-    min-width: 130px;
+    min-width: 150px;
     word-break: keep-all;
     text-align: center;
 }
