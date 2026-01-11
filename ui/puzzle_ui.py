@@ -785,23 +785,18 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             already = puzzle_key in rated
             
-            # Custom CSS for better-looking rating buttons
+            # Custom CSS for better-looking rating buttons - smaller text, wider columns
             st.markdown("""
 <style>
-div[data-testid="column"] button[kind="secondary"] {
-    font-size: 0.98rem;
-    padding: 0.6rem 0.9rem;
-    border-radius: 0.5rem;
-    font-weight: 600;
-    transition: all 0.2s;
-    white-space: nowrap;
-    min-width: 150px;
-    word-break: keep-all;
-    text-align: center;
+div[data-testid="stHorizontalBlock"] button {
+    min-width: 110px !important;
+    padding: 0px !important;
+    height: 40px !important;
 }
-div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
-    transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+div[data-testid="stHorizontalBlock"] button p {
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    white-space: nowrap !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -815,7 +810,7 @@ div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
 
             rater = (st.session_state.get("puzzle_rater") or "").strip() or None
 
-            col1, col2, col3 = st.columns(3, gap="small")
+            col1, col2, col3 = st.columns([1.3, 1, 1], gap="small")
             # Ensure all rating buttons are always visible and update state correctly
             with col1:
                 dislike_clicked = st.button("👎 Dislike", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}")
@@ -827,18 +822,21 @@ div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
             if not already:
                 if dislike_clicked:
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="dislike", rater=rater)
-                    rated.add(puzzle_key)
-                    last_rating_map[puzzle_key] = "👎 Dislike"
+                    st.session_state["puzzle_rated_keys"].add(puzzle_key)
+                    st.session_state["puzzle_last_rating"][puzzle_key] = "👎 Dislike"
+                    st.toast("Rating saved: Dislike")
                     st.rerun()
                 elif meh_clicked:
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="meh", rater=rater)
-                    rated.add(puzzle_key)
-                    last_rating_map[puzzle_key] = "😐 Meh"
+                    st.session_state["puzzle_rated_keys"].add(puzzle_key)
+                    st.session_state["puzzle_last_rating"][puzzle_key] = "😐 Meh"
+                    st.toast("Rating saved: Meh")
                     st.rerun()
                 elif like_clicked:
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="like", rater=rater)
-                    rated.add(puzzle_key)
-                    last_rating_map[puzzle_key] = "👍 Like"
+                    st.session_state["puzzle_rated_keys"].add(puzzle_key)
+                    st.session_state["puzzle_last_rating"][puzzle_key] = "👍 Like"
+                    st.toast("Rating saved: Like")
                     st.rerun()
 
         if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
