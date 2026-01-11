@@ -1849,28 +1849,40 @@ def increment_ai_coach_usage(user_id: str):
 
 def generate_demo_review(game_data: Dict[str, Any]) -> AICoachResponse:
     """Generate fake review for demo purposes (no API call)."""
+    
+    narrative = """## 🧠 What Decided This Game
+This was a sharp Sicilian Defense game where the initiative was everything.
+You came out of the opening with a solid position, but the game was decided by a single moment of hesitation in the middlegame.
+Instead of seizing control of the center when you had the chance, you allowed your opponent to expand.
+
+## 🔍 The Turning Point
+Move 18 was the moment the game flipped.
+You played **Qd2**, a passive move that hoped for the best.
+The position demanded **Bxf6**, eliminating their strong knight.
+By allowing the knight to jump to g4, you gave them an attack that played itself.
+
+## ⚠️ What Changed After That
+**Before:** You were equal, with a solid structure.
+**After:** You were constantly defending against threats. Your pieces got tied down, and you never had time to formulate your own plan.
+
+## ♜ What Your Opponent Was Allowed To Do
+Once you gave them the initiative, their plan was simple: attack the kingside.
+They didn't have to calculate deep combinations; they just improved their pieces while you shuffled.
+
+## 🛑 What Would Have Helped
+A more active mindset. When the center is fluid, you cannot afford "waiting moves."
+You needed to trade off their most active piece (the knight) even if it meant giving up the bishop pair.
+
+## 🎯 The Lesson From This Game
+In sharp positions, passivity is often more dangerous than a tactical error.
+This game didn't punish your calculation—it punished your hesitation.
+
+## ✅ One-Sentence Summary
+"You treated a critical position casually, and your opponent punished you for it." """
+
     return AICoachResponse(
-        game_summary="This was a sharp Sicilian Defense game where you struggled in the middlegame. Your opening was solid but you missed a tactical shot on move 18 that cost you the game.",
-        key_moments=[
-            {
-                'move': 18,
-                'advice': 'After ...Nf6, you should have played Bxf6 to eliminate their strong knight. Instead, you played Qd2 which allowed ...Ng4 with a devastating attack.'
-            },
-            {
-                'move': 23,
-                'advice': 'In this endgame position, trading rooks with Rxd8 would have simplified to a drawable position. Your move Re1 allowed your opponent to activate their king.'
-            }
-        ],
-        opening_advice="Your Sicilian Najdorf move order was correct. Consider studying the English Attack variation more deeply, as you seemed uncomfortable with White's setup.",
-        strategic_advice="You need to work on recognizing when to trade pieces. In worse positions, simplification is often your best friend. Also, pay attention to pawn structure - the backward pawn on d6 was a long-term weakness.",
-        tactical_advice="You missed several tactical opportunities. On move 15, there was a simple knight fork available with Nxe5. Practice tactics puzzles focusing on knight forks and pins.",
-        training_recommendations=[
-            "Study English Attack vs Najdorf (focus on plans after 6.Be3)",
-            "Practice knight fork tactics (30 puzzles)",
-            "Review endgame principle: when to trade pieces",
-            "Analyze 3 GM games in this opening line"
-        ],
+        narrative=narrative,
         timestamp=datetime.now(),
-        cost_cents=4,
-        tokens_used=1234,
+        cost_cents=0,
+        tokens_used=0,
     )
