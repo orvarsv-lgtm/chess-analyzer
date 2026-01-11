@@ -73,6 +73,27 @@ def _get_supabase_client():
         return None
 
 
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively sanitize data for JSON serialization.
+    
+    Replaces NaN, Infinity, -Infinity with None.
+    """
+    import math
+    
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_sanitize_for_json(item) for item in obj)
+    else:
+        return obj
+
+
 def save_analysis(
     user_id: str,
     username: str,
@@ -93,6 +114,9 @@ def save_analysis(
         return False, "Must be signed in to save analyses."
 
     try:
+        # Sanitize the analysis data to remove NaN/Infinity values
+        clean_data = _sanitize_for_json(analysis_data)
+        
         # Check if analysis for this user/username combo already exists
         existing = client.table("saved_analyses").select("id").eq("user_id", user_id).eq("username", username.lower()).execute()
         
@@ -102,7 +126,7 @@ def save_analysis(
             "source": source,
             "num_games": num_games,
             "analysis_depth": analysis_depth,
-            "analysis_data": analysis_data,
+            "analysis_data": clean_data,
             "updated_at": datetime.utcnow().isoformat(),
         }
 
