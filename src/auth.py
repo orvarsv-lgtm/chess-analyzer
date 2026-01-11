@@ -236,7 +236,7 @@ def render_auth_sidebar() -> None:
 
             auth_mode = st.radio(
                 "Method",
-                ["Magic Link", "Password"],
+                ["Password", "Magic Link"],
                 horizontal=True,
                 key="auth_mode_radio",
                 label_visibility="collapsed",
@@ -244,7 +244,28 @@ def render_auth_sidebar() -> None:
 
             email = st.text_input("Email", key="auth_email_input", placeholder="you@example.com")
 
-            if auth_mode == "Magic Link":
+            if auth_mode == "Password":
+                password = st.text_input("Password", type="password", key="auth_pass_input")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Sign In", use_container_width=True, key="auth_signin_btn"):
+                        success, msg = sign_in_with_password(email, password)
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                with col2:
+                    if st.button("Sign Up", use_container_width=True, key="auth_signup_btn"):
+                        success, msg = sign_up_with_password(email, password)
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+            else:  # Magic Link mode
                 if st.button("📧 Send Magic Link", use_container_width=True, key="auth_magic_btn"):
                     success, msg = sign_in_with_magic_link(email)
                     if success:
@@ -262,22 +283,6 @@ def render_auth_sidebar() -> None:
                             st.rerun()
                         else:
                             st.error(msg)
-
-            else:  # Password mode
-                password = st.text_input("Password", type="password", key="auth_pass_input")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("Sign In", use_container_width=True, key="auth_signin_btn"):
-                        success, msg = sign_in_with_password(email, password)
-                        if success:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                with col2:
-                    if st.button("Sign Up", use_container_width=True, key="auth_signup_btn"):
-                        success, msg = sign_up_with_password(email, password)
                         if success:
                             st.success(msg)
                             if "confirmation" not in msg.lower():
