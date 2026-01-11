@@ -55,19 +55,16 @@ def _ai_coach_model() -> str:
 
     Override with env var AI_COACH_MODEL.
     """
-    return (os.getenv("AI_COACH_MODEL") or "gpt-5-mini").strip()
+    return (os.getenv("AI_COACH_MODEL") or "gpt-4o-mini").strip()
 
 
 def _model_supports_temperature(model: str) -> bool:
     """Check if the model supports the temperature parameter.
     
-    GPT-5 mini/nano and some other newer models don't support temperature.
+    Some reasoning models don't support temperature.
     """
     model_lower = model.lower()
-    # GPT-5 mini and nano don't support temperature
-    if "gpt-5-mini" in model_lower or "gpt-5-nano" in model_lower:
-        return False
-    # o1/o3 models also don't support temperature
+    # o1/o3 reasoning models don't support temperature
     if model_lower.startswith("o1") or model_lower.startswith("o3"):
         return False
     return True
@@ -169,9 +166,13 @@ def generate_game_review(
         ai_analysis = (response.choices[0].message.content or "").strip()
         tokens_used = getattr(response.usage, "total_tokens", 0) or 0
         cost_cents = _estimate_cost_cents(tokens_used)
+        
+        # Log for debugging
+        print(f"[AI Coach] Model: {model}, Tokens: {tokens_used}, Response length: {len(ai_analysis)}")
 
         # Defensive fallback: if the model returns empty content, build a deterministic summary
         if not ai_analysis:
+            print(f"[AI Coach] WARNING: Model returned empty content")
             ai_analysis = _build_fallback_narrative(game_data, player_color, player_rating)
         
     except Exception as e:
