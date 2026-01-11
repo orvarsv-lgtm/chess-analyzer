@@ -121,7 +121,9 @@ def sign_in_with_password(email: str, password: str) -> tuple[bool, str]:
     except Exception as e:
         err_msg = str(e)
         if "invalid" in err_msg.lower() or "credentials" in err_msg.lower():
-            return False, "Invalid email or password."
+            return False, "Invalid email or password. If you just signed up, check your email to confirm first."
+        if "not confirmed" in err_msg.lower() or "confirm" in err_msg.lower():
+            return False, "Please confirm your email first. Check your inbox for a confirmation link."
         return False, f"Sign in failed: {err_msg}"
 
 
@@ -154,7 +156,7 @@ def sign_up_with_password(email: str, password: str) -> tuple[bool, str]:
                 }
                 return True, f"✅ Account created! Welcome, **{email}**!"
             else:
-                return True, f"✅ Account created! Please check **{email}** for a confirmation link."
+                return True, f"✅ Account created! Check {email} for a confirmation link, then sign in."
         return False, "Failed to create account."
     except Exception as e:
         err_msg = str(e)
@@ -225,7 +227,8 @@ def render_auth_sidebar() -> None:
 
         if user:
             # Logged in state
-            st.success(f"👤 **{user.get('email', 'User')}**")
+            user_email = user.get('email', 'User')
+            st.success(f"👤 {user_email}")
             if st.button("🚪 Sign Out", use_container_width=True, key="auth_signout_btn"):
                 success, msg = sign_out()
                 if success:
