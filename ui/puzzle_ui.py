@@ -814,20 +814,26 @@ div[data-testid="column"] button[kind="secondary"]:hover:not(:disabled) {
             rater = (st.session_state.get("puzzle_rater") or "").strip() or None
 
             col1, col2, col3 = st.columns(3, gap="small")
+            # Ensure all rating buttons are always visible and update state correctly
             with col1:
-                if st.button("👎 Dislike", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}"):
+                dislike_clicked = st.button("👎 Dislike", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}")
+            with col2:
+                meh_clicked = st.button("😐 Meh", type="secondary", disabled=already, use_container_width=True, key=f"rate_meh_{puzzle_key}")
+            with col3:
+                like_clicked = st.button("👍 Like", type="secondary", disabled=already, use_container_width=True, key=f"rate_like_{puzzle_key}")
+
+            if not already:
+                if dislike_clicked:
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="dislike", rater=rater)
                     rated.add(puzzle_key)
                     last_rating_map[puzzle_key] = "👎 Dislike"
                     st.rerun()
-            with col2:
-                if st.button("😐 Meh", type="secondary", disabled=already, use_container_width=True, key=f"rate_meh_{puzzle_key}"):
+                elif meh_clicked:
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="meh", rater=rater)
                     rated.add(puzzle_key)
                     last_rating_map[puzzle_key] = "😐 Meh"
                     st.rerun()
-            with col3:
-                if st.button("👍 Like", type="secondary", disabled=already, use_container_width=True, key=f"rate_like_{puzzle_key}"):
+                elif like_clicked:
                     record_puzzle_rating(puzzle_key=str(puzzle_key), rating="like", rater=rater)
                     rated.add(puzzle_key)
                     last_rating_map[puzzle_key] = "👍 Like"
