@@ -753,6 +753,20 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             or f"index_{progress.current_index}"
         )
 
+        # Determine if we should animate a move (opponent just moved or reveal answer)
+        animate_move = None
+        if progress.opponent_just_moved and progress.opponent_last_uci:
+            animate_move = progress.opponent_last_uci
+        elif progress.reveal_answer and progress.reveal_puzzle_index == progress.current_index:
+            # Get the answer move to animate
+            reveal_uci = (
+                solution_moves[progress.solution_move_index]
+                if progress.solution_move_index < len(solution_moves)
+                else None
+            )
+            if reveal_uci:
+                animate_move = reveal_uci
+
         if debug_board:
             st.write("DEBUG: rendering board", puzzle_id)
         move = render_chessboard(
@@ -762,6 +776,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             side_to_move=side_to_move,
             highlights=highlights,
             hint=hint,
+            animate_move=animate_move,
             key=f"puzzle_board_{st.session_state.puzzle_index}_{progress.board_nonce}",
         )
         if debug_board:

@@ -23,6 +23,7 @@ def render_chessboard(
     side_to_move: str,
     highlights: Optional[Dict[str, Any]] = None,
     hint: str = "",
+    animate_move: Optional[str] = None,
     key: str = "chessboard",
 ) -> Optional[str]:
     """Render an interactive JS chessboard and return a UCI move when user plays.
@@ -34,6 +35,7 @@ def render_chessboard(
         side_to_move: "w" or "b".
         highlights: Dict controlling UI highlights.
         hint: Small hint text under the board.
+        animate_move: UCI move to animate (e.g., "e2e4"). Shows piece sliding.
         key: Streamlit component key.
 
     Returns:
@@ -52,6 +54,7 @@ def render_chessboard(
         "side_to_move": side_to_move,
         "highlights": highlights or {},
         "ui": {"hint": hint},
+        "animate_move": animate_move,
     }
 
     value = _chessboard_component(**payload, key=key, default=None)

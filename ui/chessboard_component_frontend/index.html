@@ -88,11 +88,19 @@
         user-select: none;
         -webkit-user-select: none;
         touch-action: none;
+        transition: transform 0.3s ease-out;
       }
 
       .piece.dragging {
         opacity: 0.6;
         cursor: grabbing;
+      }
+
+      .piece.animating {
+        position: absolute;
+        z-index: 100;
+        pointer-events: none;
+        transition: left 0.35s ease-out, top 0.35s ease-out;
       }
 
       /* Legal move dot */
@@ -390,6 +398,7 @@
         ui: {
           hint: "",
         },
+        animate_move: null,  // UCI move to animate, e.g., "e2e4"
       };
 
       function chessStartFen() {
@@ -397,6 +406,51 @@
       }
 
       let selectedSquare = null;
+      let isAnimating = false;
+      let lastAnimatedMove = null;
+
+      // Get pixel position of a square on the board
+      function getSquarePosition(sq, viewFiles, viewRanks) {
+        const file = sq[0];
+        const rank = parseInt(sq[1]);
+        const fIdx = viewFiles.indexOf(file);
+        const rIdx = viewRanks.indexOf(rank);
+        return {
+          left: fIdx * 52,
+          top: rIdx * 52
+        };
+      }
+
+      // Animate a piece from one square to another
+      function animateMove(fromSq, toSq, pieceChar, viewFiles, viewRanks, callback) {
+        const boardEl = document.getElementById("board");
+        
+        // Create animated piece element
+        const pieceEl = createPieceElement(pieceChar);
+        pieceEl.classList.add("animating");
+        
+        const fromPos = getSquarePosition(fromSq, viewFiles, viewRanks);
+        const toPos = getSquarePosition(toSq, viewFiles, viewRanks);
+        
+        // Position at start square (centered in square)
+        pieceEl.style.left = (fromPos.left + 5) + "px";
+        pieceEl.style.top = (fromPos.top + 5) + "px";
+        
+        boardEl.appendChild(pieceEl);
+        
+        // Force reflow to ensure transition works
+        pieceEl.offsetHeight;
+        
+        // Animate to destination
+        pieceEl.style.left = (toPos.left + 5) + "px";
+        pieceEl.style.top = (toPos.top + 5) + "px";
+        
+        // Clean up after animation
+        setTimeout(() => {
+          pieceEl.remove();
+          if (callback) callback();
+        }, 380);
+      }
 
       function render() {
         const boardEl = document.getElementById("board");
@@ -414,6 +468,50 @@
         const ranks = [1, 2, 3, 4, 5, 6, 7, 8];
         const viewFiles = orientation === "white" ? files : [...files].reverse();
         const viewRanks = orientation === "white" ? [...ranks].reverse() : ranks;
+
+        // Check for animation request
+        const animMove = args.animate_move;
+        const shouldAnimate = animMove && animMove.length >= 4 && animMove !== lastAnimatedMove && !isAnimating;
+        
+        if (shouldAnimate) {
+          lastAnimatedMove = animMove;
+          const fromSq = animMove.slice(0, 2);
+          const toSq = animMove.slice(2, 4);
+          
+          // Get the piece that should be animated (from the position BEFORE the move)
+          // We need to figure out what piece moved - check the destination in current FEN
+          const movedPiece = pieces[toSq];
+          
+          if (movedPiece) {
+            isAnimating = true;
+            // Temporarily hide the piece at destination for animation
+            const destPieces = { ...pieces };
+            delete destPieces[toSq];
+            
+            // Render board without the destination piece
+            renderBoard(boardEl, destPieces, viewFiles, viewRanks, legalMoves, sideToMove);
+            
+            // Animate the piece
+            animateMove(fromSq, toSq, movedPiece, viewFiles, viewRanks, () => {
+              isAnimating = false;
+              // Re-render with piece in place
+              renderBoard(boardEl, pieces, viewFiles, viewRanks, legalMoves, sideToMove);
+            });
+            
+            setFrameHeight(Math.max(420, document.body.scrollHeight));
+            return;
+          }
+        }
+
+        renderBoard(boardEl, pieces, viewFiles, viewRanks, legalMoves, sideToMove);
+        
+        // Height: ensure the board is always visible in the iframe.
+        setFrameHeight(Math.max(420, document.body.scrollHeight));
+      }
+
+      function renderBoard(boardEl, pieces, viewFiles, viewRanks, legalMoves, sideToMove) {
+        const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        const ranks = [1, 2, 3, 4, 5, 6, 7, 8];
 
         // Build destination highlight set for selectedSquare
         const legalDestinations = new Set();
