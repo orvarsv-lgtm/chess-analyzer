@@ -2022,7 +2022,7 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
                     analyzed_games=games,
                     min_eval_loss=100,
                     max_puzzles=200,
-                    engine_depth=6,  # Reduced for faster generation
+                    engine_depth=12,  # Increased for better puzzle quality validation
                     progress_callback=update_progress,
                 )
                 

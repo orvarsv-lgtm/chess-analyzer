@@ -785,8 +785,9 @@ class PuzzleGenerator:
                 move_gap_cp = 0
                 if engine is not None:
                     try:
+                        # Pre-filter with same gap as validation (100cp) to avoid premature rejection
                         is_forcing, move_gap_cp = _check_if_only_one_good_move(
-                            board, engine, depth=engine_depth, min_gap_cp=150
+                            board, engine, depth=engine_depth, min_gap_cp=100
                         )
                     except Exception:
                         # If forcing check fails, default to non-forcing
