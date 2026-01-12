@@ -1880,8 +1880,8 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
 
     # Display mappings favoring full first words
     label_map = {
-        "Openings": "Openings",
-        "Opponent Analysis": "Opponent",
+        "Openings": "Opening",
+        "Opponent Analysis": "Rivals",
         "Analysis": "Analysis",
         "AI Coach": "AI Coach",
         "Replayer": "Replayer",
