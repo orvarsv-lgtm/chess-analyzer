@@ -226,6 +226,50 @@ def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
     progress.board_nonce = 0
 
 
+def _render_puzzle_nav_buttons(progress: PuzzleProgress, total_puzzles: int) -> None:
+    """Render navigation buttons with smooth styling."""
+    # Inject smooth button styling
+    st.markdown("""
+<style>
+/* Smooth puzzle navigation buttons */
+.puzzle-nav-container button {
+    height: 48px !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+}
+.puzzle-nav-container button:hover:not(:disabled) {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
+}
+.puzzle-nav-container button:active:not(:disabled) {
+    transform: translateY(0) !important;
+}
+.puzzle-nav-container button:disabled {
+    opacity: 0.5 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+    
+    st.markdown('<div class="puzzle-nav-container">', unsafe_allow_html=True)
+    nav1, nav2, nav3 = st.columns(3, gap="small")
+    with nav1:
+        if st.button("⬅️ Back", use_container_width=True, disabled=progress.current_index <= 0, key="puzzle_nav_back"):
+            progress.current_index = max(progress.current_index - 1, 0)
+            st.rerun()
+    with nav2:
+        if st.button("➡️ Next", use_container_width=True, disabled=progress.current_index >= total_puzzles - 1, type="primary", key="puzzle_nav_next"):
+            progress.current_index = min(progress.current_index + 1, total_puzzles - 1)
+            st.rerun()
+    with nav3:
+        if st.button("🔄 Reset", use_container_width=True, key="puzzle_nav_reset"):
+            _reset_progress()
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def _open_stockfish_engine() -> chess.engine.SimpleEngine:
     """Open Stockfish - prefer persistent engine for speed."""
     # Try to use persistent engine first
@@ -789,6 +833,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             st.success("Correct!" if total_player_moves == 1 else f"Correct! ({total_player_moves} moves)")
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
+            
+            # Navigation buttons - immediately after success for quick continuation
+            _render_puzzle_nav_buttons(progress, len(puzzles))
+            
         elif progress.last_result == "viable":
             # Show why this isn't the optimal move
             why_not = st.session_state.get("last_why_not_optimal")
@@ -798,6 +846,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 st.warning("Viable move! This works, but there may be a better option.")
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
+            
+            # Navigation buttons - immediately after viable for quick continuation
+            _render_puzzle_nav_buttons(progress, len(puzzles))
+            
         elif progress.last_result == "incorrect":
             st.error("Incorrect. Try again.")
             if show_explanation:
@@ -843,23 +895,25 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             already = puzzle_key in rated
             
-            # Custom CSS for rating buttons - prevent overlap and ensure interaction
+            # Custom CSS for rating buttons - larger, smoother transitions
             st.markdown("""
 <style>
-div[data-testid="column"] {
-    display: flex;
-    justify-content: center;
+/* Smooth rating buttons */
+.rating-container button {
+    height: 44px !important;
+    padding: 8px 12px !important;
+    font-size: 0.9rem !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08) !important;
 }
-div[data-testid="stHorizontalBlock"] button {
-    height: 38px !important;
-    padding: 0 4px !important;
-    margin: 0 !important;
+.rating-container button:hover:not(:disabled) {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
 }
-div[data-testid="stHorizontalBlock"] button p {
-    font-size: 0.75rem !important;
-    font-weight: 700 !important;
-    line-height: 1 !important;
-    white-space: nowrap !important;
+.rating-container button:active:not(:disabled) {
+    transform: translateY(0) !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -871,15 +925,16 @@ div[data-testid="stHorizontalBlock"] button p {
             else:
                 st.write("**How was this puzzle?**")
 
-            # Use 3 equal columns but with 'gap="small"' and strict CSS to prevent overflow
+            # Rating buttons with smooth styling
+            st.markdown('<div class="rating-container">', unsafe_allow_html=True)
             col1, col2, col3 = st.columns(3, gap="small")
-            # Ensure all rating buttons are always visible and update state correctly
             with col1:
-                dislike_clicked = st.button("👎 Dislike", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}")
+                dislike_clicked = st.button("👎", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}", help="Dislike")
             with col2:
-                meh_clicked = st.button("😐 Meh", type="secondary", disabled=already, use_container_width=True, key=f"rate_meh_{puzzle_key}")
+                meh_clicked = st.button("😐", type="secondary", disabled=already, use_container_width=True, key=f"rate_meh_{puzzle_key}", help="Meh")
             with col3:
-                like_clicked = st.button("👍 Like", type="secondary", disabled=already, use_container_width=True, key=f"rate_like_{puzzle_key}")
+                like_clicked = st.button("👍", type="secondary", disabled=already, use_container_width=True, key=f"rate_like_{puzzle_key}", help="Like")
+            st.markdown('</div>', unsafe_allow_html=True)
 
             if not already:
                 if dislike_clicked:
@@ -903,18 +958,3 @@ div[data-testid="stHorizontalBlock"] button p {
 
         if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
             st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
-
-        nav1, nav2, nav3 = st.columns(3)
-        with nav1:
-            if st.button("Back", width="stretch", disabled=progress.current_index <= 0):
-                progress.current_index = max(progress.current_index - 1, 0)
-                st.rerun()
-        with nav2:
-            if st.button("Next", width="stretch", disabled=progress.current_index >= len(puzzles) - 1):
-                progress.current_index = min(progress.current_index + 1, len(puzzles) - 1)
-                st.rerun()
-        with nav3:
-            # Full reset: clears index, solved, last result, last move, accepted position.
-            if st.button("Reset", width="stretch"):
-                _reset_progress()
-                st.rerun()
