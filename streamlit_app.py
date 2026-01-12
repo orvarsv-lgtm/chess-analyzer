@@ -1860,34 +1860,39 @@ def main() -> None:
         _render_tabbed_results(st.session_state["analysis_result"])
 
 
-def _render_sidebar_navigation(view_options: list[str]) -> str:
-    """Render always-visible navigation in sidebar and return selected view."""
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown("### 🧭 Navigation")
-        
-        # Use buttons for cleaner look with icons visible
-        for i, option in enumerate(view_options):
+def _render_pinned_navigation(view_options: list[str]) -> str:
+    """Render pinned navigation as a horizontal bar at the top."""
+    # Create a horizontal row of navigation buttons
+    cols = st.columns(len(view_options))
+    
+    for i, (col, option) in enumerate(zip(cols, view_options)):
+        with col:
             is_selected = st.session_state.get("main_view") == option
+            # Extract just the emoji and short label
+            parts = option.split(" ", 1)
+            emoji = parts[0] if parts else "📌"
+            label = parts[1] if len(parts) > 1 else option
+            # Shorten label for mobile
+            short_label = label[:12] + "..." if len(label) > 15 else label
+            
             button_type = "primary" if is_selected else "secondary"
             if st.button(
-                option,
-                key=f"nav_btn_{i}",
+                f"{emoji}\n{short_label}",
+                key=f"nav_pin_{i}",
                 use_container_width=True,
                 type=button_type,
             ):
                 st.session_state["main_view"] = option
                 st.rerun()
-        
-        st.markdown("---")
     
+    st.markdown("---")
     return st.session_state.get("main_view", view_options[0])
 
 
 def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
-    """Render analysis results with persistent sidebar navigation.
+    """Render analysis results with pinned navigation bar.
 
-    Navigation is always visible in the sidebar for easy access.
+    Navigation is always visible at the top of the content area.
     """
     
     # Build translated view options
@@ -1909,8 +1914,8 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     if st.session_state.get("main_view") not in view_options:
         st.session_state["main_view"] = view_options[0]
 
-    # Always-visible sidebar navigation
-    view = _render_sidebar_navigation(view_options)
+    # Pinned navigation bar at top
+    view = _render_pinned_navigation(view_options)
 
     # Render selected view
     if t('tab_puzzles') in view:
