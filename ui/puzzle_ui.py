@@ -62,9 +62,61 @@ _STATE_KEY = "puzzle_progress_v2"
 _SOLUTION_CACHE_KEY = "puzzle_solution_line_cache_v2"
 _SOLUTION_FUTURES_KEY = "puzzle_solution_line_futures_v1"
 _SOLUTION_EXECUTOR_KEY = "puzzle_solution_line_executor_v1"
+_PERSISTENT_ENGINE_KEY = "puzzle_persistent_stockfish_engine"
 
 # Keep puzzle analysis depth high for accuracy, but compute solution lines asynchronously.
 PUZZLE_SOLUTION_ANALYSIS_DEPTH = 20
+
+# Use a lower depth for interactive move classification (much faster)
+PUZZLE_CLASSIFICATION_DEPTH = 12
+
+
+def _get_persistent_engine() -> Optional[chess.engine.SimpleEngine]:
+    """Get or create a persistent Stockfish engine for fast puzzle analysis."""
+    if _PERSISTENT_ENGINE_KEY not in st.session_state:
+        st.session_state[_PERSISTENT_ENGINE_KEY] = None
+    
+    engine = st.session_state[_PERSISTENT_ENGINE_KEY]
+    
+    # Check if engine is still alive
+    if engine is not None:
+        try:
+            # Quick ping to see if engine is responsive
+            engine.ping()
+            return engine
+        except Exception:
+            # Engine died, clean up
+            try:
+                engine.quit()
+            except Exception:
+                pass
+            st.session_state[_PERSISTENT_ENGINE_KEY] = None
+    
+    # Create new engine
+    try:
+        if os.path.exists(STOCKFISH_PATH):
+            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+        else:
+            engine = chess.engine.SimpleEngine.popen_uci("stockfish")
+        st.session_state[_PERSISTENT_ENGINE_KEY] = engine
+        return engine
+    except Exception:
+        return None
+
+
+def _is_persistent_engine(engine: chess.engine.SimpleEngine) -> bool:
+    """Check if this engine is the persistent one (should not be closed)."""
+    persistent = st.session_state.get(_PERSISTENT_ENGINE_KEY)
+    return persistent is not None and engine is persistent
+
+
+def _maybe_quit_engine(engine: chess.engine.SimpleEngine) -> None:
+    """Quit engine only if it's not the persistent one."""
+    if not _is_persistent_engine(engine):
+        try:
+            engine.quit()
+        except Exception:
+            pass
 
 
 def _get_progress() -> PuzzleProgress:
@@ -175,7 +227,12 @@ def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
 
 
 def _open_stockfish_engine() -> chess.engine.SimpleEngine:
-    """Open Stockfish (required for puzzle validation)."""
+    """Open Stockfish - prefer persistent engine for speed."""
+    # Try to use persistent engine first
+    engine = _get_persistent_engine()
+    if engine is not None:
+        return engine
+    # Fallback to new engine
     if os.path.exists(STOCKFISH_PATH):
         return chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
     return chess.engine.SimpleEngine.popen_uci("stockfish")
@@ -251,17 +308,14 @@ def _get_acceptable_moves_uci(
             return [best_uci, second_uci]
         return [best_uci]
     finally:
-        try:
-            engine.quit()
-        except Exception:
-            pass
+        _maybe_quit_engine(engine)
 
 
 def _classify_move(
     board: chess.Board,
     move_uci: str,
     expected_uci: Optional[str],
-    depth: int = 20,
+    depth: int = PUZZLE_CLASSIFICATION_DEPTH,
 ) -> tuple[str, int, Optional[str]]:
     """
     Classify a move as 'correct', 'viable', or 'incorrect'.
@@ -335,10 +389,7 @@ def _classify_move(
         return ('incorrect', 100, None)
         
     finally:
-        try:
-            engine.quit()
-        except Exception:
-            pass
+        _maybe_quit_engine(engine)
 
 
 def _explain_why_not_optimal(board: chess.Board, 
@@ -634,18 +685,19 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             if classification in ("correct", "viable"):
                 # Good move - continue the puzzle
-                # Recompute the solution line from this position so continuations follow Stockfish,
-                # even if the player chose an alternate-but-viable move.
-                try:
-                    progress.active_solution_moves = compute_solution_line(
-                        board_fen,
-                        uci,
-                        analysis_depth=depth,
-                    )
-                    solution_moves = progress.active_solution_moves or solution_moves
-                    progress.solution_move_index = 0
-                except Exception:
-                    pass
+                # Only recompute solution line if the move differs from expected
+                # (for viable/alternate moves) - this avoids expensive engine calls
+                if classification == "viable" and uci != expected:
+                    try:
+                        progress.active_solution_moves = compute_solution_line(
+                            board_fen,
+                            uci,
+                            analysis_depth=PUZZLE_CLASSIFICATION_DEPTH,  # Use lower depth for speed
+                        )
+                        solution_moves = progress.active_solution_moves or solution_moves
+                        progress.solution_move_index = 0
+                    except Exception:
+                        pass
 
                 board.push(move)
                 
