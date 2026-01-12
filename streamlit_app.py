@@ -1475,11 +1475,11 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
 
 def main() -> None:
     st.title(t("app_title"))
-    st.caption(f"{t('contact_us')}: orvarsv@icloud.com")
 
     # Render language selector and authentication sidebar
     render_language_selector()
     render_auth_sidebar()
+    st.sidebar.caption(f"{t('contact_us')}: orvarsv@icloud.com")
 
     if "analysis_result" not in st.session_state:
         st.session_state["analysis_result"] = None
