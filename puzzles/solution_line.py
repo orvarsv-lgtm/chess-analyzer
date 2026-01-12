@@ -117,10 +117,6 @@ def compute_solution_line(
     except Exception:
         # If engine is required but fails, we can't compute the line reliably.
         # Fallback to single move to avoid crashing, but this indicates setup issue.
-        print(
-            "Warning: Stockfish not found (set STOCKFISH_PATH or install 'stockfish' in PATH). "
-            "Puzzle continuation disabled."
-        )
         return solution
 
     # If the first move already wins decisive material (after best defense), treat puzzle as complete.
@@ -140,7 +136,9 @@ def compute_solution_line(
         try:
             pov = not board.turn  # side that played first_move
             before_pts = _material_points(chess.Board(fen), pov)
-            reply = engine.play(board, chess.engine.Limit(depth=analysis_depth)).move
+            # Create fresh board from FEN to ensure proper engine sync
+            fresh_board = chess.Board(board.fen())
+            reply = engine.play(fresh_board, chess.engine.Limit(depth=analysis_depth)).move
             after = board.copy()
             if reply is not None and reply in after.legal_moves:
                 after.push(reply)
@@ -250,7 +248,9 @@ def _find_best_opponent_response(
     
     try:
         # Use depth for determinism across runs/environments.
-        result = engine.play(board, chess.engine.Limit(depth=int(analysis_depth)))
+        # Create a fresh board from FEN to ensure proper engine sync
+        fresh_board = chess.Board(board.fen())
+        result = engine.play(fresh_board, chess.engine.Limit(depth=int(analysis_depth)))
         return result.move
     except Exception:
         return None
@@ -267,13 +267,16 @@ def _find_player_forcing_move(
     
     Returns the best move if it is a check, capture, leads to mate,
     or is clearly the only good move in a winning position.
+    Also considers capturing moves that are close to the best evaluation.
     """
     if board.turn != player_color:
         return None
     
     try:
-        # Get best move with multipv to check if there are alternatives
-        result = engine.analyse(board, chess.engine.Limit(depth=int(analysis_depth)), multipv=2)
+        # Create a fresh board from FEN to ensure proper engine sync
+        fresh_board = chess.Board(board.fen())
+        # Get multiple moves to find best forcing option
+        result = engine.analyse(fresh_board, chess.engine.Limit(depth=int(analysis_depth)), multipv=5)
         if not isinstance(result, list):
             result = [result]
         
@@ -285,6 +288,12 @@ def _find_player_forcing_move(
         
         if not best_move:
             return None
+        
+        # Get best score as centipawns
+        try:
+            best_cp = best_score.pov(player_color).score(mate_score=10000) or 0
+        except Exception:
+            best_cp = 0
             
         # Check if we should continue the line
         # We continue if the best move is forcing (check, capture, or mate)
@@ -303,11 +312,34 @@ def _find_player_forcing_move(
         if board.is_capture(best_move):
             return best_move
         
+        # If best move is quiet, check if there's a forcing move (capture/check)
+        # that's almost as good (within 100 cp)
+        for r in result[1:]:
+            if not r.get("pv"):
+                continue
+            move = r["pv"][0]
+            move_score = r.get("score")
+            if not move or not move_score:
+                continue
+            try:
+                move_cp = move_score.pov(player_color).score(mate_score=10000) or 0
+            except Exception:
+                continue
+            # If this move is within 100 cp of best and is forcing, use it
+            if (best_cp - move_cp) <= 100:
+                # Check if it's a capture or check
+                if board.is_capture(move) or board.gives_check(move):
+                    return move
+                # Check for mate
+                board_after = board.copy()
+                board_after.push(move)
+                if board_after.is_checkmate():
+                    return move
+        
         # For quiet moves, only continue if it's the ONLY good move
         # (big difference between best and second best)
         if len(result) >= 2 and result[1].get("score") and best_score:
             try:
-                best_cp = best_score.pov(player_color).score(mate_score=10000) or 0
                 second_cp = result[1]["score"].pov(player_color).score(mate_score=10000) or 0
                 # If best move is much better than second (>= 150 cp difference), include it
                 if (best_cp - second_cp) >= 150:
