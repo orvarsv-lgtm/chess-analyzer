@@ -1865,6 +1865,17 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
     # Create a horizontal row of navigation buttons
     cols = st.columns(len(view_options))
     
+    # Short display labels for buttons (keeps full option for state tracking)
+    short_labels = {
+        "Openings": "Opens",
+        "Opponent Analysis": "Oppon",
+        "Analysis": "Stats",
+        "AI Coach": "Coach",
+        "Replayer": "Replay",
+        "Streaks": "Streaks",
+        "Puzzles": "Puzzles",
+    }
+    
     for i, (col, option) in enumerate(zip(cols, view_options)):
         with col:
             is_selected = st.session_state.get("main_view") == option
@@ -1872,12 +1883,13 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
             parts = option.split(" ", 1)
             emoji = parts[0] if parts else "📌"
             label = parts[1] if len(parts) > 1 else option
-            # Shorten label for mobile
-            short_label = label[:12] + "..." if len(label) > 15 else label
+            
+            # Use short label mapping or truncate
+            display_label = short_labels.get(label, label[:7])
             
             button_type = "primary" if is_selected else "secondary"
             if st.button(
-                f"{emoji}\n{short_label}",
+                f"{emoji}\n{display_label}",
                 key=f"nav_pin_{i}",
                 use_container_width=True,
                 type=button_type,
