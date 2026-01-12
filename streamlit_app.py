@@ -1860,10 +1860,34 @@ def main() -> None:
         _render_tabbed_results(st.session_state["analysis_result"])
 
 
-def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
-    """Render analysis results with sidebar navigation menu.
+def _render_sidebar_navigation(view_options: list[str]) -> str:
+    """Render always-visible navigation in sidebar and return selected view."""
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🧭 Navigation")
+        
+        # Use buttons for cleaner look with icons visible
+        for i, option in enumerate(view_options):
+            is_selected = st.session_state.get("main_view") == option
+            button_type = "primary" if is_selected else "secondary"
+            if st.button(
+                option,
+                key=f"nav_btn_{i}",
+                use_container_width=True,
+                type=button_type,
+            ):
+                st.session_state["main_view"] = option
+                st.rerun()
+        
+        st.markdown("---")
+    
+    return st.session_state.get("main_view", view_options[0])
 
-    Uses sidebar radio buttons for stable navigation that survives reruns.
+
+def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
+    """Render analysis results with persistent sidebar navigation.
+
+    Navigation is always visible in the sidebar for easy access.
     """
     
     # Build translated view options
@@ -1885,16 +1909,8 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     if st.session_state.get("main_view") not in view_options:
         st.session_state["main_view"] = view_options[0]
 
-    # Sidebar navigation menu
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown("### 🧭 Navigation")
-        view = st.radio(
-            "Select view",
-            options=view_options,
-            key="main_view",
-            label_visibility="collapsed",
-        )
+    # Always-visible sidebar navigation
+    view = _render_sidebar_navigation(view_options)
 
     # Render selected view
     if t('tab_puzzles') in view:

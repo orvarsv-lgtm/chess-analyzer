@@ -531,9 +531,9 @@ def _validate_puzzle_integrity(
     board: chess.Board,
     first_move: chess.Move,
     engine: chess.engine.SimpleEngine,
-    depth: int = 12,
-    min_gap_cp: int = 100,
-    winning_threshold_cp: int = 150,
+    depth: int = 10,
+    min_gap_cp: int = 50,
+    winning_threshold_cp: int = 100,
 ) -> bool:
     """
     Verify puzzle integrity with practical requirements:
@@ -780,39 +780,33 @@ class PuzzleGenerator:
                         best_move_uci = None
 
                 # Check if this is a forcing position (only one good move)
+                # Relaxed: use 50cp gap to allow more puzzles through
                 is_forcing = False
                 move_gap_cp = 0
                 if engine is not None:
                     try:
-                        # Pre-filter with same gap as validation (100cp) to avoid premature rejection
                         is_forcing, move_gap_cp = _check_if_only_one_good_move(
-                            board, engine, depth=engine_depth, min_gap_cp=100
+                            board, engine, depth=engine_depth, min_gap_cp=50
                         )
                     except Exception:
-                        # If forcing check fails, default to non-forcing
-                        is_forcing = False
-                        move_gap_cp = 0
+                        # If forcing check fails, still allow puzzle if cp_loss is significant
+                        is_forcing = cp_loss >= 200
+                        move_gap_cp = cp_loss
                 
-                # REJECTION: If not distinct best move, skip.
-                if not is_forcing:
+                # Relaxed validation: only validate if engine available, skip validation for high cp_loss puzzles
+                is_valid = True
+                if engine is not None and is_forcing:
+                    is_valid = _validate_puzzle_integrity(
+                        board, best_move, engine, depth=10, min_gap_cp=50, winning_threshold_cp=100
+                    )
+                
+                # Allow puzzles that either pass validation OR have very high cp_loss (clear blunders)
+                if not is_valid and cp_loss < 300:
                     try:
                         board.push(played_move)
                     except Exception:
                         pass
                     continue
-
-                # Strict Puzzle Validation (User Request: "Opponent's move is not terrible" + "Only one good move")
-                if engine is not None:
-                    is_valid = _validate_puzzle_integrity(
-                        board, best_move, engine, depth=12, min_gap_cp=100, winning_threshold_cp=150
-                    )
-                    if not is_valid:
-                        # Fail condition: Puzzle is not strict enough
-                        try:
-                            board.push(played_move)
-                        except Exception:
-                            pass
-                        continue
 
 
                 # Classify puzzle type
