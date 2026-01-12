@@ -125,6 +125,7 @@ def compute_solution_line(
 
     # If the first move already wins decisive material (after best defense), treat puzzle as complete.
     # This avoids awkward "cleanup" continuations after a straightforward win.
+    # Increased threshold from 3 to 5 to allow more multi-move tactical puzzles through.
     def _material_points(b: chess.Board, color: chess.Color) -> int:
         values = {
             chess.PAWN: 1,
@@ -144,7 +145,9 @@ def compute_solution_line(
             if reply is not None and reply in after.legal_moves:
                 after.push(reply)
             after_pts = _material_points(after, pov)
-            if (after_pts - before_pts) >= 3:
+            # Only skip continuation if we won a rook or more (5+ points)
+            # This allows puzzles that win a piece but have more forcing play
+            if (after_pts - before_pts) >= 5:
                 return solution
         except Exception:
             pass
@@ -262,15 +265,23 @@ def _find_player_forcing_move(
     """
     Find the player's forcing continuation move using Stockfish.
     
-    Returns the best move if it is a check, capture, or leads to mate.
+    Returns the best move if it is a check, capture, leads to mate,
+    or is clearly the only good move in a winning position.
     """
     if board.turn != player_color:
         return None
     
     try:
-        # Get best move
-        result = engine.play(board, chess.engine.Limit(depth=int(analysis_depth)))
-        best_move = result.move
+        # Get best move with multipv to check if there are alternatives
+        result = engine.analyse(board, chess.engine.Limit(depth=int(analysis_depth)), multipv=2)
+        if not isinstance(result, list):
+            result = [result]
+        
+        if not result or not result[0].get("pv"):
+            return None
+            
+        best_move = result[0]["pv"][0]
+        best_score = result[0].get("score")
         
         if not best_move:
             return None
@@ -291,9 +302,20 @@ def _find_player_forcing_move(
         # Check for capture
         if board.is_capture(best_move):
             return best_move
+        
+        # For quiet moves, only continue if it's the ONLY good move
+        # (big difference between best and second best)
+        if len(result) >= 2 and result[1].get("score") and best_score:
+            try:
+                best_cp = best_score.pov(player_color).score(mate_score=10000) or 0
+                second_cp = result[1]["score"].pov(player_color).score(mate_score=10000) or 0
+                # If best move is much better than second (>= 150 cp difference), include it
+                if (best_cp - second_cp) >= 150:
+                    return best_move
+            except Exception:
+                pass
             
-        # If it's a quiet move, we generally stop the puzzle line here
-        # unless we want to support quiet moves in puzzles (which can be hard)
+        # If it's a quiet move without big advantage, stop the puzzle line
         return None
         
     except Exception:
