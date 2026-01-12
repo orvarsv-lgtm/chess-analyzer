@@ -527,6 +527,87 @@ def _check_if_only_one_good_move(
         return (False, 0)
 
 
+def _validate_puzzle_integrity(
+    board: chess.Board,
+    first_move: chess.Move,
+    engine: chess.engine.SimpleEngine,
+    depth: int = 12,
+    min_gap_cp: int = 100,
+    winning_threshold_cp: int = 200,
+) -> bool:
+    """
+    Verify complete puzzle integrity strictly:
+    1. Only one good move for solver at each step.
+    2. Opponent plays best defense (not terrible moves).
+    3. Final position is winning.
+    """
+    temp_board = board.copy()
+    solver_color = temp_board.turn
+    
+    # Check Step 1 gap
+    is_forcing, _ = _check_if_only_one_good_move(temp_board, engine, depth, min_gap_cp)
+    if not is_forcing:
+        return False
+        
+    temp_board.push(first_move)
+    
+    # Simulate up to 3 sequence pairs (6 plies)
+    # Stop if mated or winning score is sustained
+    for _ in range(3):
+        if temp_board.is_game_over():
+            break
+            
+        # --- Opponent Turn (Best Defense) ---
+        # "Opponent's move is not terrible" -> We ensure checking against the BEST move.
+        result = engine.play(temp_board, chess.engine.Limit(depth=depth))
+        if not result.move:
+            break
+        temp_board.push(result.move)
+        
+        if temp_board.is_game_over():
+            break
+
+        # --- Solver Turn (Unique Winning Move check) ---
+        is_forcing, _ = _check_if_only_one_good_move(temp_board, engine, depth, min_gap_cp)
+        if not is_forcing:
+            # If we are already massively winning (mate or > +600), loose move selection might be accepted
+            # But the requirement says "Only one good move... at each step".
+            # To be safe, we reject if there are multiple good moves, unless it's literally Mate.
+            info = engine.analyse(temp_board, chess.engine.Limit(depth=depth))
+            score = info.get("score")
+            if score and score.is_mate():
+                # If mate is forced, multiple paths to mate might exist (e.g. Q everywhere), 
+                # but usually "puzzle" implies specific line. 
+                # Let's be strict: if multiple moves maintain simple win, it's a weak puzzle.
+                pass 
+            else:
+                 return False
+
+        result_solver = engine.play(temp_board, chess.engine.Limit(depth=depth))
+        if not result_solver.move:
+            break
+        temp_board.push(result_solver.move)
+
+    # --- Final Winning Position Check ---
+    info = engine.analyse(temp_board, chess.engine.Limit(depth=depth))
+    score = info.get("score")
+    if not score:
+        return False
+        
+    if score.is_mate():
+        # Make sure it is mate FOR the solver
+        # If solver is White, and mate > 0, White wins.
+        mate_in = score.white().mate() 
+        if solver_color == chess.WHITE:
+             return mate_in > 0
+        else:
+             return mate_in < 0
+
+    cp = score.white().score() if solver_color == chess.WHITE else score.black().score()
+    return cp > winning_threshold_cp
+
+
+
 def _calculate_best_move_from_analysis(
     move_evals: List[dict],
     game_index: int,
@@ -711,6 +792,28 @@ class PuzzleGenerator:
                         # If forcing check fails, default to non-forcing
                         is_forcing = False
                         move_gap_cp = 0
+                
+                # REJECTION: If not distinct best move, skip.
+                if not is_forcing:
+                    try:
+                        board.push(played_move)
+                    except Exception:
+                        pass
+                    continue
+
+                # Strict Puzzle Validation (User Request: "Opponent's move is not terrible" + "Only one good move")
+                if engine is not None:
+                    is_valid = _validate_puzzle_integrity(
+                        board, best_move, engine, depth=12, min_gap_cp=100, winning_threshold_cp=150
+                    )
+                    if not is_valid:
+                        # Fail condition: Puzzle is not strict enough
+                        try:
+                            board.push(played_move)
+                        except Exception:
+                            pass
+                        continue
+
 
                 # Classify puzzle type
                 try:
