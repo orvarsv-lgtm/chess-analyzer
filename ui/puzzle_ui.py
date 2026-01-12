@@ -64,8 +64,8 @@ _SOLUTION_FUTURES_KEY = "puzzle_solution_line_futures_v1"
 _SOLUTION_EXECUTOR_KEY = "puzzle_solution_line_executor_v1"
 _PERSISTENT_ENGINE_KEY = "puzzle_persistent_stockfish_engine"
 
-# Keep puzzle analysis depth high for accuracy, but compute solution lines asynchronously.
-PUZZLE_SOLUTION_ANALYSIS_DEPTH = 20
+# Keep puzzle analysis depth moderate for speed vs accuracy
+PUZZLE_SOLUTION_ANALYSIS_DEPTH = 15
 
 # Use a lower depth for interactive move classification (much faster)
 PUZZLE_CLASSIFICATION_DEPTH = 12
@@ -802,9 +802,14 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             progress.last_uci = uci
             progress.opponent_just_moved = False
             
-            # Wait for solution line computation if still running
-            # This ensures we have the full multi-move solution before processing
-            _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True)
+            # Show analyzing spinner while waiting for opponent response
+            # If the background computation is slow, this gives user feedback
+            if progress.active_solution_moves is None and cache.get(cache_key) is None:
+                with st.spinner("Analyzing opponent response..."):
+                    # Wait for solution line computation if still running
+                    # This ensures we have the full multi-move solution before processing
+                    _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True)
+            
             solution_moves = progress.active_solution_moves or cache.get(cache_key) or puzzle.solution_moves
 
             # Validate legality with python-chess
