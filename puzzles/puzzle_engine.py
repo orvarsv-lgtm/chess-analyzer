@@ -794,14 +794,36 @@ class PuzzleGenerator:
                         move_gap_cp = cp_loss
                 
                 # Relaxed validation: only validate if engine available, skip validation for high cp_loss puzzles
-                is_valid = True
-                if engine is not None and is_forcing:
+                is_valid = False
+                if engine is not None:
+                    # Validate integrity with threshold > 0 (e.g. 10cp) to satisfy "0 < x" request
                     is_valid = _validate_puzzle_integrity(
-                        board, best_move, engine, depth=10, min_gap_cp=50, winning_threshold_cp=100
+                        board, best_move, engine, depth=10, min_gap_cp=50, winning_threshold_cp=10
                     )
                 
-                # Allow puzzles that either pass validation OR have very high cp_loss (clear blunders)
-                if not is_valid and cp_loss < 300:
+                # FALLBACK: Allow puzzles that failed strict validation IF they are huge blunders (cp_loss >= 300)
+                # AND satisfy the "0 < x" best-move requirement.
+                if not is_valid and cp_loss >= 300:
+                    try:
+                        # Quick check: does the best move result in a position > 0?
+                        # Since we might have failed integrity due to min_gap or opponent defense,
+                        # we double check the static eval of the best move here.
+                        # (Ideally _validate_puzzle_integrity covers this, but for high blunders we ignore 'min_gap')
+                        
+                        # We just need to know if the STARTING position (best move) is winning (>0).
+                        info = engine.analyse(board, chess.engine.Limit(depth=10))
+                        sc = info.get("score")
+                        if sc:
+                            mate = sc.white().mate() if board.turn == chess.WHITE else sc.black().mate()
+                            cp = sc.white().score() if board.turn == chess.WHITE else sc.black().score()
+                            
+                            if (mate is not None and mate > 0) or (cp is not None and cp > 10):
+                                is_valid = True
+                    except Exception:
+                        pass
+
+                # If still not valid, skip
+                if not is_valid:
                     try:
                         board.push(played_move)
                     except Exception:
