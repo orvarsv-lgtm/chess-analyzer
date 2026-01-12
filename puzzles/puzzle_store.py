@@ -83,7 +83,7 @@ def from_legacy_puzzle(
         solution_moves=solution_moves,
         theme=p.puzzle_type.value,
         difficulty=_difficulty_to_int(p.difficulty),
-        explanation=explanation or "Explanation unavailable for this puzzle.",
+        explanation=explanation or "",
          source_game_index=int(getattr(p, "source_game_index", 0) or 0) or None,
          # Prefer origin names embedded in puzzle (if saved with global bank),
          # otherwise map using current game_players (may be None for Other Users view).
