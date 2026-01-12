@@ -958,9 +958,6 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
             
-            # Navigation and rating buttons - immediately after success
-            _render_puzzle_nav_buttons(progress, len(puzzles), puzzle)
-            
         elif progress.last_result == "viable":
             # Show why this isn't the optimal move
             why_not = st.session_state.get("last_why_not_optimal")
@@ -971,10 +968,11 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
             
-            # Navigation and rating buttons - immediately after viable
-            _render_puzzle_nav_buttons(progress, len(puzzles), puzzle)
-            
         elif progress.last_result == "incorrect":
             st.error("Incorrect. Try again.")
         elif progress.opponent_just_moved:
             st.info("Opponent played. Find the next best move!")
+            
+        # Navigation and rating buttons - always visible
+        st.markdown("---")
+        _render_puzzle_nav_buttons(progress, len(puzzles), puzzle)
