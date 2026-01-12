@@ -1849,17 +1849,11 @@ def main() -> None:
                         st.warning(f"⚠️ Could not save analysis: {msg}")
 
     req = st.session_state.get("analysis_request")
-    if req:
-        if req.get("num_games_in_pgn", 0) > 0:
-            st.info(
-                f"Analyzing {req.get('games_to_analyze')} of {req.get('num_games_in_pgn')} games "
-                f"(limited by max_games={req.get('max_games')})."
-            )
-        else:
-            st.warning(
-                "Could not count games in PGN (no '[Event ' headers found). "
-                "This usually means the PGN is a single game or is missing headers."
-            )
+    if req and req.get("num_games_in_pgn", 0) > 0:
+        st.info(
+            f"Analyzed {req.get('games_to_analyze')} of {req.get('num_games_in_pgn')} games "
+            f"(limited by max_games={req.get('max_games')})."
+        )
 
     # Show results with tabs if we have analysis
     if st.session_state.get("analysis_result"):
