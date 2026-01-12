@@ -770,6 +770,13 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         animate_move = None
         if progress.opponent_just_moved and progress.opponent_last_uci:
             animate_move = progress.opponent_last_uci
+            try:
+                # Validate it's a real move before passing to FE
+                # (Prevents partial strings from breaking JS)
+                chess.Move.from_uci(animate_move)
+            except Exception:
+                animate_move = None
+
         elif progress.reveal_answer and progress.reveal_puzzle_index == progress.current_index:
             # Get the answer move to animate
             reveal_uci = (
@@ -779,9 +786,18 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             )
             if reveal_uci:
                 animate_move = reveal_uci
-
+                try:
+                    chess.Move.from_uci(animate_move)
+                except Exception:
+                    animate_move = None
+        
+        # KEY CHANGES:
+        # 1. Reset 'opponent_just_moved' ONLY after the user interacts (makes their next move),
+        #    so the animation prop persists through the redraw.
+        # 2. Add 'key' nonce to force full remount if needed, but we try to keep it stable first.
+        
         if debug_board:
-            st.write("DEBUG: rendering board", puzzle_id)
+            st.write("DEBUG: rendering board", puzzle_id, "animate_move=", animate_move)
         move = render_chessboard(
             fen=board_fen,
             legal_moves=legal_moves,
