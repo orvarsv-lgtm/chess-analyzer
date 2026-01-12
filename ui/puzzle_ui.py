@@ -185,8 +185,11 @@ def _schedule_solution_line(fen: str, first_uci: str, *, depth: int) -> None:
     )
 
 
-def _harvest_solution_line(fen: str, first_uci: str, *, depth: int) -> None:
-    """Move completed background computation into the in-memory cache."""
+def _harvest_solution_line(fen: str, first_uci: str, *, depth: int, wait: bool = False) -> None:
+    """Move completed background computation into the in-memory cache.
+    
+    If wait=True, will block up to 5 seconds for the computation to complete.
+    """
     if not fen or not first_uci:
         return
 
@@ -197,7 +200,17 @@ def _harvest_solution_line(fen: str, first_uci: str, *, depth: int) -> None:
         return
 
     fut = futs.get(key)
-    if not isinstance(fut, concurrent.futures.Future) or not fut.done():
+    if not isinstance(fut, concurrent.futures.Future):
+        return
+    
+    # Optionally wait for computation to finish
+    if wait and not fut.done():
+        try:
+            fut.result(timeout=5.0)  # Wait up to 5 seconds
+        except Exception:
+            pass
+    
+    if not fut.done():
         return
 
     try:
@@ -788,6 +801,11 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         if uci and uci != progress.last_uci and progress.last_result not in ("correct", "viable"):
             progress.last_uci = uci
             progress.opponent_just_moved = False
+            
+            # Wait for solution line computation if still running
+            # This ensures we have the full multi-move solution before processing
+            _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True)
+            solution_moves = progress.active_solution_moves or cache.get(cache_key) or puzzle.solution_moves
 
             # Validate legality with python-chess
             try:
