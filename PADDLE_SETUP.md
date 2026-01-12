@@ -9,9 +9,10 @@ This guide explains how to integrate Paddle (v2) payments into your Chess Analyz
 
 ## 2. Database Setup (Supabase)
 
-Run this SQL in your Supabase SQL Editor to create a table for tracking subscriptions.
+Run this SQL in your Supabase SQL Editor to create tables for subscriptions and puzzle solution caching.
 
 ```sql
+-- Subscriptions table for Paddle
 create table if not exists subscriptions (
   subscription_id text primary key,
   user_email text not null,
@@ -27,6 +28,16 @@ alter table subscriptions enable row level security;
 create policy "Users can read own subscription"
   on subscriptions for select
   using ( auth.email() = user_email );
+
+-- Puzzle Solutions Cache (speeds up "other users" puzzles)
+create table if not exists puzzle_solutions (
+  puzzle_key text primary key,
+  solution_line jsonb not null, -- Array of UCI moves, e.g. ["e2e4", "e7e5", "g1f3"]
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- Index for fast lookups
+create index if not exists idx_puzzle_solutions_key on puzzle_solutions(puzzle_key);
 ```
 
 ## 3. Backend: Webhook Handler (Supabase Edge Function)

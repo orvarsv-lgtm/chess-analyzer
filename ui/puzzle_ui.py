@@ -156,7 +156,50 @@ def _get_solution_executor() -> concurrent.futures.ThreadPoolExecutor:
     return ex
 
 
-def _schedule_solution_line(fen: str, first_uci: str, *, depth: int) -> None:
+def _get_supabase_solution_cache() -> dict[str, list[str]]:
+    """Get or create the Supabase solution cache for this session."""
+    key = "_supabase_solution_cache"
+    if key not in st.session_state:
+        st.session_state[key] = {}
+    return st.session_state[key]
+
+
+def _try_fetch_cached_solution(puzzle_key: str) -> list[str] | None:
+    """Try to fetch solution from Supabase cache."""
+    sb_cache = _get_supabase_solution_cache()
+    
+    # Already fetched this session
+    if puzzle_key in sb_cache:
+        return sb_cache[puzzle_key] if sb_cache[puzzle_key] else None
+    
+    # Try Supabase
+    try:
+        from puzzles.global_supabase_store import get_cached_solution_line
+        solution = get_cached_solution_line(puzzle_key)
+        if solution:
+            sb_cache[puzzle_key] = solution
+            return solution
+        sb_cache[puzzle_key] = []  # Mark as checked (no solution stored)
+    except Exception:
+        pass
+    return None
+
+
+def _save_solution_to_supabase(puzzle_key: str, solution_line: list[str]) -> None:
+    """Save computed solution to Supabase for future users."""
+    if not puzzle_key or not solution_line:
+        return
+    try:
+        from puzzles.global_supabase_store import save_solution_line
+        save_solution_line(puzzle_key, solution_line)
+        # Update local cache
+        sb_cache = _get_supabase_solution_cache()
+        sb_cache[puzzle_key] = solution_line
+    except Exception:
+        pass
+
+
+def _schedule_solution_line(fen: str, first_uci: str, *, depth: int, puzzle_key: str = None) -> None:
     """Schedule solution-line computation in background if not cached."""
     if not fen or not first_uci:
         return
@@ -165,27 +208,50 @@ def _schedule_solution_line(fen: str, first_uci: str, *, depth: int) -> None:
     futs = _get_solution_futures()
     key = (fen, first_uci, int(depth))
 
-    # Already computed
+    # Already computed locally
     if key in cache:
         return
+    
+    # Check Supabase cache first (fast network fetch vs slow Stockfish)
+    if puzzle_key:
+        cached = _try_fetch_cached_solution(puzzle_key)
+        if cached:
+            cache[key] = cached
+            return
 
     # Already running
     fut = futs.get(key)
     if isinstance(fut, concurrent.futures.Future) and not fut.done():
         return
 
-    # Schedule
+    # Schedule computation with puzzle_key for saving later
     ex = _get_solution_executor()
     futs[key] = ex.submit(
-        compute_solution_line,
+        _compute_and_cache_solution,
         fen,
         first_uci,
         6,
         int(depth),
+        puzzle_key,
     )
 
 
-def _harvest_solution_line(fen: str, first_uci: str, *, depth: int, wait: bool = False) -> None:
+def _compute_and_cache_solution(fen: str, first_uci: str, max_depth: int, analysis_depth: int, puzzle_key: str = None) -> list[str]:
+    """Compute solution and optionally save to Supabase."""
+    solution = compute_solution_line(fen, first_uci, max_depth, analysis_depth)
+    
+    # Save to Supabase for future users
+    if puzzle_key and solution:
+        try:
+            from puzzles.global_supabase_store import save_solution_line
+            save_solution_line(puzzle_key, solution)
+        except Exception:
+            pass
+    
+    return solution
+
+
+def _harvest_solution_line(fen: str, first_uci: str, *, depth: int, wait: bool = False, puzzle_key: str = None) -> None:
     """Move completed background computation into the in-memory cache.
     
     If wait=True, will block up to 5 seconds for the computation to complete.
@@ -198,6 +264,13 @@ def _harvest_solution_line(fen: str, first_uci: str, *, depth: int, wait: bool =
     key = (fen, first_uci, int(depth))
     if key in cache:
         return
+    
+    # Check Supabase cache if we have puzzle_key
+    if puzzle_key:
+        cached = _try_fetch_cached_solution(puzzle_key)
+        if cached:
+            cache[key] = cached
+            return
 
     fut = futs.get(key)
     if not isinstance(fut, concurrent.futures.Future):
@@ -631,6 +704,13 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     debug_board = bool(st.session_state.get("puzzle_debug_board", False))
 
     puzzle = puzzles[progress.current_index]
+    
+    # Get puzzle_key for Supabase solution caching
+    puzzle_key = (
+        getattr(puzzle, "puzzle_key", None)
+        or getattr(puzzle, "puzzle_id", None)
+        or f"fen_{hash(puzzle.fen)}"
+    )
 
     # Compute solution lines asynchronously so puzzle load is instant.
     # We'll prefetch the active puzzle + the next puzzle in the background.
@@ -642,19 +722,25 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
     cache_key = (puzzle.fen, first_uci, depth)
 
     # Schedule active puzzle line in background and harvest if already computed.
-    _schedule_solution_line(puzzle.fen, first_uci, depth=depth)
-    _harvest_solution_line(puzzle.fen, first_uci, depth=depth)
+    # Pass puzzle_key for Supabase caching (speeds up "other users" puzzles)
+    _schedule_solution_line(puzzle.fen, first_uci, depth=depth, puzzle_key=puzzle_key)
+    _harvest_solution_line(puzzle.fen, first_uci, depth=depth, puzzle_key=puzzle_key)
 
     # Prefetch next puzzle while the user is solving this one.
     next_idx = progress.current_index + 1
     if 0 <= next_idx < len(puzzles):
         nxt = puzzles[next_idx]
+        nxt_key = (
+            getattr(nxt, "puzzle_key", None)
+            or getattr(nxt, "puzzle_id", None)
+            or f"fen_{hash(nxt.fen)}"
+        )
         nxt_first = (getattr(nxt, "first_move_uci", "") or "").strip() or (
             (nxt.solution_moves[0] if nxt.solution_moves else "").strip()
         )
         if nxt_first:
-            _schedule_solution_line(nxt.fen, nxt_first, depth=depth)
-            _harvest_solution_line(nxt.fen, nxt_first, depth=depth)
+            _schedule_solution_line(nxt.fen, nxt_first, depth=depth, puzzle_key=nxt_key)
+            _harvest_solution_line(nxt.fen, nxt_first, depth=depth, puzzle_key=nxt_key)
 
     # Show source game metadata (if present). Only render player names if available;
     # otherwise omit metadata to avoid showing "Unknown - Unknown".
@@ -824,7 +910,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 with st.spinner("Analyzing opponent response..."):
                     # Wait for solution line computation if still running
                     # This ensures we have the full multi-move solution before processing
-                    _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True)
+                    _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True, puzzle_key=puzzle_key)
             
             solution_moves = progress.active_solution_moves or cache.get(cache_key) or puzzle.solution_moves
 
