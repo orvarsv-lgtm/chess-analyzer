@@ -1862,16 +1862,29 @@ def main() -> None:
 
 def _render_pinned_navigation(view_options: list[str]) -> str:
     """Render pinned navigation as a horizontal bar at the top."""
-    # Create a horizontal row of navigation buttons
-    cols = st.columns(len(view_options))
+    # Create a horizontal row of navigation buttons with minimal gap to maximize space
+    cols = st.columns(len(view_options), gap="small")
     
-    # Short display labels for buttons (keeps full option for state tracking)
-    short_labels = {
-        "Openings": "Opens",
-        "Opponent Analysis": "Oppon",
-        "Analysis": "Stats",
-        "AI Coach": "Coach",
-        "Replayer": "Replay",
+    # Custom CSS to ensure buttons fit well (reduce padding, ensure text centering)
+    st.markdown("""
+        <style>
+        /* Target buttons inside the horizontal block for navigation */
+        div[data-testid="column"] button {
+            padding: 0.5rem 0.25rem !important; /* Reduce horizontal padding */
+            line-height: 1.2 !important;
+            height: 100% !important;
+            min-height: 3.5rem;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Display mappings favoring full first words
+    label_map = {
+        "Openings": "Openings",
+        "Opponent Analysis": "Opponent",
+        "Analysis": "Analysis",
+        "AI Coach": "AI Coach",
+        "Replayer": "Replayer",
         "Streaks": "Streaks",
         "Puzzles": "Puzzles",
     }
@@ -1882,10 +1895,14 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
             # Extract just the emoji and short label
             parts = option.split(" ", 1)
             emoji = parts[0] if parts else "📌"
-            label = parts[1] if len(parts) > 1 else option
+            original_label = parts[1] if len(parts) > 1 else option
             
-            # Use short label mapping or truncate
-            display_label = short_labels.get(label, label[:7])
+            # Use mapped label or fallback to original (first word key)
+            # Default fallback: First word only
+            if original_label in label_map:
+                display_label = label_map[original_label]
+            else:
+                display_label = original_label.split(" ")[0]
             
             button_type = "primary" if is_selected else "secondary"
             if st.button(
