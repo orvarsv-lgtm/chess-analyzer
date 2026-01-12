@@ -226,13 +226,15 @@ def _reset_puzzle_progress(progress: PuzzleProgress, puzzle_fen: str) -> None:
     progress.board_nonce = 0
 
 
-def _render_puzzle_nav_buttons(progress: PuzzleProgress, total_puzzles: int) -> None:
-    """Render navigation buttons with smooth styling."""
+def _render_puzzle_nav_buttons(progress: PuzzleProgress, total_puzzles: int, puzzle: "PuzzleDefinition") -> None:
+    """Render navigation and rating buttons with smooth styling."""
+    from puzzles.global_puzzle_store import record_puzzle_rating, get_user_rated_keys
+    
     # Inject smooth button styling
     st.markdown("""
 <style>
-/* Smooth puzzle navigation buttons */
-.puzzle-nav-container button {
+/* Smooth puzzle buttons */
+.puzzle-buttons-container button {
     height: 48px !important;
     font-size: 1rem !important;
     font-weight: 600 !important;
@@ -240,20 +242,94 @@ def _render_puzzle_nav_buttons(progress: PuzzleProgress, total_puzzles: int) -> 
     transition: all 0.2s ease !important;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
 }
-.puzzle-nav-container button:hover:not(:disabled) {
+.puzzle-buttons-container button:hover:not(:disabled) {
     transform: translateY(-1px) !important;
     box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
 }
-.puzzle-nav-container button:active:not(:disabled) {
+.puzzle-buttons-container button:active:not(:disabled) {
     transform: translateY(0) !important;
 }
-.puzzle-nav-container button:disabled {
+.puzzle-buttons-container button:disabled {
     opacity: 0.5 !important;
 }
 </style>
 """, unsafe_allow_html=True)
     
-    st.markdown('<div class="puzzle-nav-container">', unsafe_allow_html=True)
+    # Get puzzle key for rating
+    puzzle_key = (
+        getattr(puzzle, "puzzle_key", None)
+        or getattr(puzzle, "puzzle_id", None)
+        or f"index_{progress.current_index}"
+    )
+    
+    # Get rater info
+    user = st.session_state.get("user")
+    if user and user.get("id"):
+        rater = user.get("id")
+    else:
+        rater = (st.session_state.get("puzzle_rater") or "").strip() or None
+    
+    # Initialize rating state
+    if "puzzle_rated_keys" not in st.session_state:
+        try:
+            rated = get_user_rated_keys(rater)
+        except Exception:
+            rated = set()
+        st.session_state["puzzle_rated_keys"] = set(rated)
+    
+    rated = st.session_state.get("puzzle_rated_keys")
+    if not isinstance(rated, set):
+        rated = set(rated) if isinstance(rated, list) else set()
+        st.session_state["puzzle_rated_keys"] = rated
+    
+    last_rating_map = st.session_state.get("puzzle_last_rating")
+    if not isinstance(last_rating_map, dict):
+        last_rating_map = {}
+        st.session_state["puzzle_last_rating"] = last_rating_map
+    
+    already_rated = puzzle_key in rated
+    
+    st.markdown('<div class="puzzle-buttons-container">', unsafe_allow_html=True)
+    
+    # Show rating status if already rated
+    if already_rated:
+        prev = last_rating_map.get(puzzle_key)
+        if prev:
+            st.caption(f"✓ Rated: {prev}")
+    
+    # Rating buttons row
+    st.caption("Rate this puzzle:")
+    r1, r2, r3 = st.columns(3, gap="small")
+    with r1:
+        dislike_clicked = st.button("👎", type="secondary", disabled=already_rated, use_container_width=True, key=f"rate_dislike_{puzzle_key}", help="Dislike")
+    with r2:
+        meh_clicked = st.button("😐", type="secondary", disabled=already_rated, use_container_width=True, key=f"rate_meh_{puzzle_key}", help="Meh")
+    with r3:
+        like_clicked = st.button("👍", type="secondary", disabled=already_rated, use_container_width=True, key=f"rate_like_{puzzle_key}", help="Like")
+    
+    # Handle rating clicks
+    if not already_rated:
+        if dislike_clicked:
+            record_puzzle_rating(puzzle_key=str(puzzle_key), rating="dislike", rater=rater)
+            st.session_state["puzzle_rated_keys"].add(puzzle_key)
+            st.session_state["puzzle_last_rating"][puzzle_key] = "👎"
+            st.toast("Rating saved!")
+            st.rerun()
+        elif meh_clicked:
+            record_puzzle_rating(puzzle_key=str(puzzle_key), rating="meh", rater=rater)
+            st.session_state["puzzle_rated_keys"].add(puzzle_key)
+            st.session_state["puzzle_last_rating"][puzzle_key] = "😐"
+            st.toast("Rating saved!")
+            st.rerun()
+        elif like_clicked:
+            record_puzzle_rating(puzzle_key=str(puzzle_key), rating="like", rater=rater)
+            st.session_state["puzzle_rated_keys"].add(puzzle_key)
+            st.session_state["puzzle_last_rating"][puzzle_key] = "👍"
+            st.toast("Rating saved!")
+            st.rerun()
+    
+    # Navigation buttons row
+    st.caption("Navigation:")
     nav1, nav2, nav3 = st.columns(3, gap="small")
     with nav1:
         if st.button("⬅️ Back", use_container_width=True, disabled=progress.current_index <= 0, key="puzzle_nav_back"):
@@ -795,18 +871,12 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         st.write(f"Progress: **{progress.current_index + 1} / {len(puzzles)}**")
         st.write(f"Solved: **{progress.solved}**")
 
-        st.checkbox("Debug", key="puzzle_debug_board")
-
-        show_explanation = st.checkbox("📖 Show explanation", key="puzzle_show_explanation_v2")
-
         # Reveal answer (for the current move in the sequence)
-        reveal_cols = st.columns(1)
-        with reveal_cols[0]:
-            if st.button("Reveal answer", use_container_width=True):
-                progress.reveal_answer = True
-                progress.reveal_puzzle_index = progress.current_index
-                progress.reveal_solution_move_index = progress.solution_move_index
-                progress.last_uci = None
+        if st.button("🔍 Reveal answer", use_container_width=True):
+            progress.reveal_answer = True
+            progress.reveal_puzzle_index = progress.current_index
+            progress.reveal_solution_move_index = progress.solution_move_index
+            progress.last_uci = None
 
         if (
             progress.reveal_answer
@@ -834,8 +904,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
             
-            # Navigation buttons - immediately after success for quick continuation
-            _render_puzzle_nav_buttons(progress, len(puzzles))
+            # Navigation and rating buttons - immediately after success
+            _render_puzzle_nav_buttons(progress, len(puzzles), puzzle)
             
         elif progress.last_result == "viable":
             # Show why this isn't the optimal move
@@ -847,114 +917,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             if puzzle.explanation:
                 st.info(f"💡 {puzzle.explanation}")
             
-            # Navigation buttons - immediately after viable for quick continuation
-            _render_puzzle_nav_buttons(progress, len(puzzles))
+            # Navigation and rating buttons - immediately after viable
+            _render_puzzle_nav_buttons(progress, len(puzzles), puzzle)
             
         elif progress.last_result == "incorrect":
             st.error("Incorrect. Try again.")
-            if show_explanation:
-                st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
         elif progress.opponent_just_moved:
             st.info("Opponent played. Find the next best move!")
-
-        # Rating (after each completed puzzle)
-        if progress.last_result in ("correct", "viable"):
-            st.markdown("---")
-            
-            puzzle_key = (
-                getattr(puzzle, "puzzle_key", None)
-                or getattr(puzzle, "puzzle_id", None)
-                or f"index_{progress.current_index}"
-            )
-
-            # Determine current rater: prefer logged-in user, fallback to puzzle_rater session
-            user = st.session_state.get("user")
-            if user and user.get("id"):
-                rater = user.get("id")
-                rater_display = user.get("email", "User")
-            else:
-                rater = (st.session_state.get("puzzle_rater") or "").strip() or None
-                rater_display = rater
-
-            if "puzzle_rated_keys" not in st.session_state:
-                try:
-                    rated = get_user_rated_keys(rater)
-                except Exception:
-                    rated = set()
-                st.session_state["puzzle_rated_keys"] = set(rated)
-
-            rated = st.session_state.get("puzzle_rated_keys")
-            if not isinstance(rated, set):
-                rated = set(rated) if isinstance(rated, list) else set()
-                st.session_state["puzzle_rated_keys"] = rated
-
-            last_rating_map = st.session_state.get("puzzle_last_rating")
-            if not isinstance(last_rating_map, dict):
-                last_rating_map = {}
-                st.session_state["puzzle_last_rating"] = last_rating_map
-
-            already = puzzle_key in rated
-            
-            # Custom CSS for rating buttons - larger, smoother transitions
-            st.markdown("""
-<style>
-/* Smooth rating buttons */
-.rating-container button {
-    height: 44px !important;
-    padding: 8px 12px !important;
-    font-size: 0.9rem !important;
-    font-weight: 600 !important;
-    border-radius: 8px !important;
-    transition: all 0.2s ease !important;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.08) !important;
-}
-.rating-container button:hover:not(:disabled) {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
-}
-.rating-container button:active:not(:disabled) {
-    transform: translateY(0) !important;
-}
-</style>
-""", unsafe_allow_html=True)
-            
-            if already:
-                prev = last_rating_map.get(puzzle_key)
-                if prev:
-                    st.success(f"✓ You rated this puzzle: **{prev}**")
-            else:
-                st.write("**How was this puzzle?**")
-
-            # Rating buttons with smooth styling
-            st.markdown('<div class="rating-container">', unsafe_allow_html=True)
-            col1, col2, col3 = st.columns(3, gap="small")
-            with col1:
-                dislike_clicked = st.button("👎", type="secondary", disabled=already, use_container_width=True, key=f"rate_dislike_{puzzle_key}", help="Dislike")
-            with col2:
-                meh_clicked = st.button("😐", type="secondary", disabled=already, use_container_width=True, key=f"rate_meh_{puzzle_key}", help="Meh")
-            with col3:
-                like_clicked = st.button("👍", type="secondary", disabled=already, use_container_width=True, key=f"rate_like_{puzzle_key}", help="Like")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            if not already:
-                if dislike_clicked:
-                    record_puzzle_rating(puzzle_key=str(puzzle_key), rating="dislike", rater=rater)
-                    st.session_state["puzzle_rated_keys"].add(puzzle_key)
-                    st.session_state["puzzle_last_rating"][puzzle_key] = "👎 Dislike"
-                    st.toast("Rating saved: Dislike")
-                    st.rerun()
-                elif meh_clicked:
-                    record_puzzle_rating(puzzle_key=str(puzzle_key), rating="meh", rater=rater)
-                    st.session_state["puzzle_rated_keys"].add(puzzle_key)
-                    st.session_state["puzzle_last_rating"][puzzle_key] = "😐 Meh"
-                    st.toast("Rating saved: Meh")
-                    st.rerun()
-                elif like_clicked:
-                    record_puzzle_rating(puzzle_key=str(puzzle_key), rating="like", rater=rater)
-                    st.session_state["puzzle_rated_keys"].add(puzzle_key)
-                    st.session_state["puzzle_last_rating"][puzzle_key] = "👍 Like"
-                    st.toast("Rating saved: Like")
-                    st.rerun()
-
-        if progress.last_result is None and not progress.opponent_just_moved and show_explanation:
-            st.info(f"💡 {puzzle.explanation or 'Explanation unavailable for this puzzle.'}")
