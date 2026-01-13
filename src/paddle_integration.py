@@ -73,6 +73,9 @@ def render_checkout_button(price_id: str, customer_email: str = None, button_tex
     # Defensive coding for email
     email_js = f"email: '{customer_email}'," if customer_email else ""
     
+    # Ensure the Paddle script is loaded inside this component iframe and initialize it
+    script_url = "https://sandbox-cdn.paddle.com/paddle/v2/paddle.js" if PADDLE_ENV == "sandbox" else "https://cdn.paddle.com/paddle/v2/paddle.js"
+
     html_code = f"""
     <style>
         .paddle-btn {{
@@ -92,9 +95,16 @@ def render_checkout_button(price_id: str, customer_email: str = None, button_tex
             background-color: #1D4ED8;
         }}
     </style>
-    <button class="paddle-btn" onclick="openCheckout()">{button_text}</button>
-    
+    <!-- Load Paddle inside this iframe so window.Paddle is available to the button code -->
+    <script src="{script_url}"></script>
     <script type="text/javascript">
+        if (window.Paddle) {{
+            try {{
+                Paddle.Initialize({{ token: "{PADDLE_CLIENT_TOKEN}" }});
+            }} catch(e) {{
+                console.warn('Paddle Initialize failed:', e);
+            }}
+        }}
         function openCheckout() {{
             if (window.Paddle) {{
                 Paddle.Checkout.open({{
@@ -103,7 +113,7 @@ def render_checkout_button(price_id: str, customer_email: str = None, button_tex
                         {email_js}
                     }},
                     settings: {{
-                        successUrl: window.location.href // Returns to app after success
+                        successUrl: window.location.href
                     }}
                 }});
             }} else {{
@@ -111,6 +121,7 @@ def render_checkout_button(price_id: str, customer_email: str = None, button_tex
             }}
         }}
     </script>
+    <button class="paddle-btn" onclick="openCheckout()">{button_text}</button>
     """
     
     # Height needs to be large enough for the button
