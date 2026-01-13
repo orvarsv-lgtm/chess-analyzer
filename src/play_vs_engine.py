@@ -74,9 +74,10 @@ def _get_engine_move(board: chess.Board, depth: int = ENGINE_PLAY_DEPTH) -> Opti
     
     try:
         result = engine.play(board, chess.engine.Limit(depth=depth))
-        return result.move
+        move = result.move
+        return move
     except Exception as e:
-        st.error(f"Engine error: {e}")
+        st.error(f"Engine play error: {e}")
         return None
     finally:
         try:
@@ -207,6 +208,8 @@ def _make_player_move(uci_move: str, explanation: str = "") -> bool:
         if game.board.is_game_over():
             game.game_over = True
             game.result = game.board.result()
+            # Force session state update
+            st.session_state["vs_engine_game"] = game
             return True
         
         # Engine responds
@@ -228,6 +231,8 @@ def _make_player_move(uci_move: str, explanation: str = "") -> bool:
                 game.game_over = True
                 game.result = game.board.result()
         
+        # Force session state update
+        st.session_state["vs_engine_game"] = game
         return True
         
     except Exception as e:
@@ -489,13 +494,17 @@ def _render_simple_board(board: chess.Board, orientation: str = "white", selecte
                 "correct_squares": [to_sq],
             }
         
+        # Use a unique key based on FEN to force component refresh after moves
+        fen_hash = hash(board.fen()) % 100000
+        component_key = f"vs_engine_board_{fen_hash}"
+        
         move = render_chessboard(
             fen=board.fen(),
             legal_moves=legal_moves,
             orientation=orientation,
             side_to_move=side_to_move,
             highlights=highlights,
-            key="vs_engine_board",
+            key=component_key,
         )
         
         return move
