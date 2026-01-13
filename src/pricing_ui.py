@@ -31,15 +31,23 @@ def render_pricing_page() -> None:
     if current_tier != "free":
         st.success(f"✅ You're currently on the **{current_tier.title()}** plan")
     
-    # Custom CSS for pricing cards
+    # Custom CSS for pricing cards - equal height and symmetrical
     st.markdown("""
     <style>
+    .pricing-container {
+        display: flex;
+        align-items: stretch;
+        gap: 16px;
+    }
     .pricing-card {
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px 16px;
         margin: 8px 0;
         text-align: center;
         transition: transform 0.2s, box-shadow 0.2s;
+        min-height: 420px;
+        display: flex;
+        flex-direction: column;
     }
     .pricing-card:hover {
         transform: translateY(-4px);
@@ -64,29 +72,35 @@ def render_pricing_page() -> None:
         color: white;
     }
     .price-amount {
-        font-size: 2.5rem;
+        font-size: 2.2rem;
         font-weight: 800;
-        margin: 16px 0;
+        margin: 12px 0;
     }
     .price-period {
-        font-size: 1rem;
+        font-size: 0.9rem;
         opacity: 0.9;
     }
     .tier-name {
-        font-size: 1.5rem;
+        font-size: 1.3rem;
         font-weight: 700;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
+        min-height: 32px;
+    }
+    .tier-badge-space {
+        min-height: 28px;
     }
     .feature-list {
         text-align: left;
-        margin: 20px 0;
+        margin: 16px 0;
         padding: 0;
         list-style: none;
+        flex-grow: 1;
     }
     .feature-list li {
-        padding: 8px 0;
+        padding: 6px 0;
         border-bottom: 1px solid rgba(255,255,255,0.2);
-        font-size: 0.95rem;
+        font-size: 0.85rem;
+        line-height: 1.3;
     }
     .feature-list li:last-child {
         border-bottom: none;
@@ -94,20 +108,19 @@ def render_pricing_page() -> None:
     .popular-badge {
         background: #fbbf24;
         color: #1f2937;
-        padding: 4px 16px;
+        padding: 4px 12px;
         border-radius: 20px;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         display: inline-block;
-        margin-bottom: 8px;
     }
     .tier-tagline {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         opacity: 0.9;
         font-style: italic;
-        margin-top: 12px;
+        margin-top: auto;
         padding-top: 12px;
         border-top: 1px solid rgba(255,255,255,0.2);
     }
@@ -121,17 +134,18 @@ def render_pricing_page() -> None:
     with col1:
         st.markdown("""
         <div class="pricing-card pricing-free">
+            <div class="tier-badge-space"></div>
             <div class="tier-name">🟢 Free</div>
-            <div class="price-amount">€0<span class="price-period">/month</span></div>
+            <div class="price-amount">€0<span class="price-period">/mo</span></div>
             <ul class="feature-list">
                 <li>✅ 50 games / month</li>
                 <li>✅ Max depth: 10</li>
-                <li>✅ 1 AI game review / month</li>
+                <li>✅ 1 AI review / month</li>
                 <li>✅ Unlimited puzzles</li>
-                <li>✅ Batch limit: 100 games</li>
+                <li>✅ Batch: 100 games</li>
                 <li>❌ No career analysis</li>
             </ul>
-            <div class="tier-tagline">Perfect for getting started</div>
+            <div class="tier-tagline">Perfect to get started</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -145,17 +159,18 @@ def render_pricing_page() -> None:
     with col2:
         st.markdown("""
         <div class="pricing-card pricing-basic">
+            <div class="tier-badge-space"></div>
             <div class="tier-name">🔵 Basic</div>
-            <div class="price-amount">€9<span class="price-period">/month</span></div>
+            <div class="price-amount">€9<span class="price-period">/mo</span></div>
             <ul class="feature-list">
                 <li>✅ 500 games / month</li>
                 <li>✅ Max depth: 16</li>
-                <li>✅ 10 AI game reviews / month</li>
+                <li>✅ 10 AI reviews / month</li>
                 <li>✅ Unlimited puzzles</li>
-                <li>✅ Batch limit: 500 games</li>
+                <li>✅ Batch: 500 games</li>
                 <li>❌ No career analysis</li>
             </ul>
-            <div class="tier-tagline">💡 For casual improvers</div>
+            <div class="tier-tagline">💡 For casual players</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -165,18 +180,18 @@ def render_pricing_page() -> None:
     with col3:
         st.markdown("""
         <div class="pricing-card pricing-plus">
-            <div class="popular-badge">⭐ Most Popular</div>
+            <div class="tier-badge-space"><span class="popular-badge">⭐ BEST VALUE</span></div>
             <div class="tier-name">🟣 Plus</div>
-            <div class="price-amount">€19<span class="price-period">/month</span></div>
+            <div class="price-amount">€19<span class="price-period">/mo</span></div>
             <ul class="feature-list">
                 <li>✅ 2,000 games / month</li>
                 <li>✅ Max depth: 18–20</li>
-                <li>✅ 15 AI game reviews / month</li>
-                <li>✅ 1 career analysis / month</li>
-                <li>✅ Batch limit: 1,000 games</li>
+                <li>✅ 15 AI reviews / month</li>
+                <li>✅ 1 career analysis / mo</li>
+                <li>✅ Batch: 1,000 games</li>
                 <li>✅ Priority support</li>
             </ul>
-            <div class="tier-tagline">💡 For serious improvers</div>
+            <div class="tier-tagline">💡 For serious players</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -186,17 +201,18 @@ def render_pricing_page() -> None:
     with col4:
         st.markdown("""
         <div class="pricing-card pricing-pro">
+            <div class="tier-badge-space"></div>
             <div class="tier-name">🔴 Pro</div>
-            <div class="price-amount">€29<span class="price-period">/month</span></div>
+            <div class="price-amount">€29<span class="price-period">/mo</span></div>
             <ul class="feature-list">
                 <li>✅ 10,000 games / month</li>
                 <li>✅ Max depth: 20–22</li>
                 <li>✅ Unlimited AI reviews</li>
-                <li>✅ 5 career analyses / month</li>
-                <li>✅ Batch limit: 2,000 games</li>
+                <li>✅ 5 career analyses / mo</li>
+                <li>✅ Batch: 2,000 games</li>
                 <li>✅ Priority support</li>
             </ul>
-            <div class="tier-tagline">💡 For dedicated players</div>
+            <div class="tier-tagline">💡 For dedicated pros</div>
         </div>
         """, unsafe_allow_html=True)
         

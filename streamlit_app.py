@@ -1868,61 +1868,58 @@ def main() -> None:
 
 def _render_pinned_navigation(view_options: list[str]) -> str:
     """Render pinned navigation as a horizontal bar at the top."""
-    # Create a horizontal row of navigation buttons with minimal gap to maximize space
-    cols = st.columns(len(view_options), gap="small")
+    # Create 9 equal columns for navigation
+    cols = st.columns(9, gap="small")
     
-    # Custom CSS for uniform button sizing and single-line text
+    # Custom CSS for compact navigation buttons
     st.markdown("""
         <style>
-        /* Navigation buttons - uniform size, single line */
-        div[data-testid="column"] button {
-            padding: 0.4rem 0.2rem !important;
-            line-height: 1.1 !important;
-            height: 3rem !important;
-            min-height: 3rem !important;
-            max-height: 3rem !important;
-            font-size: 0.75rem !important;
+        /* Navigation buttons - compact and uniform */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(-n+9) button {
+            padding: 0.3rem 0.1rem !important;
+            line-height: 1.0 !important;
+            height: 2.8rem !important;
+            min-height: 2.8rem !important;
+            max-height: 2.8rem !important;
+            font-size: 0.65rem !important;
             white-space: nowrap !important;
             overflow: hidden !important;
-            text-overflow: ellipsis !important;
         }
-        div[data-testid="column"] button p {
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(-n+9) button p {
             margin: 0 !important;
-            font-size: 0.75rem !important;
+            font-size: 0.65rem !important;
             white-space: nowrap !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # Short labels for single-line display
+    # Short 4-5 char labels for 9-column layout
     label_map = {
-        "Openings": "Open",
-        "Opponent Analysis": "Rivals",
         "Analysis": "Stats",
         "AI Coach": "Coach",
-        "Replayer": "Replay",
-        "Streaks": "Streak",
-        "Puzzles": "Puzzle",
-        "Play vs Engine": "Play",
+        "Replayer": "Play",
+        "Openings": "Opens",
+        "Opponent Analysis": "Rival",
+        "Streaks": "Wins",
+        "Puzzles": "Tactic",
+        "Play vs Engine": "Engine",
+        "Pricing": "Plans",
     }
     
     for i, (col, option) in enumerate(zip(cols, view_options)):
         with col:
             is_selected = st.session_state.get("main_view") == option
-            # Extract just the emoji and short label
+            # Extract emoji and label
             parts = option.split(" ", 1)
             emoji = parts[0] if parts else "📌"
             original_label = parts[1] if len(parts) > 1 else option
             
-            # Use mapped label or fallback to first word
-            if original_label in label_map:
-                display_label = label_map[original_label]
-            else:
-                display_label = original_label.split(" ")[0][:6]  # Max 6 chars
+            # Use mapped short label
+            display_label = label_map.get(original_label, original_label[:5])
             
             button_type = "primary" if is_selected else "secondary"
             if st.button(
-                f"{emoji} {display_label}",
+                f"{emoji}{display_label}",
                 key=f"nav_pin_{i}",
                 use_container_width=True,
                 type=button_type,
