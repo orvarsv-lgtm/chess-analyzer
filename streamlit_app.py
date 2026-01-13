@@ -1867,70 +1867,72 @@ def main() -> None:
 
 
 def _render_pinned_navigation(view_options: list[str]) -> str:
-    """Render pinned navigation as a horizontal bar at the top."""
-    # Create 9 equal columns for navigation
-    cols = st.columns(9, gap="small")
+    """Render pinned navigation as two rows of buttons."""
     
-    # Custom CSS for compact navigation buttons
+    # Custom CSS for navigation buttons to ensure text fitting
     st.markdown("""
         <style>
-        /* Navigation buttons - compact and uniform */
-        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(-n+9) button {
-            padding: 0px 0px !important;
-            line-height: 1.0 !important;
-            height: 2.8rem !important;
-            min-height: 2.8rem !important;
-            max-height: 2.8rem !important;
-            font-size: 0.55rem !important;
+        div[data-testid="column"] button {
             white-space: nowrap !important;
             overflow: hidden !important;
-        }
-        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(-n+9) button p {
-            margin: 0 !important;
-            font-size: 0.55rem !important;
-            white-space: nowrap !important;
-            font-weight: 600 !important;
-            letter-spacing: -0.5px !important;
+            text-overflow: ellipsis !important;
+            padding: 0.4rem 0.1rem !important;
+            font-size: 0.85rem !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # Ultra-short labels for 9-column layout
+    # Label mapping for cleaner display
     label_map = {
-        "Analysis": "Stats",
-        "AI Coach": "Coach",
-        "Replayer": "Games",
-        "Openings": "Open",
-        "Opponent Analysis": "Rival",
-        "Streaks": "Wins",
-        "Puzzles": "Puzl",
-        "Play vs Engine": "Vs AI",
-        "Pricing": "Plan",
+        "Analysis": "Analysis",
+        "AI Coach": "AI Coach",
+        "Replayer": "Replayer",
+        "Openings": "Openings",
+        "Opponent Analysis": "Opponent",
+        "Streaks": "Streaks",
+        "Puzzles": "Puzzles",
+        "Play vs Engine": "Vs Engine",
+        "Pricing": "Pricing",
     }
-    
-    for i, (col, option) in enumerate(zip(cols, view_options)):
+
+    # Split into two rows (5 items top, 4 items bottom)
+    row1 = view_options[:5]
+    row2 = view_options[5:]
+
+    # Row 1
+    cols1 = st.columns(5, gap="small")
+    for i, (col, option) in enumerate(zip(cols1, row1)):
         with col:
-            is_selected = st.session_state.get("main_view") == option
-            # Extract emoji and label
-            parts = option.split(" ", 1)
-            emoji = parts[0] if parts else "📌"
-            original_label = parts[1] if len(parts) > 1 else option
+            _render_nav_button_logic(option, label_map, i)
+
+    # Row 2
+    cols2 = st.columns(4, gap="small")
+    for i, (col, option) in enumerate(zip(cols2, row2)):
+        with col:
+            _render_nav_button_logic(option, label_map, i + 5)
             
-            # Use mapped short label
-            display_label = label_map.get(original_label, original_label[:5])
-            
-            button_type = "primary" if is_selected else "secondary"
-            if st.button(
-                f"{emoji} {display_label}",
-                key=f"nav_pin_{i}",
-                use_container_width=True,
-                type=button_type,
-            ):
-                st.session_state["main_view"] = option
-                st.rerun()
-    
     st.markdown("---")
     return st.session_state.get("main_view", view_options[0])
+
+
+def _render_nav_button_logic(option: str, label_map: dict, key_idx: int) -> None:
+    """Helper to render a single navigation button."""
+    is_selected = st.session_state.get("main_view") == option
+    parts = option.split(" ", 1)
+    emoji = parts[0] if parts else "📌"
+    original_label = parts[1] if len(parts) > 1 else option
+    
+    display_label = label_map.get(original_label, original_label)
+    
+    button_type = "primary" if is_selected else "secondary"
+    if st.button(
+        f"{emoji} {display_label}",
+        key=f"nav_pin_{key_idx}",
+        use_container_width=True,
+        type=button_type,
+    ):
+        st.session_state["main_view"] = option
+        st.rerun()
 
 
 def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
