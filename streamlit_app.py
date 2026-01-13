@@ -104,6 +104,7 @@ from src.play_vs_engine import render_play_vs_engine_tab
 
 # Pricing page
 from src.pricing_ui import render_pricing_page
+from src.legal_ui import render_terms_of_service_page
 
 # Puzzle disk cache
 from puzzles.puzzle_cache import load_cached_puzzles, save_cached_puzzles
@@ -1486,6 +1487,11 @@ def main() -> None:
     render_language_selector()
     render_auth_sidebar()
     st.sidebar.caption(f"{t('contact_us')}: orvarsv@icloud.com")
+    
+    st.sidebar.markdown("---")
+    if st.sidebar.button("📜 Terms of Service", use_container_width=True):
+        st.session_state["main_view"] = "Terms of Service"
+        st.rerun()
 
     if "analysis_result" not in st.session_state:
         st.session_state["analysis_result"] = None
@@ -1958,8 +1964,8 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     if "main_view" not in st.session_state:
         st.session_state["main_view"] = view_options[0]
     
-    # Handle language change - reset view if current selection invalid
-    if st.session_state.get("main_view") not in view_options:
+    # Handle language change - reset view if current selection invalid, but allow Terms of Service
+    if st.session_state.get("main_view") not in view_options and st.session_state.get("main_view") != "Terms of Service":
         st.session_state["main_view"] = view_options[0]
 
     # Pinned navigation bar at top
@@ -1987,6 +1993,8 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
         render_play_vs_engine_tab()
     elif "Pricing" in view:
         render_pricing_page()
+    elif view == "Terms of Service":
+        render_terms_of_service_page()
     else:
         _render_enhanced_ui(aggregated)
 
