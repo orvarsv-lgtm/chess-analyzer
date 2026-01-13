@@ -1876,34 +1876,36 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
         <style>
         /* Navigation buttons - compact and uniform */
         div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(-n+9) button {
-            padding: 0.3rem 0.1rem !important;
+            padding: 0px 0px !important;
             line-height: 1.0 !important;
             height: 2.8rem !important;
             min-height: 2.8rem !important;
             max-height: 2.8rem !important;
-            font-size: 0.65rem !important;
+            font-size: 0.55rem !important;
             white-space: nowrap !important;
             overflow: hidden !important;
         }
         div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(-n+9) button p {
             margin: 0 !important;
-            font-size: 0.65rem !important;
+            font-size: 0.55rem !important;
             white-space: nowrap !important;
+            font-weight: 600 !important;
+            letter-spacing: -0.5px !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # Short 4-5 char labels for 9-column layout
+    # Ultra-short labels for 9-column layout
     label_map = {
         "Analysis": "Stats",
         "AI Coach": "Coach",
-        "Replayer": "Play",
-        "Openings": "Opens",
+        "Replayer": "Games",
+        "Openings": "Open",
         "Opponent Analysis": "Rival",
         "Streaks": "Wins",
-        "Puzzles": "Tactic",
-        "Play vs Engine": "Engine",
-        "Pricing": "Plans",
+        "Puzzles": "Puzl",
+        "Play vs Engine": "Vs AI",
+        "Pricing": "Plan",
     }
     
     for i, (col, option) in enumerate(zip(cols, view_options)):
@@ -1919,7 +1921,7 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
             
             button_type = "primary" if is_selected else "secondary"
             if st.button(
-                f"{emoji}{display_label}",
+                f"{emoji} {display_label}",
                 key=f"nav_pin_{i}",
                 use_container_width=True,
                 type=button_type,
