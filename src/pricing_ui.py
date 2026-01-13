@@ -17,6 +17,11 @@ from src.auth import get_current_user, is_logged_in
 def render_pricing_page() -> None:
     """Render a beautiful pricing page with tier comparison."""
     
+    # Get current user info first
+    user = get_current_user()
+    user_email = user.get("email") if user else None
+    current_tier = get_user_tier(user_email) if user_email else "free"
+    
     # Initialize Paddle.js (pass user email as pwCustomer when available)
     init_paddle(user_email)
 
@@ -24,14 +29,9 @@ def render_pricing_page() -> None:
     from src.paddle_integration import validate_paddle_setup
     setup_report = validate_paddle_setup()
     if not setup_report.get("ok"):
-        with st.expander("Paddle Setup Warnings", expanded=True):
+        with st.expander("⚠️ Paddle Setup Warnings", expanded=False):
             for msg in setup_report.get("messages", []):
                 st.warning(msg)
-    
-    # Get current user info
-    user = get_current_user()
-    user_email = user.get("email") if user else None
-    current_tier = get_user_tier(user_email) if user_email else "free"
     
     st.header("💎 Choose Your Plan")
     st.caption("Unlock deeper analysis and accelerate your chess improvement")
