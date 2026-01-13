@@ -102,6 +102,9 @@ from puzzles.global_puzzle_store import load_global_puzzles, save_puzzles_to_glo
 # Play vs Engine tab
 from src.play_vs_engine import render_play_vs_engine_tab
 
+# Pricing page
+from src.pricing_ui import render_pricing_page
+
 # Puzzle disk cache
 from puzzles.puzzle_cache import load_cached_puzzles, save_cached_puzzles
 
@@ -1947,6 +1950,7 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
         f"🏆 Streaks",
         f"♟️ {t('tab_puzzles')}",
         f"🤺 Play vs Engine",
+        f"💎 Pricing",
     ]
     
     # Stable view selector (survives reruns)
@@ -1980,6 +1984,8 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
         _render_streaks_tab(aggregated)
     elif "Play vs Engine" in view:
         render_play_vs_engine_tab()
+    elif "Pricing" in view:
+        render_pricing_page()
     else:
         _render_enhanced_ui(aggregated)
 

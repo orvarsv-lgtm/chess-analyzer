@@ -16,6 +16,9 @@ venv/
 .env.local
 *.env
 
+# Streamlit secrets (contains API keys!)
+.streamlit/secrets.toml
+
 # OS
 .DS_Store
 

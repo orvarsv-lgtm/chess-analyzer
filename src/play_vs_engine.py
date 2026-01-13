@@ -579,12 +579,15 @@ def render_play_vs_engine_tab() -> None:
             if user_move:
                 if st.session_state["vs_engine_explanation_mode"]:
                     # Explanation mode - store as pending, show confirm
-                    st.session_state["vs_engine_pending_move"] = user_move
-                    st.rerun()
+                    # Only update if different to avoid infinite rerun loops
+                    if st.session_state.get("vs_engine_pending_move") != user_move:
+                        st.session_state["vs_engine_pending_move"] = user_move
+                        st.rerun()
                 else:
                     # No explanation mode - play immediately
-                    _make_player_move(user_move, "")
-                    st.rerun()
+                    with st.spinner("Engine is thinking..."):
+                        if _make_player_move(user_move, ""):
+                            st.rerun()
             
             if game.game_over:
                 st.success(f"**Game Over!** Result: {game.result}")
@@ -615,9 +618,10 @@ def render_play_vs_engine_tab() -> None:
                 col_confirm, col_cancel = st.columns(2)
                 with col_confirm:
                     if st.button("✅ Confirm", use_container_width=True, type="primary"):
-                        _make_player_move(pending_move, explanation)
-                        st.session_state["vs_engine_pending_move"] = None
-                        st.rerun()
+                        with st.spinner("Engine is thinking..."):
+                            _make_player_move(pending_move, explanation)
+                            st.session_state["vs_engine_pending_move"] = None
+                            st.rerun()
                 with col_cancel:
                     if st.button("❌ Cancel", use_container_width=True):
                         st.session_state["vs_engine_pending_move"] = None
