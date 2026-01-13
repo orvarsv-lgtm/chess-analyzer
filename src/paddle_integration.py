@@ -82,7 +82,7 @@ def render_checkout_button(price_id: str, customer_email: str = None, button_tex
             background-color: #2563EB;
             color: white;
             padding: 12px 24px;
-            border-radius: 6px;
+            border-radius: 12px;
             border: none;
             font-weight: 600;
             cursor: pointer;

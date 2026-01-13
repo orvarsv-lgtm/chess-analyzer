@@ -34,6 +34,10 @@ def render_pricing_page() -> None:
     # Custom CSS for pricing cards - equal height and symmetrical
     st.markdown("""
     <style>
+    /* Make Streamlit native buttons rounded on pricing page */
+    div[data-testid="column"] button, div.stButton > button {
+        border-radius: 12px !important;
+    }
     .pricing-container {
         display: flex;
         align-items: stretch;
