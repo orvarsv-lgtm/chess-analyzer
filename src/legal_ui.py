@@ -3,7 +3,7 @@ import streamlit as st
 def render_terms_of_service_page():
     st.title("Terms of Service")
     st.markdown("""
-These Terms of Service govern your use of **ChessAnalyzerV1** (the "Service"), operated by us.  
+These Terms of Service govern your use of **ChessAnalyzerV1**, operated by us.  
 By accessing or using the Service, you agree to these Terms.  
 **If you do not agree, do not use the Service.**
 
