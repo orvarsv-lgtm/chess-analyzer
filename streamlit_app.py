@@ -1868,28 +1868,38 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
     # Create a horizontal row of navigation buttons with minimal gap to maximize space
     cols = st.columns(len(view_options), gap="small")
     
-    # Custom CSS to ensure buttons fit well (reduce padding, ensure text centering)
+    # Custom CSS for uniform button sizing and single-line text
     st.markdown("""
         <style>
-        /* Target buttons inside the horizontal block for navigation */
+        /* Navigation buttons - uniform size, single line */
         div[data-testid="column"] button {
-            padding: 0.5rem 0.25rem !important; /* Reduce horizontal padding */
-            line-height: 1.2 !important;
-            height: 100% !important;
-            min-height: 3.5rem;
+            padding: 0.4rem 0.2rem !important;
+            line-height: 1.1 !important;
+            height: 2.8rem !important;
+            min-height: 2.8rem !important;
+            max-height: 2.8rem !important;
+            font-size: 0.75rem !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+        div[data-testid="column"] button p {
+            margin: 0 !important;
+            font-size: 0.75rem !important;
+            white-space: nowrap !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # Display mappings favoring full first words
+    # Short labels for single-line display
     label_map = {
-        "Openings": "Opening",
+        "Openings": "Open",
         "Opponent Analysis": "Rivals",
-        "Analysis": "Analysis",
-        "AI Coach": "AI Coach",
-        "Replayer": "Replayer",
+        "Analysis": "Stats",
+        "AI Coach": "Coach",
+        "Replayer": "Replay",
         "Streaks": "Streaks",
-        "Puzzles": "Puzzles",
+        "Puzzles": "Puzzle",
         "Play vs Engine": "Play",
     }
     
@@ -1901,16 +1911,15 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
             emoji = parts[0] if parts else "📌"
             original_label = parts[1] if len(parts) > 1 else option
             
-            # Use mapped label or fallback to original (first word key)
-            # Default fallback: First word only
+            # Use mapped label or fallback to first word
             if original_label in label_map:
                 display_label = label_map[original_label]
             else:
-                display_label = original_label.split(" ")[0]
+                display_label = original_label.split(" ")[0][:6]  # Max 6 chars
             
             button_type = "primary" if is_selected else "secondary"
             if st.button(
-                f"{emoji}\n{display_label}",
+                f"{emoji} {display_label}",
                 key=f"nav_pin_{i}",
                 use_container_width=True,
                 type=button_type,
