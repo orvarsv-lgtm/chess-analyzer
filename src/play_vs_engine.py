@@ -596,6 +596,14 @@ def render_play_vs_engine_tab() -> None:
                     st.info("🎯 **Your turn** - Click/drag a piece to move")
                 else:
                     st.info("⏳ **Engine's turn**...")
+            
+            # Resign button (always visible during active game)
+            if not game.game_over:
+                st.divider()
+                if st.button("🏳️ Resign", use_container_width=True, type="secondary"):
+                    game.game_over = True
+                    game.result = "0-1" if game.player_color == "white" else "1-0"
+                    st.rerun()
         
         with col2:
             # Move history
@@ -628,26 +636,94 @@ def render_play_vs_engine_tab() -> None:
 
 
 def _render_game_review(review: dict[str, Any]) -> None:
-    """Render the AI game review."""
+    """Render the AI game review with interactive board navigation."""
     st.subheader("📊 AI Game Review")
     
     if "error" in review:
         st.error(review["error"])
         return
     
-    # Overall summary
-    st.markdown(review.get("overall_summary", ""))
+    game: GameState = st.session_state["vs_engine_game"]
     
-    st.divider()
+    # Initialize review navigation state
+    if "review_move_index" not in st.session_state:
+        st.session_state["review_move_index"] = 0
     
-    # Phase-by-phase analysis
-    st.subheader("📈 Analysis by Phase")
+    moves_analysis = review.get("moves_analysis", [])
+    move_history = game.move_history
     
-    for phase in ("Opening", "Middlegame", "Endgame"):
-        phase_moves = review["phase_summary"].get(phase, [])
-        if phase_moves:
-            with st.expander(f"**{phase}** ({len(phase_moves)} moves)", expanded=phase == "Opening"):
-                for m in phase_moves:
+    # Build list of all positions (starting + after each move)
+    positions = [chess.STARTING_FEN]
+    for m in move_history:
+        positions.append(m["fen_after"])
+    
+    # Current position index
+    current_idx = st.session_state["review_move_index"]
+    max_idx = len(positions) - 1
+    
+    # Layout: board on left, analysis on right
+    col_board, col_analysis = st.columns([1, 1])
+    
+    with col_board:
+        # Render the board at current position
+        current_fen = positions[current_idx]
+        board = chess.Board(current_fen)
+        
+        try:
+            from ui.chessboard_component import render_chessboard
+            render_chessboard(
+                fen=current_fen,
+                legal_moves=[],  # No moves during review
+                orientation=game.player_color,
+                side_to_move="w" if board.turn == chess.WHITE else "b",
+                key="review_board",
+            )
+        except ImportError:
+            st.code(board.unicode(invert_color=game.player_color == "black"))
+        
+        # Navigation buttons
+        col_first, col_prev, col_next, col_last = st.columns(4)
+        
+        with col_first:
+            if st.button("⏮️", use_container_width=True, disabled=current_idx == 0):
+                st.session_state["review_move_index"] = 0
+                st.rerun()
+        
+        with col_prev:
+            if st.button("◀️ Back", use_container_width=True, disabled=current_idx == 0):
+                st.session_state["review_move_index"] = current_idx - 1
+                st.rerun()
+        
+        with col_next:
+            if st.button("Next ▶️", use_container_width=True, disabled=current_idx >= max_idx):
+                st.session_state["review_move_index"] = current_idx + 1
+                st.rerun()
+        
+        with col_last:
+            if st.button("⏭️", use_container_width=True, disabled=current_idx >= max_idx):
+                st.session_state["review_move_index"] = max_idx
+                st.rerun()
+        
+        st.caption(f"Position {current_idx}/{max_idx}")
+    
+    with col_analysis:
+        # Show analysis for the current move (if any)
+        if current_idx > 0:
+            # Get the move that led to this position
+            move_data = move_history[current_idx - 1]
+            san = move_data["san"]
+            player = move_data["player"]
+            
+            if player == "human":
+                # Find the analysis for this move
+                move_analysis = None
+                for m in moves_analysis:
+                    if m["san"] == san:
+                        move_analysis = m
+                        break
+                
+                if move_analysis:
+                    quality = move_analysis["quality"]
                     quality_emoji = {
                         "Best": "🏆",
                         "Excellent": "⭐",
@@ -655,24 +731,45 @@ def _render_game_review(review: dict[str, Any]) -> None:
                         "Inaccuracy": "⚠️",
                         "Mistake": "❌",
                         "Blunder": "🚨",
-                    }.get(m["quality"], "•")
+                    }.get(quality, "•")
                     
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        best_note = " (best)" if m["was_best"] else f" (best: {m['best_move']})"
-                        st.markdown(f"{quality_emoji} **Move {m['move_num']}:** {m['san']}{best_note}")
-                    with col2:
-                        st.caption(f"CPL: {m['cp_loss']}")
-    
-    st.divider()
-    
-    # Explanation review
-    if review.get("explanation_review"):
-        st.subheader("🧠 Explanation Review")
-        st.caption("AI feedback on your thinking for each explained move")
+                    st.markdown(f"### Move {move_analysis['move_num']}: {san}")
+                    st.markdown(f"**Phase:** {move_analysis['phase']}")
+                    st.markdown(f"**Quality:** {quality_emoji} {quality}")
+                    st.markdown(f"**CPL:** {move_analysis['cp_loss']}")
+                    
+                    if move_analysis["was_best"]:
+                        st.success("This was the best move!")
+                    else:
+                        st.info(f"Best move was: **{move_analysis['best_move']}**")
+                    
+                    st.divider()
+                    
+                    # Find explanation review for this move
+                    explanation_review = None
+                    for er in review.get("explanation_review", []):
+                        if er["san"] == san:
+                            explanation_review = er
+                            break
+                    
+                    if explanation_review:
+                        st.markdown("**Your explanation:**")
+                        st.markdown(f"*{explanation_review['explanation']}*")
+                        st.markdown("---")
+                        st.markdown(explanation_review["feedback"])
+                    else:
+                        st.caption("No explanation provided for this move.")
+                else:
+                    st.markdown(f"### Your move: {san}")
+            else:
+                st.markdown(f"### Engine played: {san}")
+                st.caption("This was the engine's response.")
+        else:
+            st.markdown("### Starting Position")
+            st.caption("Use the navigation buttons to step through the game.")
         
-        for exp_review in review["explanation_review"]:
-            with st.expander(f"**Move {exp_review['move_num']}:** {exp_review['san']}"):
-                st.markdown(f"**Your explanation:** *{exp_review['explanation']}*")
-                st.markdown("---")
-                st.markdown(exp_review["feedback"])
+        st.divider()
+        
+        # Overall summary at the bottom
+        with st.expander("📋 Overall Summary", expanded=False):
+            st.markdown(review.get("overall_summary", ""))
