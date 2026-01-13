@@ -462,8 +462,11 @@ def _generate_overall_summary(
     return "\n\n".join(summary_parts)
 
 
-def _render_simple_board(board: chess.Board, orientation: str = "white") -> None:
-    """Render a simple text-based chess board (fallback if JS board unavailable)."""
+def _render_simple_board(board: chess.Board, orientation: str = "white") -> str | None:
+    """Render a simple text-based chess board (fallback if JS board unavailable).
+    
+    Returns the UCI move if user made one, else None.
+    """
     # Use the JS board component if available
     try:
         from ui.chessboard_component import render_chessboard
@@ -479,12 +482,12 @@ def _render_simple_board(board: chess.Board, orientation: str = "white") -> None
             key="vs_engine_board",
         )
         
-        if move:
-            st.session_state["vs_engine_pending_move"] = move
+        return move
             
     except ImportError:
         # Fallback to text board
         st.code(board.unicode(invert_color=orientation == "black"))
+        return None
 
 
 def render_play_vs_engine_tab() -> None:
@@ -536,11 +539,22 @@ def render_play_vs_engine_tab() -> None:
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            # Display board
-            _render_simple_board(game.board, orientation=game.player_color)
+            # Display board and get any move the user made
+            user_move = _render_simple_board(game.board, orientation=game.player_color)
             
-            # Handle pending move
+            # Handle pending move from session (for explanation mode)
             pending_move = st.session_state.get("vs_engine_pending_move")
+            
+            # If user just made a move on the board
+            if user_move and not pending_move:
+                if st.session_state["vs_engine_explanation_mode"]:
+                    # Store as pending - need explanation first
+                    st.session_state["vs_engine_pending_move"] = user_move
+                    st.rerun()
+                else:
+                    # No explanation mode - make the move immediately
+                    _make_player_move(user_move, "")
+                    st.rerun()
             
             if game.game_over:
                 st.success(f"**Game Over!** Result: {game.result}")
@@ -549,6 +563,28 @@ def render_play_vs_engine_tab() -> None:
                         review_result = _review_game_with_ai()
                         st.session_state["vs_engine_review"] = review_result
                     st.rerun()
+            elif pending_move:
+                # Explanation mode - show input before confirming
+                st.info(f"You selected: **{pending_move}**")
+                
+                # Use move count to create unique key so text clears after each move
+                move_count = len(game.move_history)
+                explanation = st.text_area(
+                    "📝 Explain your thinking for this move:",
+                    placeholder="Why are you playing this move? What's your plan?",
+                    key=f"move_explanation_input_{move_count}",
+                )
+                
+                col_confirm, col_cancel = st.columns(2)
+                with col_confirm:
+                    if st.button("✅ Confirm Move", use_container_width=True):
+                        _make_player_move(pending_move, explanation)
+                        st.session_state["vs_engine_pending_move"] = None
+                        st.rerun()
+                with col_cancel:
+                    if st.button("❌ Cancel", use_container_width=True):
+                        st.session_state["vs_engine_pending_move"] = None
+                        st.rerun()
             else:
                 # Check whose turn it is
                 is_player_turn = (
@@ -557,33 +593,7 @@ def render_play_vs_engine_tab() -> None:
                 )
                 
                 if is_player_turn:
-                    if pending_move:
-                        if st.session_state["vs_engine_explanation_mode"]:
-                            # Show explanation input before confirming move
-                            st.info(f"You selected: **{pending_move}**")
-                            explanation = st.text_area(
-                                "📝 Explain your thinking for this move:",
-                                placeholder="Why are you playing this move? What's your plan?",
-                                key="move_explanation_input",
-                            )
-                            
-                            col_confirm, col_cancel = st.columns(2)
-                            with col_confirm:
-                                if st.button("✅ Confirm Move", use_container_width=True):
-                                    if _make_player_move(pending_move, explanation):
-                                        st.session_state["vs_engine_pending_move"] = None
-                                        st.rerun()
-                            with col_cancel:
-                                if st.button("❌ Cancel", use_container_width=True):
-                                    st.session_state["vs_engine_pending_move"] = None
-                                    st.rerun()
-                        else:
-                            # No explanation mode - just make the move
-                            if _make_player_move(pending_move, ""):
-                                st.session_state["vs_engine_pending_move"] = None
-                                st.rerun()
-                    else:
-                        st.info("🎯 **Your turn** - Click/drag a piece to move")
+                    st.info("🎯 **Your turn** - Click/drag a piece to move")
                 else:
                     st.info("⏳ **Engine's turn**...")
         
