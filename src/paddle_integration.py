@@ -37,34 +37,67 @@ def _get_price_ids():
 
 PADDLE_PRICES = _get_price_ids()
 
-def init_paddle():
+def init_paddle(pw_customer: str | None = None):
     """
-    Injects the Paddle.js script into the Streamlit app.
-    Call this once at the top of your app (e.g. in sidebar or main).
+    Injects the Paddle.js script into the Streamlit app and initializes it.
+    Pass `pw_customer` (Paddle customer id or email) when available so Retain works.
+    Call this once at the top of your UI (e.g. in sidebar or main).
     """
     if not PADDLE_CLIENT_TOKEN:
         return  # Skip if not configured
-        
-    if PADDLE_ENV == "sandbox":
-        script_url = "https://sandbox-cdn.paddle.com/paddle/v2/paddle.js"
-    else:
-        script_url = "https://cdn.paddle.com/paddle/v2/paddle.js"
 
-    # We use a hidden div to inject the script only once if possible, 
-    # but Streamlit re-runs scripts, so we check existence in JS.
+    script_url = "https://sandbox-cdn.paddle.com/paddle/v2/paddle.js" if PADDLE_ENV == "sandbox" else "https://cdn.paddle.com/paddle/v2/paddle.js"
+
+    # Build initialization options
+    init_opts = f"token: \"{PADDLE_CLIENT_TOKEN}\""
+    if pw_customer:
+        # pwCustomer helps Retain work correctly in live
+        init_opts += f", pwCustomer: \"{pw_customer}\""
+
+    # Inject Paddle and initialize inside the component iframe
     html_code = f"""
     <div id="paddle-init-container" style="display:none;"></div>
     <script src="{script_url}"></script>
     <script type="text/javascript">
         if (window.Paddle) {{
-            Paddle.Initialize({{ 
-                token: "{PADDLE_CLIENT_TOKEN}"
-            }});
-            console.log("Paddle initialized (env: {PADDLE_ENV})");
+            try {{
+                Paddle.Initialize({{ {init_opts} }});
+                console.log("Paddle initialized (env: {PADDLE_ENV})");
+            }} catch(e) {{
+                console.warn('Paddle init error', e);
+            }}
         }}
     </script>
     """
     components.html(html_code, height=0, width=0)
+
+
+def validate_paddle_setup() -> dict:
+    """Return a small report of Paddle config validity for display in the UI.
+
+    Returns a dict with keys 'ok' (bool) and 'messages' (list[str]).
+    """
+    msgs: list[str] = []
+    ok = True
+
+    if not PADDLE_CLIENT_TOKEN:
+        ok = False
+        msgs.append("PADDLE_CLIENT_TOKEN is missing.")
+    if not PADDLE_API_KEY:
+        ok = False
+        msgs.append("PADDLE_API_KEY is missing.")
+
+    # Check price IDs look like price IDs (start with pri_)
+    for tier in ("basic", "plus", "pro"):
+        val = PADDLE_PRICES.get(tier) or ""
+        if not val:
+            ok = False
+            msgs.append(f"PADDLE_PRICE_{tier.upper()} is not set.")
+        elif not val.startswith("pri_"):
+            ok = False
+            msgs.append(f"PADDLE_PRICE_{tier.upper()} looks like a PRODUCT id (must start with 'pri_').")
+
+    return {"ok": ok, "messages": msgs}
 
 def render_checkout_button(price_id: str, customer_email: str = None, button_text: str = "Subscribe Now"):
     """

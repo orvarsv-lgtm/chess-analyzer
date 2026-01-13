@@ -17,8 +17,16 @@ from src.auth import get_current_user, is_logged_in
 def render_pricing_page() -> None:
     """Render a beautiful pricing page with tier comparison."""
     
-    # Initialize Paddle.js
-    init_paddle()
+    # Initialize Paddle.js (pass user email as pwCustomer when available)
+    init_paddle(user_email)
+
+    # Validate Paddle setup and show warnings if misconfigured
+    from src.paddle_integration import validate_paddle_setup
+    setup_report = validate_paddle_setup()
+    if not setup_report.get("ok"):
+        with st.expander("Paddle Setup Warnings", expanded=True):
+            for msg in setup_report.get("messages", []):
+                st.warning(msg)
     
     # Get current user info
     user = get_current_user()
