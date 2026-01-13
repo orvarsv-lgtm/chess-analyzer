@@ -1875,9 +1875,9 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
         div[data-testid="column"] button {
             padding: 0.4rem 0.2rem !important;
             line-height: 1.1 !important;
-            height: 2.8rem !important;
-            min-height: 2.8rem !important;
-            max-height: 2.8rem !important;
+            height: 3rem !important;
+            min-height: 3rem !important;
+            max-height: 3rem !important;
             font-size: 0.75rem !important;
             white-space: nowrap !important;
             overflow: hidden !important;
@@ -1898,7 +1898,7 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
         "Analysis": "Stats",
         "AI Coach": "Coach",
         "Replayer": "Replay",
-        "Streaks": "Streaks",
+        "Streaks": "Streak",
         "Puzzles": "Puzzle",
         "Play vs Engine": "Play",
     }
