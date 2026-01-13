@@ -99,6 +99,9 @@ from ui.puzzle_ui import render_puzzle_trainer
 # Cross-user shared puzzle bank + ratings
 from puzzles.global_puzzle_store import load_global_puzzles, save_puzzles_to_global_bank
 
+# Play vs Engine tab
+from src.play_vs_engine import render_play_vs_engine_tab
+
 # Puzzle disk cache
 from puzzles.puzzle_cache import load_cached_puzzles, save_cached_puzzles
 
@@ -1887,6 +1890,7 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
         "Replayer": "Replayer",
         "Streaks": "Streaks",
         "Puzzles": "Puzzles",
+        "Play vs Engine": "Play",
     }
     
     for i, (col, option) in enumerate(zip(cols, view_options)):
@@ -1933,6 +1937,7 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
         f"⚔️ Opponent Analysis",
         f"🏆 Streaks",
         f"♟️ {t('tab_puzzles')}",
+        f"🤺 Play vs Engine",
     ]
     
     # Stable view selector (survives reruns)
@@ -1964,6 +1969,8 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
         _render_opponent_analysis_tab(aggregated)
     elif "Streak" in view:
         _render_streaks_tab(aggregated)
+    elif "Play vs Engine" in view:
+        render_play_vs_engine_tab()
     else:
         _render_enhanced_ui(aggregated)
 

@@ -1,0 +1,668 @@
+"""Play vs Engine tab with move explanations and AI review.
+
+This module provides:
+1. A chessboard where the user plays against Stockfish (depth 10)
+2. Optional explanation mode where user explains moves before making them
+3. Post-game AI review that analyzes both the moves and the player's explanations
+"""
+
+from __future__ import annotations
+
+import chess
+import chess.engine
+import streamlit as st
+from typing import Any, Optional
+from dataclasses import dataclass, field
+
+
+# Stockfish configuration
+STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
+ENGINE_PLAY_DEPTH = 10  # Depth for engine opponent
+ENGINE_REVIEW_DEPTH = 20  # Higher depth for post-game review
+
+
+@dataclass
+class GameState:
+    """Represents the current state of a game vs engine."""
+    board: chess.Board = field(default_factory=chess.Board)
+    player_color: str = "white"  # "white" or "black"
+    move_explanations: dict[int, str] = field(default_factory=dict)  # move_num -> explanation
+    move_history: list[dict[str, Any]] = field(default_factory=list)
+    game_over: bool = False
+    result: str = ""
+    pending_explanation: str = ""
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "fen": self.board.fen(),
+            "player_color": self.player_color,
+            "move_explanations": self.move_explanations.copy(),
+            "move_history": self.move_history.copy(),
+            "game_over": self.game_over,
+            "result": self.result,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GameState":
+        state = cls()
+        state.board = chess.Board(data.get("fen", chess.STARTING_FEN))
+        state.player_color = data.get("player_color", "white")
+        state.move_explanations = data.get("move_explanations", {})
+        state.move_history = data.get("move_history", [])
+        state.game_over = data.get("game_over", False)
+        state.result = data.get("result", "")
+        return state
+
+
+def _get_engine() -> Optional[chess.engine.SimpleEngine]:
+    """Get a Stockfish engine instance."""
+    try:
+        return chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+    except FileNotFoundError:
+        st.error(f"Stockfish not found at {STOCKFISH_PATH}. Please install Stockfish.")
+        return None
+    except Exception as e:
+        st.error(f"Failed to start engine: {e}")
+        return None
+
+
+def _get_engine_move(board: chess.Board, depth: int = ENGINE_PLAY_DEPTH) -> Optional[chess.Move]:
+    """Get the engine's best move for the current position."""
+    engine = _get_engine()
+    if engine is None:
+        return None
+    
+    try:
+        result = engine.play(board, chess.engine.Limit(depth=depth))
+        return result.move
+    except Exception as e:
+        st.error(f"Engine error: {e}")
+        return None
+    finally:
+        try:
+            engine.quit()
+        except Exception:
+            pass
+
+
+def _analyze_position(board: chess.Board, depth: int = ENGINE_REVIEW_DEPTH) -> dict[str, Any]:
+    """Analyze a position and return evaluation details."""
+    engine = _get_engine()
+    if engine is None:
+        return {"error": "Engine not available"}
+    
+    try:
+        info = engine.analyse(board, chess.engine.Limit(depth=depth))
+        score = info.get("score")
+        pv = info.get("pv", [])
+        
+        if score is not None:
+            cp = score.white().score(mate_score=10000)
+        else:
+            cp = 0
+        
+        return {
+            "eval_cp": cp,
+            "best_line": [board.san(m) for m in pv[:5]] if pv else [],
+            "depth": depth,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        try:
+            engine.quit()
+        except Exception:
+            pass
+
+
+def _get_phase(move_num: int) -> str:
+    """Classify game phase by move number."""
+    if move_num <= 15:
+        return "Opening"
+    elif move_num <= 40:
+        return "Middlegame"
+    else:
+        return "Endgame"
+
+
+def _classify_move_quality(cp_loss: int) -> str:
+    """Classify move quality based on centipawn loss."""
+    if cp_loss <= 10:
+        return "Best"
+    elif cp_loss <= 30:
+        return "Excellent"
+    elif cp_loss <= 60:
+        return "Good"
+    elif cp_loss <= 150:
+        return "Inaccuracy"
+    elif cp_loss <= 300:
+        return "Mistake"
+    else:
+        return "Blunder"
+
+
+def _init_game_state() -> None:
+    """Initialize or reset the game state in session."""
+    if "vs_engine_game" not in st.session_state:
+        st.session_state["vs_engine_game"] = GameState()
+    if "vs_engine_explanation_mode" not in st.session_state:
+        st.session_state["vs_engine_explanation_mode"] = False
+    if "vs_engine_review" not in st.session_state:
+        st.session_state["vs_engine_review"] = None
+    if "vs_engine_pending_move" not in st.session_state:
+        st.session_state["vs_engine_pending_move"] = None
+
+
+def _reset_game(player_color: str = "white") -> None:
+    """Reset the game to initial state."""
+    st.session_state["vs_engine_game"] = GameState(player_color=player_color)
+    st.session_state["vs_engine_review"] = None
+    st.session_state["vs_engine_pending_move"] = None
+    
+    # If player is black, engine plays first
+    if player_color == "black":
+        game = st.session_state["vs_engine_game"]
+        engine_move = _get_engine_move(game.board)
+        if engine_move:
+            san = game.board.san(engine_move)
+            game.board.push(engine_move)
+            game.move_history.append({
+                "move_num": 1,
+                "san": san,
+                "uci": engine_move.uci(),
+                "player": "engine",
+                "fen_after": game.board.fen(),
+            })
+
+
+def _make_player_move(uci_move: str, explanation: str = "") -> bool:
+    """Execute a player move and get engine response."""
+    game: GameState = st.session_state["vs_engine_game"]
+    
+    try:
+        move = chess.Move.from_uci(uci_move)
+        if move not in game.board.legal_moves:
+            return False
+        
+        # Record player move
+        move_num = (len(game.move_history) // 2) + 1
+        san = game.board.san(move)
+        game.board.push(move)
+        
+        # Save move to history
+        player_move_data = {
+            "move_num": move_num,
+            "san": san,
+            "uci": uci_move,
+            "player": "human",
+            "fen_after": game.board.fen(),
+        }
+        game.move_history.append(player_move_data)
+        
+        # Save explanation if provided
+        if explanation.strip():
+            game.move_explanations[len(game.move_history)] = explanation.strip()
+        
+        # Check if game is over after player move
+        if game.board.is_game_over():
+            game.game_over = True
+            game.result = game.board.result()
+            return True
+        
+        # Engine responds
+        engine_move = _get_engine_move(game.board)
+        if engine_move:
+            engine_san = game.board.san(engine_move)
+            game.board.push(engine_move)
+            
+            game.move_history.append({
+                "move_num": move_num if game.player_color == "black" else move_num,
+                "san": engine_san,
+                "uci": engine_move.uci(),
+                "player": "engine",
+                "fen_after": game.board.fen(),
+            })
+            
+            # Check if game is over after engine move
+            if game.board.is_game_over():
+                game.game_over = True
+                game.result = game.board.result()
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"Move error: {e}")
+        return False
+
+
+def _review_game_with_ai() -> dict[str, Any]:
+    """Review the completed game with deep engine analysis and explanation review."""
+    game: GameState = st.session_state["vs_engine_game"]
+    
+    if not game.move_history:
+        return {"error": "No moves to review"}
+    
+    review = {
+        "moves_analysis": [],
+        "phase_summary": {"Opening": [], "Middlegame": [], "Endgame": []},
+        "explanation_review": [],
+        "overall_summary": "",
+    }
+    
+    # Replay the game and analyze each player move
+    analysis_board = chess.Board()
+    player_moves_analyzed = 0
+    total_cp_loss = 0
+    
+    for i, move_data in enumerate(game.move_history):
+        move = chess.Move.from_uci(move_data["uci"])
+        san = move_data["san"]
+        is_player_move = move_data["player"] == "human"
+        
+        if is_player_move:
+            player_moves_analyzed += 1
+            move_num = (player_moves_analyzed + 1) // 2 if game.player_color == "white" else player_moves_analyzed // 2 + 1
+            phase = _get_phase(move_num)
+            
+            # Get evaluation before the move
+            eval_before = _analyze_position(analysis_board, depth=ENGINE_REVIEW_DEPTH)
+            
+            # Get best move according to engine
+            engine = _get_engine()
+            best_move = None
+            best_san = ""
+            if engine:
+                try:
+                    result = engine.play(analysis_board, chess.engine.Limit(depth=ENGINE_REVIEW_DEPTH))
+                    best_move = result.move
+                    best_san = analysis_board.san(best_move) if best_move else ""
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        engine.quit()
+                    except Exception:
+                        pass
+            
+            # Make the actual move
+            analysis_board.push(move)
+            
+            # Get evaluation after the move
+            eval_after = _analyze_position(analysis_board, depth=ENGINE_REVIEW_DEPTH)
+            
+            # Calculate CP loss (from player's perspective)
+            cp_before = eval_before.get("eval_cp", 0)
+            cp_after = eval_after.get("eval_cp", 0)
+            
+            if game.player_color == "white":
+                cp_loss = max(0, cp_before - cp_after)
+            else:
+                cp_loss = max(0, cp_after - cp_before)
+            
+            total_cp_loss += cp_loss
+            quality = _classify_move_quality(cp_loss)
+            
+            # Check if there was an explanation for this move
+            explanation = game.move_explanations.get(i + 1, "")
+            
+            move_analysis = {
+                "move_num": move_num,
+                "san": san,
+                "phase": phase,
+                "eval_before": cp_before,
+                "eval_after": cp_after,
+                "cp_loss": cp_loss,
+                "quality": quality,
+                "best_move": best_san,
+                "was_best": san == best_san,
+                "explanation": explanation,
+            }
+            
+            review["moves_analysis"].append(move_analysis)
+            review["phase_summary"][phase].append(move_analysis)
+            
+            # Review the explanation if provided
+            if explanation:
+                explanation_feedback = _review_explanation(
+                    explanation, san, best_san, cp_loss, quality, phase
+                )
+                review["explanation_review"].append({
+                    "move_num": move_num,
+                    "san": san,
+                    "explanation": explanation,
+                    "feedback": explanation_feedback,
+                })
+        else:
+            # Engine move - just push it
+            analysis_board.push(move)
+    
+    # Generate overall summary
+    avg_cp_loss = total_cp_loss / player_moves_analyzed if player_moves_analyzed > 0 else 0
+    
+    review["overall_summary"] = _generate_overall_summary(
+        review, avg_cp_loss, player_moves_analyzed, game.result, game.player_color
+    )
+    
+    return review
+
+
+def _review_explanation(
+    explanation: str,
+    played_move: str,
+    best_move: str,
+    cp_loss: int,
+    quality: str,
+    phase: str,
+) -> str:
+    """Generate feedback on the player's explanation for a move."""
+    feedback_parts = []
+    
+    was_best = played_move == best_move
+    
+    if was_best:
+        feedback_parts.append(f"✅ **Good thinking!** You played the best move ({played_move}).")
+    elif quality in ("Best", "Excellent", "Good"):
+        feedback_parts.append(
+            f"👍 **Solid reasoning.** Your move ({played_move}) was {quality.lower()}. "
+            f"The engine's top choice was {best_move}, but your move was also strong."
+        )
+    elif quality == "Inaccuracy":
+        feedback_parts.append(
+            f"⚠️ **Slight inaccuracy.** Your reasoning led to {played_move}, "
+            f"but {best_move} was more precise (lost ~{cp_loss}cp)."
+        )
+    elif quality == "Mistake":
+        feedback_parts.append(
+            f"❌ **Mistake detected.** Your explanation for {played_move} may have missed "
+            f"a tactical or positional nuance. {best_move} was significantly better "
+            f"(lost ~{cp_loss}cp)."
+        )
+    else:  # Blunder
+        feedback_parts.append(
+            f"🚨 **Blunder!** The reasoning for {played_move} had a critical flaw. "
+            f"{best_move} was much stronger (lost ~{cp_loss}cp). "
+            f"Consider what you might have overlooked."
+        )
+    
+    # Phase-specific advice
+    if phase == "Opening" and quality not in ("Best", "Excellent", "Good"):
+        feedback_parts.append("💡 *In the opening, prioritize development and center control.*")
+    elif phase == "Middlegame" and quality not in ("Best", "Excellent", "Good"):
+        feedback_parts.append("💡 *In the middlegame, look for tactical opportunities and piece coordination.*")
+    elif phase == "Endgame" and quality not in ("Best", "Excellent", "Good"):
+        feedback_parts.append("💡 *In the endgame, king activity and pawn promotion are key themes.*")
+    
+    return " ".join(feedback_parts)
+
+
+def _generate_overall_summary(
+    review: dict[str, Any],
+    avg_cp_loss: float,
+    total_moves: int,
+    result: str,
+    player_color: str,
+) -> str:
+    """Generate an overall game summary."""
+    summary_parts = []
+    
+    # Result interpretation
+    if result == "1-0":
+        won = player_color == "white"
+    elif result == "0-1":
+        won = player_color == "black"
+    else:
+        won = None
+    
+    if won is True:
+        summary_parts.append("🎉 **Congratulations on the win!**")
+    elif won is False:
+        summary_parts.append("📚 **Good effort! Let's learn from this game.**")
+    else:
+        summary_parts.append("🤝 **A hard-fought draw.**")
+    
+    # Performance rating
+    if avg_cp_loss <= 30:
+        summary_parts.append(f"Your average centipawn loss was **{avg_cp_loss:.0f}** - excellent accuracy!")
+    elif avg_cp_loss <= 60:
+        summary_parts.append(f"Your average centipawn loss was **{avg_cp_loss:.0f}** - good play.")
+    elif avg_cp_loss <= 100:
+        summary_parts.append(f"Your average centipawn loss was **{avg_cp_loss:.0f}** - room for improvement.")
+    else:
+        summary_parts.append(f"Your average centipawn loss was **{avg_cp_loss:.0f}** - focus on reducing mistakes.")
+    
+    # Phase breakdown
+    for phase in ("Opening", "Middlegame", "Endgame"):
+        phase_moves = review["phase_summary"].get(phase, [])
+        if phase_moves:
+            phase_cpl = sum(m["cp_loss"] for m in phase_moves) / len(phase_moves)
+            blunders = sum(1 for m in phase_moves if m["quality"] == "Blunder")
+            mistakes = sum(1 for m in phase_moves if m["quality"] == "Mistake")
+            
+            if blunders > 0 or mistakes > 0:
+                summary_parts.append(
+                    f"**{phase}:** {len(phase_moves)} moves, avg CPL {phase_cpl:.0f} "
+                    f"({blunders} blunders, {mistakes} mistakes)"
+                )
+            else:
+                summary_parts.append(
+                    f"**{phase}:** {len(phase_moves)} moves, avg CPL {phase_cpl:.0f} - solid!"
+                )
+    
+    # Explanation review summary
+    if review["explanation_review"]:
+        good_explanations = sum(
+            1 for e in review["explanation_review"]
+            if "Good" in e["feedback"] or "Solid" in e["feedback"]
+        )
+        summary_parts.append(
+            f"\n📝 **Explanation Quality:** {good_explanations}/{len(review['explanation_review'])} "
+            f"of your explained moves showed good thinking."
+        )
+    
+    return "\n\n".join(summary_parts)
+
+
+def _render_simple_board(board: chess.Board, orientation: str = "white") -> None:
+    """Render a simple text-based chess board (fallback if JS board unavailable)."""
+    # Use the JS board component if available
+    try:
+        from ui.chessboard_component import render_chessboard
+        
+        legal_moves = [m.uci() for m in board.legal_moves]
+        side_to_move = "w" if board.turn == chess.WHITE else "b"
+        
+        move = render_chessboard(
+            fen=board.fen(),
+            legal_moves=legal_moves,
+            orientation=orientation,
+            side_to_move=side_to_move,
+            key="vs_engine_board",
+        )
+        
+        if move:
+            st.session_state["vs_engine_pending_move"] = move
+            
+    except ImportError:
+        # Fallback to text board
+        st.code(board.unicode(invert_color=orientation == "black"))
+
+
+def render_play_vs_engine_tab() -> None:
+    """Render the Play vs Engine tab."""
+    st.header("⚔️ Play vs Engine")
+    st.caption("Challenge Stockfish and improve your thinking • Explain your moves to get AI feedback")
+    
+    _init_game_state()
+    
+    game: GameState = st.session_state["vs_engine_game"]
+    explanation_mode = st.session_state["vs_engine_explanation_mode"]
+    review = st.session_state["vs_engine_review"]
+    
+    # Sidebar controls
+    with st.sidebar:
+        st.subheader("⚙️ Game Settings")
+        
+        # Color selection
+        new_color = st.radio(
+            "Play as",
+            options=["White", "Black"],
+            horizontal=True,
+            key="vs_engine_color_select",
+        )
+        
+        # Explanation mode toggle
+        st.session_state["vs_engine_explanation_mode"] = st.toggle(
+            "🧠 Explanation Mode",
+            value=explanation_mode,
+            help="When enabled, you'll explain your thinking before each move",
+        )
+        
+        # New game button
+        if st.button("🔄 New Game", use_container_width=True):
+            _reset_game(player_color=new_color.lower())
+            st.rerun()
+    
+    # Main game area
+    if review is not None:
+        # Show game review
+        _render_game_review(review)
+        
+        if st.button("🎮 Play Another Game"):
+            st.session_state["vs_engine_review"] = None
+            _reset_game(player_color=game.player_color)
+            st.rerun()
+    else:
+        # Active game
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Display board
+            _render_simple_board(game.board, orientation=game.player_color)
+            
+            # Handle pending move
+            pending_move = st.session_state.get("vs_engine_pending_move")
+            
+            if game.game_over:
+                st.success(f"**Game Over!** Result: {game.result}")
+                if st.button("📊 Review this Game with AI"):
+                    with st.spinner("Analyzing game with depth 20..."):
+                        review_result = _review_game_with_ai()
+                        st.session_state["vs_engine_review"] = review_result
+                    st.rerun()
+            else:
+                # Check whose turn it is
+                is_player_turn = (
+                    (game.board.turn == chess.WHITE and game.player_color == "white") or
+                    (game.board.turn == chess.BLACK and game.player_color == "black")
+                )
+                
+                if is_player_turn:
+                    if pending_move:
+                        if st.session_state["vs_engine_explanation_mode"]:
+                            # Show explanation input before confirming move
+                            st.info(f"You selected: **{pending_move}**")
+                            explanation = st.text_area(
+                                "📝 Explain your thinking for this move:",
+                                placeholder="Why are you playing this move? What's your plan?",
+                                key="move_explanation_input",
+                            )
+                            
+                            col_confirm, col_cancel = st.columns(2)
+                            with col_confirm:
+                                if st.button("✅ Confirm Move", use_container_width=True):
+                                    if _make_player_move(pending_move, explanation):
+                                        st.session_state["vs_engine_pending_move"] = None
+                                        st.rerun()
+                            with col_cancel:
+                                if st.button("❌ Cancel", use_container_width=True):
+                                    st.session_state["vs_engine_pending_move"] = None
+                                    st.rerun()
+                        else:
+                            # No explanation mode - just make the move
+                            if _make_player_move(pending_move, ""):
+                                st.session_state["vs_engine_pending_move"] = None
+                                st.rerun()
+                    else:
+                        st.info("🎯 **Your turn** - Click/drag a piece to move")
+                else:
+                    st.info("⏳ **Engine's turn**...")
+        
+        with col2:
+            # Move history
+            st.subheader("📜 Moves")
+            if game.move_history:
+                moves_text = []
+                for i, m in enumerate(game.move_history):
+                    if m["player"] == "human":
+                        san = f"**{m['san']}**"
+                    else:
+                        san = m["san"]
+                    
+                    if i % 2 == 0:
+                        move_num = (i // 2) + 1
+                        moves_text.append(f"{move_num}. {san}")
+                    else:
+                        moves_text[-1] += f" {san}"
+                
+                st.markdown("  \n".join(moves_text))
+            else:
+                st.caption("No moves yet")
+            
+            # Explanations summary
+            if game.move_explanations:
+                st.subheader("💭 Your Explanations")
+                for move_idx, expl in sorted(game.move_explanations.items()):
+                    move_data = game.move_history[move_idx - 1] if move_idx <= len(game.move_history) else None
+                    if move_data:
+                        st.caption(f"**{move_data['san']}:** {expl[:100]}...")
+
+
+def _render_game_review(review: dict[str, Any]) -> None:
+    """Render the AI game review."""
+    st.subheader("📊 AI Game Review")
+    
+    if "error" in review:
+        st.error(review["error"])
+        return
+    
+    # Overall summary
+    st.markdown(review.get("overall_summary", ""))
+    
+    st.divider()
+    
+    # Phase-by-phase analysis
+    st.subheader("📈 Analysis by Phase")
+    
+    for phase in ("Opening", "Middlegame", "Endgame"):
+        phase_moves = review["phase_summary"].get(phase, [])
+        if phase_moves:
+            with st.expander(f"**{phase}** ({len(phase_moves)} moves)", expanded=phase == "Opening"):
+                for m in phase_moves:
+                    quality_emoji = {
+                        "Best": "🏆",
+                        "Excellent": "⭐",
+                        "Good": "✅",
+                        "Inaccuracy": "⚠️",
+                        "Mistake": "❌",
+                        "Blunder": "🚨",
+                    }.get(m["quality"], "•")
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        best_note = " (best)" if m["was_best"] else f" (best: {m['best_move']})"
+                        st.markdown(f"{quality_emoji} **Move {m['move_num']}:** {m['san']}{best_note}")
+                    with col2:
+                        st.caption(f"CPL: {m['cp_loss']}")
+    
+    st.divider()
+    
+    # Explanation review
+    if review.get("explanation_review"):
+        st.subheader("🧠 Explanation Review")
+        st.caption("AI feedback on your thinking for each explained move")
+        
+        for exp_review in review["explanation_review"]:
+            with st.expander(f"**Move {exp_review['move_num']}:** {exp_review['san']}"):
+                st.markdown(f"**Your explanation:** *{exp_review['explanation']}*")
+                st.markdown("---")
+                st.markdown(exp_review["feedback"])
