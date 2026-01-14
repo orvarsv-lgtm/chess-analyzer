@@ -636,12 +636,7 @@ def render_play_vs_engine_tab() -> None:
                 
                 # Confirm and Cancel buttons
                 col_confirm, col_cancel = st.columns(2)
-                with col_confirm: is thinking...**")
-                    # Force engine move if it's engine's turn and game isn't over
-                    with st.spinner("Engine is thinking..."):
-                        if _make_engine_move(game):
-                            st.rerun()
-
+                with col_confirm:
                     if st.button("✅ Confirm", use_container_width=True, type="primary"):
                         with st.spinner("Engine is thinking..."):
                             _make_player_move(pending_move, explanation)
@@ -661,7 +656,11 @@ def render_play_vs_engine_tab() -> None:
                 if is_player_turn:
                     st.info("🎯 **Your turn** - Click a piece, then click destination")
                 else:
-                    st.info("⏳ **Engine's turn**...")
+                    st.info("⏳ **Engine is thinking...**")
+                    # Force engine move if it's engine's turn and game isn't over
+                    with st.spinner("Engine is thinking..."):
+                        if _make_engine_move(game):
+                            st.rerun()
             
             # Resign button (always visible during active game)
             if not game.game_over:
