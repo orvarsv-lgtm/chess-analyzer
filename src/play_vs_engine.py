@@ -248,6 +248,8 @@ def _init_game_state() -> None:
         st.session_state["vs_engine_thinking"] = False
     if "review_auto_play" not in st.session_state:
         st.session_state["review_auto_play"] = False
+    if "vs_engine_last_processed_move" not in st.session_state:
+        st.session_state["vs_engine_last_processed_move"] = None
 
 
 def _reset_game(player_color: str = "white") -> None:
@@ -784,7 +786,9 @@ def render_play_vs_engine_tab() -> None:
                 st.session_state["vs_engine_last_move"] = None
             
             # If user made a move on the board
-            if user_move:
+            last_processed = st.session_state.get("vs_engine_last_processed_move")
+            
+            if user_move and user_move != last_processed:
                 if st.session_state["vs_engine_explanation_mode"]:
                     # Explanation mode - store as pending, show confirm
                     if st.session_state.get("vs_engine_pending_move") != user_move:
@@ -792,8 +796,9 @@ def render_play_vs_engine_tab() -> None:
                         st.rerun()
                 else:
                     # No explanation mode - play immediately
-                    _make_player_move(user_move, "")
-                    st.rerun()  # Rerun to show updated position, engine will move on next render
+                    if _make_player_move(user_move, ""):
+                        st.session_state["vs_engine_last_processed_move"] = user_move
+                        st.rerun()  # Rerun to show updated position, engine will move on next render
             
             if game.game_over:
                 st.success(f"**Game Over!** Result: {game.result}")
@@ -824,9 +829,10 @@ def render_play_vs_engine_tab() -> None:
                 col_confirm, col_cancel = st.columns(2)
                 with col_confirm:
                     if st.button("✅ Confirm", use_container_width=True, type="primary"):
-                        _make_player_move(pending_move, explanation)
-                        st.session_state["vs_engine_pending_move"] = None
-                        st.rerun()
+                        if _make_player_move(pending_move, explanation):
+                            st.session_state["vs_engine_last_processed_move"] = pending_move
+                            st.session_state["vs_engine_pending_move"] = None
+                            st.rerun()
                 with col_cancel:
                     if st.button("❌ Cancel", use_container_width=True):
                         st.session_state["vs_engine_pending_move"] = None
