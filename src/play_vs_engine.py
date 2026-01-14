@@ -273,17 +273,8 @@ def _reset_game(player_color: str = "white") -> None:
 
 
 
-def _make_engine_move(game: GameState, delay: float = 0.5) -> bool:
-    """Execute engine move for the current turn.
-    
-    Args:
-        game: Current game state
-        delay: Seconds to wait before making move (for realism)
-    """
-    # Add a small delay for more natural feeling
-    if delay > 0:
-        time.sleep(delay)
-    
+def _make_engine_move(game: GameState) -> bool:
+    """Execute engine move for the current turn."""
     engine_move = _get_engine_move(game.board)
     if engine_move:
         engine_san = game.board.san(engine_move)
@@ -309,14 +300,12 @@ def _make_engine_move(game: GameState, delay: float = 0.5) -> bool:
             game.result = game.board.result()
             
         st.session_state["vs_engine_game"] = game
-        st.session_state["vs_engine_thinking"] = False
         return True
-    st.session_state["vs_engine_thinking"] = False
     return False
 
 
 def _make_player_move(uci_move: str, explanation: str = "") -> bool:
-    """Execute a player move and get engine response."""
+    """Execute a player move. Does NOT automatically trigger engine response."""
     game: GameState = st.session_state["vs_engine_game"]
     
     try:
@@ -347,6 +336,14 @@ def _make_player_move(uci_move: str, explanation: str = "") -> bool:
         if game.board.is_game_over():
             game.game_over = True
             game.result = game.board.result()
+        
+        # Force session state update
+        st.session_state["vs_engine_game"] = game
+        return True
+        
+    except Exception as e:
+        st.error(f"Move error: {e}")
+        return False
             # Force session state update
             st.session_state["vs_engine_game"] = game
             return True
@@ -772,11 +769,23 @@ def render_play_vs_engine_tab() -> None:
         col1, col2 = st.columns([2, 1])
         
         with col1:
+            # Check if it's engine's turn and engine hasn't moved yet
+            is_engine_turn = not game.game_over and (
+                (game.board.turn == chess.WHITE and game.player_color == "black") or
+                (game.board.turn == chess.BLACK and game.player_color == "white")
+            )
+            
+            # If it's engine's turn, make the move with a delay for natural feel
+            if is_engine_turn:
+                time.sleep(1.5)  # Thinking delay
+                _make_engine_move(game)
+                # Don't rerun - let the page render with the new position
+            
             # Get pending move for highlighting (only in explanation mode)
             pending_move = st.session_state.get("vs_engine_pending_move")
             last_move = st.session_state.get("vs_engine_last_move")
             
-            # Display board with highlight if move is pending, animate last engine move
+            # Display board - animate the last engine move
             user_move = _render_simple_board(
                 game.board, 
                 orientation=game.player_color,
@@ -784,7 +793,7 @@ def render_play_vs_engine_tab() -> None:
                 animate_move=last_move
             )
             
-            # Clear the animation after render
+            # Clear the animation flag after this render
             if last_move:
                 st.session_state["vs_engine_last_move"] = None
             
@@ -792,16 +801,13 @@ def render_play_vs_engine_tab() -> None:
             if user_move:
                 if st.session_state["vs_engine_explanation_mode"]:
                     # Explanation mode - store as pending, show confirm
-                    # Only update if different to avoid infinite rerun loops
                     if st.session_state.get("vs_engine_pending_move") != user_move:
                         st.session_state["vs_engine_pending_move"] = user_move
                         st.rerun()
                 else:
                     # No explanation mode - play immediately
-                    # Show "thinking" and schedule engine move
-                    st.session_state["vs_engine_thinking"] = True
                     _make_player_move(user_move, "")
-                    st.rerun()
+                    st.rerun()  # Rerun to show updated position, engine will move on next render
             
             if game.game_over:
                 st.success(f"**Game Over!** Result: {game.result}")
@@ -832,10 +838,9 @@ def render_play_vs_engine_tab() -> None:
                 col_confirm, col_cancel = st.columns(2)
                 with col_confirm:
                     if st.button("✅ Confirm", use_container_width=True, type="primary"):
-                        with st.spinner("Engine is thinking..."):
-                            _make_player_move(pending_move, explanation)
-                            st.session_state["vs_engine_pending_move"] = None
-                            st.rerun()
+                        _make_player_move(pending_move, explanation)
+                        st.session_state["vs_engine_pending_move"] = None
+                        st.rerun()
                 with col_cancel:
                     if st.button("❌ Cancel", use_container_width=True):
                         st.session_state["vs_engine_pending_move"] = None
@@ -848,12 +853,7 @@ def render_play_vs_engine_tab() -> None:
                 )
                 
                 if is_player_turn:
-                    st.info("🎯 **Your turn** - Click a piece, then click destination")
-                else:
-                    # Engine's turn - show thinking message and make move
-                    st.info("🤔 **Engine is thinking...**")
-                    _make_engine_move(game, delay=0.8)  # Slight delay for realism
-                    st.rerun()
+                    st.caption("🎯 Your turn")
             
             # Resign button (always visible during active game)
             if not game.game_over:
