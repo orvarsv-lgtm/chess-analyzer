@@ -419,6 +419,9 @@ def _review_game_with_ai() -> dict[str, Any]:
             # Check if there was an explanation for this move
             explanation = game.move_explanations.get(i + 1, "")
             
+            # Generate AI coaching feedback for this move
+            ai_feedback = _generate_move_feedback(san, best_san, cp_loss, quality, phase)
+            
             move_analysis = {
                 "move_num": move_num,
                 "san": san,
@@ -430,6 +433,8 @@ def _review_game_with_ai() -> dict[str, Any]:
                 "best_move": best_san,
                 "was_best": san == best_san,
                 "explanation": explanation,
+                "ai_feedback": ai_feedback,
+                "history_index": i,  # Track position in move history
             }
             
             review["moves_analysis"].append(move_analysis)
@@ -458,6 +463,64 @@ def _review_game_with_ai() -> dict[str, Any]:
     )
     
     return review
+
+
+def _generate_move_feedback(
+    played_move: str,
+    best_move: str,
+    cp_loss: int,
+    quality: str,
+    phase: str,
+) -> str:
+    """Generate AI coaching feedback for a move (regardless of whether it was explained)."""
+    feedback_parts = []
+    
+    was_best = played_move == best_move
+    
+    if was_best:
+        feedback_parts.append(f"🏆 **Excellent!** You found the best move ({played_move}).")
+        if phase == "Opening":
+            feedback_parts.append("Great opening knowledge!")
+        elif phase == "Middlegame":
+            feedback_parts.append("Sharp tactical vision!")
+        else:
+            feedback_parts.append("Precise endgame technique!")
+    elif quality in ("Best", "Excellent"):
+        feedback_parts.append(
+            f"⭐ **Very good!** Your move {played_move} was strong. "
+            f"The engine's top choice was {best_move}, but yours was nearly as good."
+        )
+    elif quality == "Good":
+        feedback_parts.append(
+            f"✅ **Solid move.** {played_move} is a reasonable choice. "
+            f"The best move was {best_move} (you lost ~{cp_loss}cp)."
+        )
+    elif quality == "Inaccuracy":
+        feedback_parts.append(
+            f"⚠️ **Inaccuracy.** {played_move} is playable but not optimal. "
+            f"{best_move} was better (lost ~{cp_loss}cp)."
+        )
+        # Add phase-specific tip
+        if phase == "Opening":
+            feedback_parts.append("💡 *Tip: Focus on development and controlling the center.*")
+        elif phase == "Middlegame":
+            feedback_parts.append("💡 *Tip: Look for tactical patterns and piece coordination.*")
+        else:
+            feedback_parts.append("💡 *Tip: Activate your king and create passed pawns.*")
+    elif quality == "Mistake":
+        feedback_parts.append(
+            f"❌ **Mistake.** {played_move} gave up significant advantage. "
+            f"{best_move} was much better (lost ~{cp_loss}cp)."
+        )
+        feedback_parts.append("🔍 *Take a moment to understand why the engine's move was stronger.*")
+    else:  # Blunder
+        feedback_parts.append(
+            f"🚨 **Blunder!** {played_move} was a serious error. "
+            f"{best_move} was critical here (lost ~{cp_loss}cp)."
+        )
+        feedback_parts.append("📚 *Study this position carefully - what did you miss?*")
+    
+    return " ".join(feedback_parts)
 
 
 def _review_explanation(
@@ -603,9 +666,8 @@ def _render_simple_board(board: chess.Board, orientation: str = "white", selecte
                 "correct_squares": [to_sq],
             }
         
-        # Use a unique key based on FEN to force component refresh after moves
-        fen_hash = hash(board.fen()) % 100000
-        component_key = f"vs_engine_board_{fen_hash}"
+        # Use stable key - component should handle FEN updates internally
+        component_key = "vs_engine_board_main"
         
         move = render_chessboard(
             fen=board.fen(),
@@ -847,12 +909,13 @@ def _render_game_review(review: dict[str, Any]) -> None:
         
         try:
             from ui.chessboard_component import render_chessboard
+            # Use stable key with index to allow position updates without full reload
             render_chessboard(
                 fen=current_fen,
                 legal_moves=[],  # No moves during review
                 orientation=game.player_color,
                 side_to_move="w" if board.turn == chess.WHITE else "b",
-                key="review_board",
+                key="vs_engine_review_board",
             )
         except ImportError:
             st.code(board.unicode(invert_color=game.player_color == "black"))
@@ -910,18 +973,28 @@ def _render_game_review(review: dict[str, Any]) -> None:
                     }.get(quality, "•")
                     
                     st.markdown(f"### Move {move_analysis['move_num']}: {san}")
-                    st.markdown(f"**Phase:** {move_analysis['phase']}")
-                    st.markdown(f"**Quality:** {quality_emoji} {quality}")
-                    st.markdown(f"**CPL:** {move_analysis['cp_loss']}")
+                    
+                    # Show key metrics in columns
+                    met_col1, met_col2 = st.columns(2)
+                    with met_col1:
+                        st.metric("Quality", f"{quality_emoji} {quality}")
+                    with met_col2:
+                        st.metric("CPL", f"{move_analysis['cp_loss']}")
+                    
+                    st.caption(f"Phase: {move_analysis['phase']}")
                     
                     if move_analysis["was_best"]:
-                        st.success("This was the best move!")
+                        st.success("✓ This was the best move!")
                     else:
-                        st.info(f"Best move was: **{move_analysis['best_move']}**")
+                        st.warning(f"Best move: **{move_analysis['best_move']}**")
                     
                     st.divider()
                     
-                    # Find explanation review for this move
+                    # Show AI feedback (always available now)
+                    st.markdown("**🤖 AI Coach:**")
+                    st.markdown(move_analysis.get("ai_feedback", "No analysis available."))
+                    
+                    # Show user's explanation if they provided one
                     explanation_review = None
                     for er in review.get("explanation_review", []):
                         if er["san"] == san:
@@ -929,14 +1002,13 @@ def _render_game_review(review: dict[str, Any]) -> None:
                             break
                     
                     if explanation_review:
-                        st.markdown("**Your explanation:**")
-                        st.markdown(f"*{explanation_review['explanation']}*")
-                        st.markdown("---")
-                        st.markdown(explanation_review["feedback"])
-                    else:
-                        st.caption("No explanation provided for this move.")
+                        st.divider()
+                        st.markdown("**💭 Your explanation:**")
+                        st.markdown(f"*\"{explanation_review['explanation']}\"*")
+                        st.markdown("**Feedback:** " + explanation_review["feedback"])
                 else:
                     st.markdown(f"### Your move: {san}")
+                    st.caption("Analysis not available for this move.")
             else:
                 st.markdown(f"### Engine played: {san}")
                 st.caption("This was the engine's response.")
