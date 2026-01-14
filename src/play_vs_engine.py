@@ -898,6 +898,8 @@ def _render_game_review(review: dict[str, Any]) -> None:
     # Initialize review navigation state
     if "review_move_index" not in st.session_state:
         st.session_state["review_move_index"] = 0
+    if "review_last_rendered_index" not in st.session_state:
+        st.session_state["review_last_rendered_index"] = -1
     
     moves_analysis = review.get("moves_analysis", [])
     move_history = game.move_history
@@ -914,10 +916,14 @@ def _render_game_review(review: dict[str, Any]) -> None:
     # Auto-play state
     auto_playing = st.session_state.get("review_auto_play", False)
     
-    # Get the move to animate (the move that led to current position)
+    # Get the move to animate (only if we moved forward by exactly 1 step)
     animate_move = None
-    if current_idx > 0:
+    last_idx = st.session_state["review_last_rendered_index"]
+    if current_idx == last_idx + 1 and current_idx > 0:
         animate_move = move_history[current_idx - 1].get("uci")
+    
+    # Update tracker
+    st.session_state["review_last_rendered_index"] = current_idx
     
     # Layout: board on left, analysis on right
     col_board, col_analysis = st.columns([1, 1])
