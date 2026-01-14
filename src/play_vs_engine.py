@@ -344,20 +344,6 @@ def _make_player_move(uci_move: str, explanation: str = "") -> bool:
     except Exception as e:
         st.error(f"Move error: {e}")
         return False
-            # Force session state update
-            st.session_state["vs_engine_game"] = game
-            return True
-        
-        # Engine responds
-        _make_engine_move(game)
-        
-        # Force session state update
-        st.session_state["vs_engine_game"] = game
-        return True
-        
-    except Exception as e:
-        st.error(f"Move error: {e}")
-        return False
 
 
 def _review_game_with_ai() -> dict[str, Any]:
