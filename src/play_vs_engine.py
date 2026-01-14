@@ -8,6 +8,8 @@ This module provides:
 
 from __future__ import annotations
 
+import os
+import shutil
 import chess
 import chess.engine
 import streamlit as st
@@ -15,8 +17,37 @@ from typing import Any, Optional
 from dataclasses import dataclass, field
 
 
-# Stockfish configuration
-STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
+# Stockfish configuration - auto-detect path
+def _find_stockfish_path() -> str:
+    """Find Stockfish binary across different environments."""
+    # Check environment variable first
+    env_path = os.getenv("STOCKFISH_PATH")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+    
+    # Common paths to check
+    candidates = [
+        "/usr/games/stockfish",      # Linux apt (Streamlit Cloud)
+        "/usr/bin/stockfish",        # Linux alternative
+        "/opt/homebrew/bin/stockfish",  # macOS Homebrew ARM
+        "/usr/local/bin/stockfish",  # macOS Homebrew Intel
+        "stockfish",                 # In PATH
+    ]
+    
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    
+    # Try shutil.which as fallback
+    which_path = shutil.which("stockfish")
+    if which_path:
+        return which_path
+    
+    # Default fallback
+    return "/usr/games/stockfish"
+
+
+STOCKFISH_PATH = _find_stockfish_path()
 ENGINE_PLAY_DEPTH = 10  # Depth for engine opponent
 ENGINE_REVIEW_DEPTH = 20  # Higher depth for post-game review
 
