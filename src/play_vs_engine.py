@@ -97,13 +97,69 @@ def _get_engine() -> Optional[chess.engine.SimpleEngine]:
         return None
 
 
-def _get_engine_move(board: chess.Board, depth: int = ENGINE_PLAY_DEPTH) -> Optional[chess.Move]:
-    """Get the engine's best move for the current position."""
+def _get_engine_elo() -> int:
+    """Get the current engine Elo setting from session state."""
+    return st.session_state.get("vs_engine_elo", 1500)
+
+
+def _elo_to_description(elo: int) -> str:
+    """Convert Elo to a human-readable skill description."""
+    if elo <= 800:
+        return "Beginner"
+    elif elo <= 1000:
+        return "Novice"
+    elif elo <= 1200:
+        return "Casual"
+    elif elo <= 1400:
+        return "Club Player"
+    elif elo <= 1600:
+        return "Intermediate"
+    elif elo <= 1800:
+        return "Advanced"
+    elif elo <= 2000:
+        return "Expert"
+    elif elo <= 2200:
+        return "Candidate Master"
+    elif elo <= 2400:
+        return "Master"
+    elif elo <= 2600:
+        return "International Master"
+    else:
+        return "Grandmaster"
+
+
+def _get_engine_move(board: chess.Board, depth: int = ENGINE_PLAY_DEPTH, elo: int | None = None) -> Optional[chess.Move]:
+    """Get the engine's best move for the current position.
+    
+    Args:
+        board: Current board position
+        depth: Search depth
+        elo: Target Elo rating (uses UCI_LimitStrength). If None, uses session state.
+    """
     engine = _get_engine()
     if engine is None:
         return None
     
     try:
+        # Get target Elo from session state if not provided
+        target_elo = elo if elo is not None else _get_engine_elo()
+        
+        # Configure engine strength using UCI options
+        # Stockfish supports UCI_LimitStrength and UCI_Elo
+        try:
+            engine.configure({
+                "UCI_LimitStrength": True,
+                "UCI_Elo": target_elo,
+            })
+        except chess.engine.EngineError:
+            # Fallback for older Stockfish versions - use Skill Level (0-20)
+            # Map Elo to skill level: 800 -> 0, 3200 -> 20
+            skill = max(0, min(20, (target_elo - 800) // 120))
+            try:
+                engine.configure({"Skill Level": skill})
+            except chess.engine.EngineError:
+                pass  # Engine doesn't support skill limiting
+        
         result = engine.play(board, chess.engine.Limit(depth=depth))
         move = result.move
         return move
@@ -183,6 +239,8 @@ def _init_game_state() -> None:
         st.session_state["vs_engine_review"] = None
     if "vs_engine_pending_move" not in st.session_state:
         st.session_state["vs_engine_pending_move"] = None
+    if "vs_engine_elo" not in st.session_state:
+        st.session_state["vs_engine_elo"] = 1500
 
 
 def _reset_game(player_color: str = "white") -> None:
@@ -588,6 +646,28 @@ def render_play_vs_engine_tab() -> None:
             horizontal=True,
             key="vs_engine_color_select",
         )
+        
+        # Engine strength slider
+        current_elo = st.session_state.get("vs_engine_elo", 1500)
+        new_elo = st.slider(
+            "🤖 Engine Rating",
+            min_value=800,
+            max_value=3200,
+            value=current_elo,
+            step=100,
+            key="vs_engine_elo_slider",
+            help="Adjust the engine's playing strength (Elo rating)",
+        )
+        
+        # Show skill description
+        skill_desc = _elo_to_description(new_elo)
+        st.caption(f"**{new_elo} Elo** — {skill_desc}")
+        
+        # Update session state if changed
+        if new_elo != current_elo:
+            st.session_state["vs_engine_elo"] = new_elo
+        
+        st.divider()
         
         # Explanation mode toggle
         st.session_state["vs_engine_explanation_mode"] = st.toggle(
