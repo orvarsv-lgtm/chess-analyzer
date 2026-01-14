@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 import chess
 import chess.engine
 import streamlit as st
@@ -241,6 +242,12 @@ def _init_game_state() -> None:
         st.session_state["vs_engine_pending_move"] = None
     if "vs_engine_elo" not in st.session_state:
         st.session_state["vs_engine_elo"] = 1500
+    if "vs_engine_last_move" not in st.session_state:
+        st.session_state["vs_engine_last_move"] = None
+    if "vs_engine_thinking" not in st.session_state:
+        st.session_state["vs_engine_thinking"] = False
+    if "review_auto_play" not in st.session_state:
+        st.session_state["review_auto_play"] = False
 
 
 def _reset_game(player_color: str = "white") -> None:
@@ -266,27 +273,32 @@ def _reset_game(player_color: str = "white") -> None:
 
 
 
-def _make_engine_move(game: GameState) -> bool:
-    """Execute engine move for the current turn."""
+def _make_engine_move(game: GameState, delay: float = 0.5) -> bool:
+    """Execute engine move for the current turn.
+    
+    Args:
+        game: Current game state
+        delay: Seconds to wait before making move (for realism)
+    """
+    # Add a small delay for more natural feeling
+    if delay > 0:
+        time.sleep(delay)
+    
     engine_move = _get_engine_move(game.board)
     if engine_move:
         engine_san = game.board.san(engine_move)
+        engine_uci = engine_move.uci()
         game.board.push(engine_move)
         
-        # Calculate move number for the engine move
-        # History length includes the move just pushed
-        # If Player White: History [P1], pushing E1. Len 1. Move 1.
-        # If Player Black: History [E1, P1], pushing E2. Len 2. Move 2.
-        # But we pushed inside this function already? No, we pushed to board. History not updated yet.
-        # Moves in history:
-        # P White: [P1] -> want E1 (move 1). Len=1. (1//2)+1 = 1.
-        # P Black: [E1, P1] -> want E2 (move 2). Len=2. (2//2)+1 = 2.
+        # Store last move for animation
+        st.session_state["vs_engine_last_move"] = engine_uci
+        
         current_move_num = (len(game.move_history) // 2) + 1
         
         game.move_history.append({
             "move_num": current_move_num,
             "san": engine_san,
-            "uci": engine_move.uci(),
+            "uci": engine_uci,
             "player": "engine",
             "fen_after": game.board.fen(),
         })
@@ -297,7 +309,9 @@ def _make_engine_move(game: GameState) -> bool:
             game.result = game.board.result()
             
         st.session_state["vs_engine_game"] = game
+        st.session_state["vs_engine_thinking"] = False
         return True
+    st.session_state["vs_engine_thinking"] = False
     return False
 
 
@@ -639,13 +653,14 @@ def _generate_overall_summary(
     return "\n\n".join(summary_parts)
 
 
-def _render_simple_board(board: chess.Board, orientation: str = "white", selected_move: str | None = None) -> str | None:
+def _render_simple_board(board: chess.Board, orientation: str = "white", selected_move: str | None = None, animate_move: str | None = None) -> str | None:
     """Render a chess board with optional highlight for pending move.
     
     Args:
         board: Current board position
         orientation: "white" or "black"
         selected_move: UCI move to highlight (e.g., "e2e4") - highlights destination green
+        animate_move: UCI move to animate (piece sliding)
     
     Returns the UCI move if user made one, else None.
     """
@@ -657,11 +672,9 @@ def _render_simple_board(board: chess.Board, orientation: str = "white", selecte
         side_to_move = "w" if board.turn == chess.WHITE else "b"
         
         # Build highlights dict for selected move
-        # The component expects: correct_squares, incorrect_squares, viable_squares as arrays
         highlights = {}
         if selected_move and len(selected_move) >= 4:
             to_sq = selected_move[2:4]
-            # Highlight destination square green
             highlights = {
                 "correct_squares": [to_sq],
             }
@@ -675,6 +688,7 @@ def _render_simple_board(board: chess.Board, orientation: str = "white", selecte
             orientation=orientation,
             side_to_move=side_to_move,
             highlights=highlights,
+            animate_move=animate_move,
             key=component_key,
         )
         
@@ -760,13 +774,19 @@ def render_play_vs_engine_tab() -> None:
         with col1:
             # Get pending move for highlighting (only in explanation mode)
             pending_move = st.session_state.get("vs_engine_pending_move")
+            last_move = st.session_state.get("vs_engine_last_move")
             
-            # Display board with highlight if move is pending
+            # Display board with highlight if move is pending, animate last engine move
             user_move = _render_simple_board(
                 game.board, 
                 orientation=game.player_color,
-                selected_move=pending_move
+                selected_move=pending_move,
+                animate_move=last_move
             )
+            
+            # Clear the animation after render
+            if last_move:
+                st.session_state["vs_engine_last_move"] = None
             
             # If user made a move on the board
             if user_move:
@@ -778,9 +798,10 @@ def render_play_vs_engine_tab() -> None:
                         st.rerun()
                 else:
                     # No explanation mode - play immediately
-                    with st.spinner("Engine is thinking..."):
-                        if _make_player_move(user_move, ""):
-                            st.rerun()
+                    # Show "thinking" and schedule engine move
+                    st.session_state["vs_engine_thinking"] = True
+                    _make_player_move(user_move, "")
+                    st.rerun()
             
             if game.game_over:
                 st.success(f"**Game Over!** Result: {game.result}")
@@ -829,11 +850,10 @@ def render_play_vs_engine_tab() -> None:
                 if is_player_turn:
                     st.info("🎯 **Your turn** - Click a piece, then click destination")
                 else:
-                    st.info("⏳ **Engine is thinking...**")
-                    # Force engine move if it's engine's turn and game isn't over
-                    with st.spinner("Engine is thinking..."):
-                        if _make_engine_move(game):
-                            st.rerun()
+                    # Engine's turn - show thinking message and make move
+                    st.info("🤔 **Engine is thinking...**")
+                    _make_engine_move(game, delay=0.8)  # Slight delay for realism
+                    st.rerun()
             
             # Resign button (always visible during active game)
             if not game.game_over:
@@ -899,51 +919,84 @@ def _render_game_review(review: dict[str, Any]) -> None:
     current_idx = st.session_state["review_move_index"]
     max_idx = len(positions) - 1
     
+    # Auto-play state
+    auto_playing = st.session_state.get("review_auto_play", False)
+    
+    # Get the move to animate (the move that led to current position)
+    animate_move = None
+    if current_idx > 0:
+        animate_move = move_history[current_idx - 1].get("uci")
+    
     # Layout: board on left, analysis on right
     col_board, col_analysis = st.columns([1, 1])
     
     with col_board:
-        # Render the board at current position
+        # Render the board at current position with animation
         current_fen = positions[current_idx]
         board = chess.Board(current_fen)
         
         try:
             from ui.chessboard_component import render_chessboard
-            # Use stable key with index to allow position updates without full reload
             render_chessboard(
                 fen=current_fen,
                 legal_moves=[],  # No moves during review
                 orientation=game.player_color,
                 side_to_move="w" if board.turn == chess.WHITE else "b",
+                animate_move=animate_move,
                 key="vs_engine_review_board",
             )
         except ImportError:
             st.code(board.unicode(invert_color=game.player_color == "black"))
         
-        # Navigation buttons
-        col_first, col_prev, col_next, col_last = st.columns(4)
+        # Navigation buttons - first row: main controls
+        col_first, col_prev, col_play, col_next, col_last = st.columns(5)
         
         with col_first:
-            if st.button("⏮️", use_container_width=True, disabled=current_idx == 0):
+            if st.button("⏮️", use_container_width=True, disabled=current_idx == 0, key="review_first"):
+                st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = 0
                 st.rerun()
         
         with col_prev:
-            if st.button("◀️ Back", use_container_width=True, disabled=current_idx == 0):
+            if st.button("◀️", use_container_width=True, disabled=current_idx == 0, key="review_prev"):
+                st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = current_idx - 1
                 st.rerun()
         
+        with col_play:
+            # Auto-play toggle
+            if auto_playing:
+                if st.button("⏸️", use_container_width=True, key="review_pause"):
+                    st.session_state["review_auto_play"] = False
+                    st.rerun()
+            else:
+                if st.button("▶️", use_container_width=True, disabled=current_idx >= max_idx, key="review_play"):
+                    st.session_state["review_auto_play"] = True
+                    st.rerun()
+        
         with col_next:
-            if st.button("Next ▶️", use_container_width=True, disabled=current_idx >= max_idx):
+            if st.button("▶️", use_container_width=True, disabled=current_idx >= max_idx, key="review_next"):
+                st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = current_idx + 1
                 st.rerun()
         
         with col_last:
-            if st.button("⏭️", use_container_width=True, disabled=current_idx >= max_idx):
+            if st.button("⏭️", use_container_width=True, disabled=current_idx >= max_idx, key="review_last"):
+                st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = max_idx
                 st.rerun()
         
-        st.caption(f"Position {current_idx}/{max_idx}")
+        # Progress indicator
+        progress = current_idx / max_idx if max_idx > 0 else 0
+        st.progress(progress, text=f"Move {current_idx} of {max_idx}")
+        
+        # Auto-play: advance to next position after delay
+        if auto_playing and current_idx < max_idx:
+            time.sleep(1.2)  # Delay between moves for comfortable viewing
+            st.session_state["review_move_index"] = current_idx + 1
+            st.rerun()
+        elif auto_playing and current_idx >= max_idx:
+            st.session_state["review_auto_play"] = False
     
     with col_analysis:
         # Show analysis for the current move (if any)
