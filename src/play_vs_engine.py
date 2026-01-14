@@ -176,6 +176,42 @@ def _reset_game(player_color: str = "white") -> None:
             })
 
 
+
+def _make_engine_move(game: GameState) -> bool:
+    """Execute engine move for the current turn."""
+    engine_move = _get_engine_move(game.board)
+    if engine_move:
+        engine_san = game.board.san(engine_move)
+        game.board.push(engine_move)
+        
+        # Calculate move number for the engine move
+        # History length includes the move just pushed
+        # If Player White: History [P1], pushing E1. Len 1. Move 1.
+        # If Player Black: History [E1, P1], pushing E2. Len 2. Move 2.
+        # But we pushed inside this function already? No, we pushed to board. History not updated yet.
+        # Moves in history:
+        # P White: [P1] -> want E1 (move 1). Len=1. (1//2)+1 = 1.
+        # P Black: [E1, P1] -> want E2 (move 2). Len=2. (2//2)+1 = 2.
+        current_move_num = (len(game.move_history) // 2) + 1
+        
+        game.move_history.append({
+            "move_num": current_move_num,
+            "san": engine_san,
+            "uci": engine_move.uci(),
+            "player": "engine",
+            "fen_after": game.board.fen(),
+        })
+        
+        # Check if game is over after engine move
+        if game.board.is_game_over():
+            game.game_over = True
+            game.result = game.board.result()
+            
+        st.session_state["vs_engine_game"] = game
+        return True
+    return False
+
+
 def _make_player_move(uci_move: str, explanation: str = "") -> bool:
     """Execute a player move and get engine response."""
     game: GameState = st.session_state["vs_engine_game"]
@@ -213,23 +249,7 @@ def _make_player_move(uci_move: str, explanation: str = "") -> bool:
             return True
         
         # Engine responds
-        engine_move = _get_engine_move(game.board)
-        if engine_move:
-            engine_san = game.board.san(engine_move)
-            game.board.push(engine_move)
-            
-            game.move_history.append({
-                "move_num": move_num if game.player_color == "black" else move_num,
-                "san": engine_san,
-                "uci": engine_move.uci(),
-                "player": "engine",
-                "fen_after": game.board.fen(),
-            })
-            
-            # Check if game is over after engine move
-            if game.board.is_game_over():
-                game.game_over = True
-                game.result = game.board.result()
+        _make_engine_move(game)
         
         # Force session state update
         st.session_state["vs_engine_game"] = game
@@ -616,7 +636,12 @@ def render_play_vs_engine_tab() -> None:
                 
                 # Confirm and Cancel buttons
                 col_confirm, col_cancel = st.columns(2)
-                with col_confirm:
+                with col_confirm: is thinking...**")
+                    # Force engine move if it's engine's turn and game isn't over
+                    with st.spinner("Engine is thinking..."):
+                        if _make_engine_move(game):
+                            st.rerun()
+
                     if st.button("✅ Confirm", use_container_width=True, type="primary"):
                         with st.spinner("Engine is thinking..."):
                             _make_player_move(pending_move, explanation)
