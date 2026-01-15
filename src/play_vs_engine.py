@@ -769,11 +769,7 @@ def render_play_vs_engine_tab() -> None:
                 (game.board.turn == chess.BLACK and game.player_color == "white")
             )
             
-            # Show thinking message if engine is about to move
-            if is_engine_turn:
-                st.caption("🤔 Engine is thinking...")
-            
-            # Display board FIRST - animate the last engine move
+            # Display board FIRST - this is the most important element
             user_move = _render_simple_board(
                 game.board, 
                 orientation=game.player_color,
@@ -785,33 +781,24 @@ def render_play_vs_engine_tab() -> None:
             if last_move:
                 st.session_state["vs_engine_last_move"] = None
             
-            # NOW handle engine turn (after board is rendered)
+            # Show status message below board
             if is_engine_turn:
-                move_time = st.session_state.get("vs_engine_move_timestamp", 0.0)
-                now = time.time()
-                delay_seconds = 1.0
-                
-                if move_time == 0.0:
-                    # Player just moved - set timestamp for delay tracking
-                    st.session_state["vs_engine_move_timestamp"] = now
-                    # Sleep briefly then rerun (board is already visible)
-                    time.sleep(delay_seconds)
+                st.caption("🤔 Engine is thinking...")
+            elif game.game_over:
+                pass  # Handled below
+            else:
+                st.caption("🎯 Your turn")
+            
+            # Handle engine turn using fragment to avoid full page reload
+            if is_engine_turn:
+                @st.fragment
+                def _engine_thinking_fragment():
+                    """Fragment that handles engine thinking without full page reload."""
+                    time.sleep(0.8)  # Brief delay for "thinking" feel
                     _make_engine_move(game)
-                    st.session_state["vs_engine_move_timestamp"] = 0.0
                     st.rerun()
-                else:
-                    # Timestamp already set - this is a continuation
-                    elapsed = now - move_time
-                    if elapsed >= delay_seconds:
-                        _make_engine_move(game)
-                        st.session_state["vs_engine_move_timestamp"] = 0.0
-                        st.rerun()
-                    else:
-                        remaining = delay_seconds - elapsed
-                        time.sleep(remaining)
-                        _make_engine_move(game)
-                        st.session_state["vs_engine_move_timestamp"] = 0.0
-                        st.rerun()
+                
+                _engine_thinking_fragment()
             
             # If user made a move on the board
             last_processed = st.session_state.get("vs_engine_last_processed_move")
@@ -1018,12 +1005,16 @@ def _render_game_review(review: dict[str, Any]) -> None:
         progress = current_idx / max_idx if max_idx > 0 else 0
         st.progress(progress, text=f"Move {current_idx} of {max_idx}")
         
-        # Auto-play: advance to next position (board already rendered above)
+        # Auto-play: use fragment to avoid full page reload
         if auto_playing and current_idx < max_idx:
-            delay_seconds = 1.2
-            time.sleep(delay_seconds)
-            st.session_state["review_move_index"] = current_idx + 1
-            st.rerun()
+            @st.fragment
+            def _auto_play_fragment():
+                """Fragment that handles auto-play without full page reload."""
+                time.sleep(1.2)
+                st.session_state["review_move_index"] = current_idx + 1
+                st.rerun()
+            
+            _auto_play_fragment()
         elif auto_playing and current_idx >= max_idx:
             st.session_state["review_auto_play"] = False
     
