@@ -250,6 +250,8 @@ def _init_game_state() -> None:
         st.session_state["review_auto_play"] = False
     if "vs_engine_last_processed_move" not in st.session_state:
         st.session_state["vs_engine_last_processed_move"] = None
+    if "vs_engine_move_timestamp" not in st.session_state:
+        st.session_state["vs_engine_move_timestamp"] = 0.0
 
 
 def _reset_game(player_color: str = "white") -> None:
@@ -763,11 +765,26 @@ def render_play_vs_engine_tab() -> None:
                 (game.board.turn == chess.BLACK and game.player_color == "white")
             )
             
-            # If it's engine's turn, make the move with a delay for natural feel
+            # If it's engine's turn, use timestamp-based delay (non-blocking)
             if is_engine_turn:
-                time.sleep(1.5)  # Thinking delay
-                _make_engine_move(game)
-                # Don't rerun - let the page render with the new position
+                move_time = st.session_state.get("vs_engine_move_timestamp", 0.0)
+                now = time.time()
+                delay_seconds = 1.2
+                
+                if move_time == 0.0:
+                    # Player just moved - set timestamp and show "thinking"
+                    st.session_state["vs_engine_move_timestamp"] = now
+                    st.caption("🤔 Engine is thinking...")
+                elif now - move_time >= delay_seconds:
+                    # Delay passed - make the engine move
+                    _make_engine_move(game)
+                    st.session_state["vs_engine_move_timestamp"] = 0.0  # Reset
+                else:
+                    # Still waiting - show thinking and schedule rerun
+                    st.caption("🤔 Engine is thinking...")
+                    remaining = delay_seconds - (now - move_time)
+                    time.sleep(min(remaining, 0.1))  # Small sleep to avoid busy loop
+                    st.rerun()
             
             # Get pending move for highlighting (only in explanation mode)
             pending_move = st.session_state.get("vs_engine_pending_move")
