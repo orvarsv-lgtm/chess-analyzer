@@ -640,7 +640,7 @@ def _generate_overall_summary(
     return "\n\n".join(summary_parts)
 
 
-def _render_simple_board(board: chess.Board, orientation: str = "white", selected_move: str | None = None, animate_move: str | None = None, no_rerun_mode: bool = False) -> str | None:
+def _render_simple_board(board: chess.Board, orientation: str = "white", selected_move: str | None = None, animate_move: str | None = None) -> str | None:
     """Render a chess board with optional highlight for pending move.
     
     Args:
@@ -648,11 +648,8 @@ def _render_simple_board(board: chess.Board, orientation: str = "white", selecte
         orientation: "white" or "black"
         selected_move: UCI move to highlight (e.g., "e2e4") - highlights destination green
         animate_move: UCI move to animate (piece sliding)
-        no_rerun_mode: If True, moves go to localStorage instead of triggering rerun.
-                       Use poll_for_move() to retrieve moves.
     
     Returns the UCI move if user made one, else None.
-    In no_rerun_mode, always returns None (use poller instead).
     """
     # Use the JS board component if available
     try:
@@ -679,7 +676,6 @@ def _render_simple_board(board: chess.Board, orientation: str = "white", selecte
             side_to_move=side_to_move,
             highlights=highlights,
             animate_move=animate_move,
-            no_rerun_mode=no_rerun_mode,
             key=component_key,
         )
         
@@ -773,47 +769,13 @@ def render_play_vs_engine_tab() -> None:
                 (game.board.turn == chess.BLACK and game.player_color == "white")
             )
             
-            # Check if it's player's turn (determines if we need move polling)
-            is_player_turn = not game.game_over and not is_engine_turn
-            
-            # Auto-refresh to poll for moves when it's player's turn
-            # This triggers the poller component periodically to check localStorage
-            if is_player_turn:
-                try:
-                    from streamlit_autorefresh import st_autorefresh
-                    # Refresh every 150ms to check for moves
-                    # Use CSS to hide the autorefresh component
-                    st.markdown(
-                        '<style>[data-testid="stAutorefresh"] { display: none !important; }</style>',
-                        unsafe_allow_html=True
-                    )
-                    st_autorefresh(interval=150, limit=None, key="move_autorefresh")
-                except ImportError:
-                    pass  # Fall back to standard component behavior
-            
-            # Display board with no_rerun_mode for smooth interaction
-            # Moves are retrieved via the poller component instead
-            _render_simple_board(
+            # Display board - uses localStorage caching internally for faster render
+            user_move = _render_simple_board(
                 game.board, 
                 orientation=game.player_color,
                 selected_move=pending_move,
                 animate_move=last_move,
-                no_rerun_mode=is_player_turn,  # Only use no-rerun when it's player's turn
             )
-            
-            # Poll for moves via hidden component (only when it's player's turn)
-            # Use CSS to hide the poller iframe
-            user_move = None
-            if is_player_turn:
-                st.markdown(
-                    '<style>iframe[title="ui.move_poller_component.poll_for_move"] { display: none !important; height: 0 !important; }</style>',
-                    unsafe_allow_html=True
-                )
-                try:
-                    from ui.move_poller_component import poll_for_move
-                    user_move = poll_for_move(key="vs_engine_move_poller")
-                except ImportError:
-                    pass
             
             # Clear the animation flag after this render
             if last_move:
@@ -822,7 +784,8 @@ def render_play_vs_engine_tab() -> None:
             # Show status message below board
             if is_engine_turn:
                 st.caption("🤔 Engine is thinking...")
-            # Note: "Your turn" is shown in the else block below to avoid duplication
+            elif not game.game_over:
+                st.caption("🎯 Your turn")
             
             # Handle engine turn using fragment to avoid full page reload
             if is_engine_turn:
@@ -887,15 +850,6 @@ def render_play_vs_engine_tab() -> None:
                     if st.button("❌ Cancel", use_container_width=True):
                         st.session_state["vs_engine_pending_move"] = None
                         st.rerun()
-            else:
-                # Check whose turn it is
-                is_player_turn = (
-                    (game.board.turn == chess.WHITE and game.player_color == "white") or
-                    (game.board.turn == chess.BLACK and game.player_color == "black")
-                )
-                
-                if is_player_turn:
-                    st.caption("🎯 Your turn")
             
             # Resign button (always visible during active game)
             if not game.game_over:
