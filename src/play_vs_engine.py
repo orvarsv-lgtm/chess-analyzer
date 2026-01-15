@@ -772,18 +772,19 @@ def render_play_vs_engine_tab() -> None:
                 delay_seconds = 1.2
                 
                 if move_time == 0.0:
-                    # Player just moved - set timestamp and show "thinking"
+                    # Player just moved - set timestamp and trigger rerun to start delay
                     st.session_state["vs_engine_move_timestamp"] = now
-                    st.caption("🤔 Engine is thinking...")
+                    st.rerun()
                 elif now - move_time >= delay_seconds:
                     # Delay passed - make the engine move
                     _make_engine_move(game)
                     st.session_state["vs_engine_move_timestamp"] = 0.0  # Reset
+                    st.rerun()  # Rerun to show the new position
                 else:
-                    # Still waiting - show thinking and schedule rerun
+                    # Still waiting - show thinking and schedule rerun after remaining time
                     st.caption("🤔 Engine is thinking...")
                     remaining = delay_seconds - (now - move_time)
-                    time.sleep(min(remaining, 0.1))  # Small sleep to avoid busy loop
+                    time.sleep(remaining + 0.05)  # Sleep remaining time
                     st.rerun()
             
             # Get pending move for highlighting (only in explanation mode)
@@ -917,6 +918,8 @@ def _render_game_review(review: dict[str, Any]) -> None:
         st.session_state["review_move_index"] = 0
     if "review_last_rendered_index" not in st.session_state:
         st.session_state["review_last_rendered_index"] = -1
+    if "review_auto_play_timestamp" not in st.session_state:
+        st.session_state["review_auto_play_timestamp"] = 0.0
     
     moves_analysis = review.get("moves_analysis", [])
     move_history = game.move_history
@@ -1005,13 +1008,29 @@ def _render_game_review(review: dict[str, Any]) -> None:
         progress = current_idx / max_idx if max_idx > 0 else 0
         st.progress(progress, text=f"Move {current_idx} of {max_idx}")
         
-        # Auto-play: advance to next position after delay
+        # Auto-play: advance to next position using non-blocking timestamp delay
         if auto_playing and current_idx < max_idx:
-            time.sleep(1.2)  # Delay between moves for comfortable viewing
-            st.session_state["review_move_index"] = current_idx + 1
-            st.rerun()
+            auto_timestamp = st.session_state.get("review_auto_play_timestamp", 0.0)
+            now = time.time()
+            delay_seconds = 1.2
+            
+            if auto_timestamp == 0.0:
+                # Just started auto-play - set timestamp
+                st.session_state["review_auto_play_timestamp"] = now
+                st.rerun()
+            elif now - auto_timestamp >= delay_seconds:
+                # Delay passed - advance to next move
+                st.session_state["review_move_index"] = current_idx + 1
+                st.session_state["review_auto_play_timestamp"] = now  # Reset for next move
+                st.rerun()
+            else:
+                # Still waiting - rerun after remaining time
+                remaining = delay_seconds - (now - auto_timestamp)
+                time.sleep(remaining + 0.05)
+                st.rerun()
         elif auto_playing and current_idx >= max_idx:
             st.session_state["review_auto_play"] = False
+            st.session_state["review_auto_play_timestamp"] = 0.0
     
     with col_analysis:
         # Show analysis for the current move (if any)
