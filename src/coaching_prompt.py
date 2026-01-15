@@ -49,6 +49,11 @@ def build_career_coaching_prompt(
     # Phase Performance Index (PPI) - lower is better, 1.0 = baseline
     ppi = stats.get('ppi', {})
     
+    # Get dynamic winning threshold (Elo-adjusted)
+    winning_threshold_cp = stats.get('winning_threshold_cp', 150)
+    winning_threshold_pawns = winning_threshold_cp / 100  # Convert to pawns for display
+    avg_elo = stats.get('avg_elo', 1500)
+    
     # Blunder data
     total_blunders = stats.get('total_blunders', 0)
     blunder_rate = stats.get('blunder_rate', 0)
@@ -222,7 +227,7 @@ def build_career_coaching_prompt(
     if dominant_error_context == 'endgame_collapses':
         one_rule_context = "endgame positions (moves 40+)"
     elif dominant_error_context == 'blunders_in_winning':  
-        one_rule_context = "winning positions (when up +1.5 or more)"
+        one_rule_context = f"winning positions (when up +{winning_threshold_pawns:.1f} or more)"
     else:
         one_rule_context = "conversion opportunities"
     
@@ -233,7 +238,7 @@ def build_career_coaching_prompt(
     # Build the data block
     data_block = f"""
 ================================================================================
-PLAYER DATA: {player_name} ({player_rating or 'Unrated'})
+PLAYER DATA: {player_name} ({player_rating or 'Unrated'}) - Avg Elo: {avg_elo}
 ================================================================================
 
 SEVERITY ASSESSMENT: {severity}
@@ -244,7 +249,7 @@ HIGH-LEVEL RESULTS
 ------------------
 Games analyzed: {total_games}
 Win rate: {win_rate*100:.0f}%
-Winning positions reached (+1.5 or better): {winning_positions}
+Winning positions reached (+{winning_threshold_pawns:.1f} or better): {winning_positions}
 Wins from winning positions: {converted_wins}
 Conversion rate: {conversion_rate:.0f}%
 Games thrown away: {games_thrown}
@@ -254,7 +259,7 @@ Mistakes per 100 moves: {mistake_rate:.1f}
 BLUNDER CONTEXT ANALYSIS
 ------------------------
 After captures: {blunder_contexts.get('after_capture', 0)} ({after_capture_pct:.0f}% of total)
-In winning positions (+1.5): {blunder_contexts.get('in_winning_position', 0)} ({in_winning_pct:.0f}% of total)
+In winning positions (+{winning_threshold_pawns:.1f}): {blunder_contexts.get('in_winning_position', 0)} ({in_winning_pct:.0f}% of total)
 In endgame phase: {blunder_phases.get('endgame', 0)} ({endgame_pct:.0f}% of total)
 After checks: {blunder_contexts.get('after_check', 0)} ({after_check_pct:.0f}% of total)
 Time pressure (move 35+): {blunder_contexts.get('time_trouble_likely', 0)} ({(blunder_contexts.get('time_trouble_likely', 0) / total_blunders * 100) if total_blunders > 0 else 0:.0f}% of total)

@@ -17,6 +17,29 @@ ENDGAME_THRESHOLD = 13  # roughly R+minor vs R+minor (non-pawn material)
 DEBUG_PHASES = False
 
 
+def get_winning_threshold_cp(avg_elo: int = 1500) -> int:
+    """Get the centipawn threshold for a 'winning position' based on player Elo.
+    
+    Lower-rated players need a larger advantage to reliably convert, so we use
+    higher thresholds for them:
+    - 0-1000 Elo: +3.0 pawns (300 cp) - beginners need a huge advantage
+    - 1000-1500 Elo: +2.0 pawns (200 cp) - intermediates need a clear advantage
+    - 1500+ Elo: +1.5 pawns (150 cp) - experienced players can convert smaller edges
+    
+    Args:
+        avg_elo: Average rating of the player
+        
+    Returns:
+        Centipawn threshold for "winning position"
+    """
+    if avg_elo < 1000:
+        return 300  # +3.0 pawns
+    elif avg_elo < 1500:
+        return 200  # +2.0 pawns
+    else:
+        return 150  # +1.5 pawns
+
+
 def compute_strengths_weaknesses(games_data: list) -> dict:
     """Derive deterministic strengths/weaknesses from existing engine output.
 
@@ -537,16 +560,20 @@ def aggregate_cpl_by_phase(games_data: list) -> dict:
     return result
 
 
-def compute_overall_cpl(games_data: list) -> dict:
+def compute_overall_cpl(games_data: list, avg_elo: int = 1500) -> dict:
     """
     Compute overall CPL metrics across all games.
     
     Args:
         games_data: List of game dicts from engine analysis
+        avg_elo: Average player Elo (used to determine winning position threshold)
         
     Returns:
         Dict with overall metrics including real trend comparison and blunder severity
     """
+    # Get dynamic winning threshold based on player's rating
+    winning_threshold_cp = get_winning_threshold_cp(avg_elo)
+    
     if not games_data:
         return {
             "overall_cpl": 0.0,
@@ -645,8 +672,8 @@ def compute_overall_cpl(games_data: list) -> dict:
             if cp_loss_raw > 0 and not is_mate:
                 piece_losses.setdefault(piece_name, []).append(cp_loss_raw)
 
-            # Conversion difficulty: when already ahead from mover POV (eval_before_player >= +1.0)
-            if eval_before_player is not None and eval_before_player >= 100 and cp_loss_raw > 0 and not is_mate:
+            # Conversion difficulty: when already ahead from mover POV (using dynamic threshold)
+            if eval_before_player is not None and eval_before_player >= winning_threshold_cp and cp_loss_raw > 0 and not is_mate:
                 winning_conversion_chances += 1
                 conversion_swings.append(cp_loss_weighted or cp_loss_raw)
                 eval_after_player = None
@@ -771,6 +798,7 @@ def compute_overall_cpl(games_data: list) -> dict:
     # Conversion difficulty summary
     conversion_difficulty = {
         "winning_positions": winning_conversion_chances,
+        "winning_threshold_cp": winning_threshold_cp,  # The threshold used (based on avg_elo)
         "avg_loss_when_ahead": round(sum(conversion_swings) / len(conversion_swings), 1) if conversion_swings else 0.0,
         "severe_conversion_errors": severe_conversion_errors,
         "severe_error_rate": round((severe_conversion_errors / winning_conversion_chances) * 100.0, 1) if winning_conversion_chances > 0 else 0.0,

@@ -22,6 +22,9 @@ from typing import List, Optional, Dict, Any
 
 import streamlit as st
 
+# Import dynamic winning threshold function
+from src.performance_metrics import get_winning_threshold_cp
+
 # Load environment variables at module import time
 try:
     from dotenv import load_dotenv
@@ -1134,6 +1137,20 @@ def _compute_streak_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Aggregate statistics across all games with advanced analytics."""
     
+    # First pass: calculate average Elo to determine winning threshold
+    pre_ratings = []
+    for game in games:
+        focus_color = game.get('focus_color', 'white')
+        rating = game.get('focus_player_rating') or game.get('white_rating' if focus_color == 'white' else 'black_rating')
+        if rating and rating > 0:
+            pre_ratings.append(rating)
+    
+    avg_elo = int(sum(pre_ratings) / len(pre_ratings)) if pre_ratings else 1500
+    
+    # Get dynamic winning threshold based on player's rating
+    # 0-1000: +3.0 (300cp), 1000-1500: +2.0 (200cp), 1500+: +1.5 (150cp)
+    winning_threshold_cp = get_winning_threshold_cp(avg_elo)
+    
     # Phase CPL baselines (empirically derived from typical amateur play)
     # These represent "expected" CPL for each phase at amateur level
     PHASE_BASELINES = {
@@ -1284,9 +1301,10 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
                     if focus_color == 'black':
                         eval_val = -eval_val
                     
-                    if eval_val >= 150:
+                    # Use dynamic threshold based on player's rating
+                    if eval_val >= winning_threshold_cp:
                         had_winning_position = True
-                    if eval_val <= -150:
+                    if eval_val <= -winning_threshold_cp:
                         had_losing_position = True
                     
                     # Capture opening exit eval (around move 15)
@@ -1345,12 +1363,12 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
                 if move_num >= 35:
                     blunder_contexts['time_trouble_likely'] += 1
                 
-                # Position context
-                if prev_eval >= 150:
+                # Position context (using dynamic threshold based on rating)
+                if prev_eval >= winning_threshold_cp:
                     blunder_contexts['in_winning_position'] += 1
                     rating_cost_factors['blunders_in_winning_pos']['count'] += 1
                     rating_cost_factors['blunders_in_winning_pos']['estimated_points_lost'] += 15
-                elif prev_eval <= -150:
+                elif prev_eval <= -winning_threshold_cp:
                     blunder_contexts['in_losing_position'] += 1
                 else:
                     blunder_contexts['in_equal_position'] += 1
@@ -1530,6 +1548,9 @@ def _aggregate_career_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
         'opening_outcomes': opening_outcomes,
         'rating_cost_factors': rating_cost_factors,
         'biggest_rating_cost': biggest_rating_cost,
+        # Winning threshold info (Elo-adjusted)
+        'winning_threshold_cp': winning_threshold_cp,
+        'avg_elo': avg_elo,
     }
 
 

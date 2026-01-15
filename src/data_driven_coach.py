@@ -48,6 +48,10 @@ def explain_game_summary(stats: Dict[str, Any]) -> Optional[CoachingSection]:
     blunder_phases = stats.get('blunder_phases', {})
     rating_cost = stats.get('rating_cost_factors', {})
     
+    # Get dynamic threshold info
+    winning_threshold_cp = stats.get('winning_threshold_cp', 150)
+    winning_threshold_pawns = winning_threshold_cp / 100
+    
     lines = []
     data_sources = []
     
@@ -59,7 +63,7 @@ def explain_game_summary(stats: Dict[str, Any]) -> Optional[CoachingSection]:
     if winning_positions >= 3 and conversion_rate < 70:
         unconverted = winning_positions - converted
         lines.append(
-            f"You reached winning positions (≥+1.5) in {winning_positions} games "
+            f"You reached winning positions (≥+{winning_threshold_pawns:.1f}) in {winning_positions} games "
             f"but only converted {converted} to wins ({conversion_rate:.0f}%). "
             f"You let {unconverted} winning games slip away."
         )
@@ -245,6 +249,10 @@ def explain_failure_patterns(stats: Dict[str, Any]) -> Optional[CoachingSection]
     blunder_phases = stats.get('blunder_phases', {})
     conversion_rate = stats.get('conversion_rate', 0)
     
+    # Get dynamic threshold
+    winning_threshold_cp = stats.get('winning_threshold_cp', 150)
+    winning_threshold_pawns = winning_threshold_cp / 100
+    
     if total_blunders < 3:
         return None
     
@@ -270,7 +278,7 @@ def explain_failure_patterns(stats: Dict[str, Any]) -> Optional[CoachingSection]
         if pct >= 20:
             lines.append(
                 f"**Conversion failures**: {pct:.0f}% of your blunders ({in_winning}/{total_blunders}) "
-                f"happen when you're already winning (≥+1.5). You relax when ahead and stop calculating."
+                f"happen when you're already winning (≥+{winning_threshold_pawns:.1f}). You relax when ahead and stop calculating."
             )
             data_sources.append(f"in_winning_position={in_winning} ({pct:.0f}%)")
     
@@ -450,6 +458,10 @@ def generate_training_recommendations(
     blunder_contexts = stats.get('blunder_contexts', {})
     total_blunders = stats.get('total_blunders', 0)
     
+    # Get dynamic threshold
+    winning_threshold_cp = stats.get('winning_threshold_cp', 150)
+    winning_threshold_pawns = winning_threshold_cp / 100
+    
     # Recommendation 1: Conversion (if below 70%)
     if conversion_rate > 0 and conversion_rate < 70:
         target = min(75, conversion_rate + 15)
@@ -457,7 +469,7 @@ def generate_training_recommendations(
             'fix': "Improve conversion from winning positions",
             'because': f"Your conversion rate is {conversion_rate:.0f}%",
             'goal': f"Conversion rate: {conversion_rate:.0f}% → {target:.0f}%",
-            'verify': "Track % of games where you had ≥+1.5 and won",
+            'verify': f"Track % of games where you had ≥+{winning_threshold_pawns:.1f} and won",
         })
         data_sources.append(f"conversion_rate={conversion_rate:.0f}%")
     
@@ -506,7 +518,7 @@ def generate_training_recommendations(
                 'fix': "Maintain focus when winning",
                 'because': f"{in_winning_pct:.0f}% of blunders happen when already ahead",
                 'goal': f"Blunders in winning positions: {in_winning} → {max(0, in_winning - 2)}",
-                'verify': "When ahead by +1.5, spend 30 extra seconds on each move",
+                'verify': f"When ahead by +{winning_threshold_pawns:.1f}, spend 30 extra seconds on each move",
             })
             data_sources.append(f"in_winning_position={in_winning}")
     

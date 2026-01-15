@@ -20,6 +20,46 @@ from src.ai_coach import (
 )
 
 
+def classify_time_control(time_control: str) -> str:
+    """
+    Classify a time control string into Rapid, Blitz, Bullet, or Unknown.
+    
+    Time control format: "initial+increment" in seconds (e.g., "600+0" = 10 min).
+    
+    Standard classifications:
+    - Bullet: < 3 minutes (< 180 seconds)
+    - Blitz: 3-10 minutes (180-599 seconds)
+    - Rapid: 10+ minutes (600+ seconds)
+    
+    We use "estimated time" = initial + 40 * increment for proper classification.
+    """
+    if not time_control:
+        return "Unknown"
+    
+    try:
+        if '+' in time_control:
+            parts = time_control.split('+')
+            initial = int(parts[0])
+            increment = int(parts[1]) if len(parts) > 1 else 0
+        elif '-' in time_control:  # Some formats use hyphen
+            return "Unknown"
+        else:
+            initial = int(time_control)
+            increment = 0
+        
+        # Estimated game time = initial + 40 moves * increment
+        estimated_time = initial + 40 * increment
+        
+        if estimated_time < 180:  # Less than 3 min
+            return "Bullet"
+        elif estimated_time < 600:  # 3-10 min
+            return "Blitz"
+        else:  # 10+ min
+            return "Rapid"
+    except (ValueError, IndexError):
+        return "Unknown"
+
+
 def _split_long_line(line, max_len=100):
     # Splits a long line into chunks of max_len, breaking at spaces if possible
     if len(line) <= max_len:
@@ -419,12 +459,48 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str, a
         aggregated: Full aggregated data from Analysis tab (includes phase_stats, opening_rates, etc.)
     """
     st.subheader("📊 Full Career Analysis")
-    st.write(f"Analyzing **{len(games)} games** for comprehensive career insights.")
     
-    # Get player rating from first game
+    # Time control filter
+    # Count games by time control category
+    tc_counts = {"All": len(games), "Rapid": 0, "Blitz": 0, "Bullet": 0}
+    for game in games:
+        tc = game.get('time_control', '')
+        category = classify_time_control(tc)
+        if category in tc_counts:
+            tc_counts[category] += 1
+    
+    # Build options with game counts
+    tc_options = []
+    for tc_name in ["All", "Rapid", "Blitz", "Bullet"]:
+        count = tc_counts.get(tc_name, 0)
+        if tc_name == "All" or count > 0:
+            tc_options.append(f"{tc_name} ({count})")
+    
+    selected_tc = st.selectbox(
+        "⏱️ Time Control",
+        tc_options,
+        index=0,
+        help="Filter analysis by time control. All = analyze all games together."
+    )
+    
+    # Extract category name from selection
+    selected_category = selected_tc.split(" (")[0]
+    
+    # Filter games if not "All"
+    if selected_category != "All":
+        filtered_games = [
+            g for g in games 
+            if classify_time_control(g.get('time_control', '')) == selected_category
+        ]
+    else:
+        filtered_games = games
+    
+    st.write(f"Analyzing **{len(filtered_games)} games** for comprehensive career insights.")
+    
+    # Get player rating from first filtered game
     player_rating = None
-    if games:
-        first_game = games[0]
+    if filtered_games:
+        first_game = filtered_games[0]
         focus_color = first_game.get('focus_color', 'white')
         if focus_color == 'white':
             player_rating = first_game.get('white_elo') or first_game.get('white_rating')
@@ -444,8 +520,8 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str, a
     _This is diagnostic coaching, not statistics recitation._
     """)
     
-    # Cache key for career analysis
-    cache_key = f"career_analysis_{player_name}_{len(games)}_{user_id}"
+    # Cache key for career analysis (includes time control filter)
+    cache_key = f"career_analysis_{player_name}_{selected_category}_{len(filtered_games)}_{user_id}"
     cached_analysis = st.session_state.get(cache_key)
     
     if cached_analysis:
@@ -476,7 +552,7 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str, a
                         return
                     
                     result = generate_career_analysis(
-                        all_games=games,
+                        all_games=filtered_games,
                         player_name=player_name or "Player",
                         player_rating=player_rating,
                         aggregated_data=aggregated,
@@ -515,6 +591,11 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     
     # Key metrics row
     col1, col2, col3, col4 = st.columns(4)
+    
+    # Get dynamic winning threshold for help text
+    winning_threshold_cp = stats.get('winning_threshold_cp', 150)
+    winning_threshold_pawns = winning_threshold_cp / 100
+    
     with col1:
         st.metric("Games", stats.get('total_games', 0))
     with col2:
@@ -523,7 +604,7 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     with col3:
         conversion_rate = stats.get('conversion_rate', 0)
         conv_icon = "✅" if conversion_rate >= 70 else "⚠️" if conversion_rate >= 50 else "🔴"
-        st.metric(f"{conv_icon} Conversion", f"{conversion_rate:.0f}%", help="% of winning positions (≥+1.5) converted to wins")
+        st.metric(f"{conv_icon} Conversion", f"{conversion_rate:.0f}%", help=f"% of winning positions (≥+{winning_threshold_pawns:.1f}) converted to wins")
     with col4:
         blunder_rate = stats.get('blunder_rate', 0)
         br_icon = "✅" if blunder_rate < 4 else "⚠️" if blunder_rate < 7 else "🔴"
