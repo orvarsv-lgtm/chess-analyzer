@@ -41,3 +41,54 @@ We may restrict usage if abuse is detected.
 - We do **not** sell your personal chess data.
 - Publicly available games (e.g. from Lichess or Chess.com) may be analyzed at your request.
 """)
+
+
+def render_privacy_policy_page():
+    st.title("Privacy Policy")
+    st.markdown("""
+**Effective Date:** January 2026
+
+This Privacy Policy explains how **we** collect, use, and protect your information when you use **ChessAnalyzerV1**.
+
+### 1. Information We Collect
+- **Account Information:** If you sign up, we collect your email address and authentication details.
+- **Chess Data:** We process PGN files and username data you provide to analyze games.
+- **Usage Data:** We collect anonymous metrics on how you use the Service (e.g., features used, errors encountered).
+- **Payment Information:** We do **not** store your credit card details. All payments are processed by our secure provider (e.g., Paddle).
+
+### 2. How We Use Your Information
+- To provide the chess analysis and coaching features.
+- To improve the performance and accuracy of our engines.
+- To communicate with you regarding your account or updates to the Service.
+
+### 3. Data Sharing
+- We do **not** sell your personal data to third parties.
+- We may share data with service providers (e.g., hosting, payment) solely to operate the Service.
+- We may disclose information if required by law.
+
+### 4. Data Security
+We implement reasonable security measures to protect your data. However, no method of transmission over the Internet is 100% secure.
+
+### 5. Your Rights
+- You can request deletion of your account and associated data by contacting us.
+- You can export your analysis data at any time.
+
+### 6. Contact Us
+If you have questions about this policy, please contact us at: **orvarsv@icloud.com**
+""")
+
+
+def render_refund_policy_page():
+    st.title("Refund Policy")
+    st.markdown("""
+**All sales are final.**
+
+### No Refunds
+Because **ChessAnalyzerV1** offers digital goods and immediate access to server-intensive analysis resources, **we do not offer refunds** for subscriptions or one-time purchases once the service has been used or the billing cycle has started.
+
+### Cancel Anytime
+You may cancel your subscription at any time to prevent future billing. Your access will continue until the end of your current billing period.
+
+### Exceptional Circumstances
+In the event of a technical error (e.g., double billing) attributed to our systems, please contact support at **orvarsv@icloud.com** to resolve the issue. We resolve these specific cases at our sole discretion.
+""")

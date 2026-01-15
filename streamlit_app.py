@@ -104,7 +104,11 @@ from src.play_vs_engine import render_play_vs_engine_tab
 
 # Pricing page
 from src.pricing_ui import render_pricing_page
-from src.legal_ui import render_terms_of_service_page
+from src.legal_ui import (
+    render_terms_of_service_page,
+    render_privacy_policy_page,
+    render_refund_policy_page,
+)
 
 # Puzzle disk cache
 from puzzles.puzzle_cache import load_cached_puzzles, save_cached_puzzles
@@ -1480,24 +1484,8 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
         st.code(coaching_report.to_json()[:5000] + "..." if len(coaching_report.to_json()) > 5000 else coaching_report.to_json(), language="json")
 
 
-def main() -> None:
-    st.title(t("app_title"))
-
-    # Render language selector and authentication sidebar
-    render_language_selector()
-    render_auth_sidebar()
-    st.sidebar.caption(f"{t('contact_us')}: orvarsv@icloud.com")
-    
-    st.sidebar.markdown("---")
-    if st.sidebar.button("📜 Terms of Service", use_container_width=True):
-        st.session_state["main_view"] = "Terms of Service"
-        st.rerun()
-
-    if "analysis_result" not in st.session_state:
-        st.session_state["analysis_result"] = None
-    if "analysis_request" not in st.session_state:
-        st.session_state["analysis_request"] = None
-
+def _render_analysis_input_form() -> None:
+    """Render the analysis input form (username/upload) and handle execution."""
     st.subheader(t("inputs"))
     
     # Load previous analysis option (for signed-in users)
@@ -1860,16 +1848,47 @@ def main() -> None:
                     else:
                         st.warning(f"⚠️ Could not save analysis: {msg}")
 
-    req = st.session_state.get("analysis_request")
-    if req and req.get("num_games_in_pgn", 0) > 0:
-        st.info(
-            f"Analyzed {req.get('games_to_analyze')} of {req.get('num_games_in_pgn')} games "
-            f"(limited by max_games={req.get('max_games')})."
-        )
-
-    # Show results with tabs if we have analysis
+    # Success message after running
     if st.session_state.get("analysis_result"):
-        _render_tabbed_results(st.session_state["analysis_result"])
+        st.success("Analysis complete! View the results in the tabs.")
+        st.rerun()
+
+
+def main() -> None:
+    st.title(t("app_title"))
+
+    # Render language selector and authentication sidebar
+    render_language_selector()
+    render_auth_sidebar()
+    st.sidebar.caption(f"{t('contact_us')}: orvarsv@icloud.com")
+    
+    st.sidebar.markdown("---")
+    
+    # Legal buttons
+    if st.sidebar.button("📜 Terms of Service", use_container_width=True):
+        st.session_state["main_view"] = "Terms of Service"
+        st.rerun()
+
+    col_legal_1, col_legal_2 = st.sidebar.columns(2)
+    with col_legal_1:
+        if st.button("🔒 Privacy", use_container_width=True):
+            st.session_state["main_view"] = "Privacy Policy"
+            st.rerun()
+    with col_legal_2:
+        if st.button("💸 Refund", use_container_width=True):
+            st.session_state["main_view"] = "Refund Policy"
+            st.rerun()
+
+    if "analysis_result" not in st.session_state:
+        st.session_state["analysis_result"] = {} # Initialize empty dict
+    if "analysis_request" not in st.session_state:
+        st.session_state["analysis_request"] = None
+
+    # Always render the tabbed main view
+    # Pass results if available, otherwise empty dict
+    _render_tabbed_results(st.session_state["analysis_result"] or {})
+
+
 
 
 def _render_pinned_navigation(view_options: list[str]) -> str:
@@ -1964,39 +1983,73 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     if "main_view" not in st.session_state:
         st.session_state["main_view"] = view_options[0]
     
-    # Handle language change - reset view if current selection invalid, but allow Terms of Service
-    if st.session_state.get("main_view") not in view_options and st.session_state.get("main_view") != "Terms of Service":
+    # Handle language change - reset view if current selection invalid, but allow Legal pages
+    legal_pages = {"Terms of Service", "Privacy Policy", "Refund Policy"}
+    if st.session_state.get("main_view") not in view_options and st.session_state.get("main_view") not in legal_pages:
         st.session_state["main_view"] = view_options[0]
 
     # Pinned navigation bar at top
     view = _render_pinned_navigation(view_options)
 
+    # Check if we have analysis data
+    has_analysis = bool(aggregated and aggregated.get("games"))
+    
     # Render selected view
     if t('tab_puzzles') in view:
-        _render_puzzle_tab(aggregated)
-    elif t('tab_ai_coach') in view:
-        # Gate AI Coach behind login
-        if not is_logged_in():
-            st.warning(f"🔒 **{t('sign_in')}** required to access the AI Coach.")
-            st.info("Use the sidebar to sign in with your email.")
+        if not has_analysis:
+            st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to generate puzzles.")
         else:
-            render_ai_coach_tab(aggregated)
+            _render_puzzle_tab(aggregated)
+    elif t('tab_ai_coach') in view:
+        if not has_analysis:
+            st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to use the AI Coach.")
+        else:
+            # Gate AI Coach behind login
+            if not is_logged_in():
+                st.warning(f"🔒 **{t('sign_in')}** required to access the AI Coach.")
+                st.info("Use the sidebar to sign in with your email.")
+            else:
+                render_ai_coach_tab(aggregated)
     elif t('tab_replayer') in view:
-        _render_game_replayer_tab(aggregated)
+        if not has_analysis:
+            st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to use the Replayer.")
+        else:
+            _render_game_replayer_tab(aggregated)
     elif t('tab_openings') in view:
-        _render_opening_repertoire_tab(aggregated)
+        if not has_analysis:
+            st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to see your Opening Repertoire.")
+        else:
+            _render_opening_repertoire_tab(aggregated)
     elif "Opponent" in view:
-        _render_opponent_analysis_tab(aggregated)
+        if not has_analysis:
+             st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to see Opponent Analysis.")
+        else:
+            _render_opponent_analysis_tab(aggregated)
     elif "Streak" in view:
-        _render_streaks_tab(aggregated)
+        if not has_analysis:
+            st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to see your Streaks.")
+        else:
+            _render_streaks_tab(aggregated)
     elif "Play vs Engine" in view:
         render_play_vs_engine_tab()
     elif "Pricing" in view:
         render_pricing_page()
     elif view == "Terms of Service":
         render_terms_of_service_page()
+    elif view == "Privacy Policy":
+        render_privacy_policy_page()
+    elif view == "Refund Policy":
+        render_refund_policy_page()
     else:
-        _render_enhanced_ui(aggregated)
+        # Default view (Analysis)
+        if not has_analysis:
+            _render_analysis_input_form()
+        else:
+            # Show option to start new analysis
+            if st.button("⬅️ New Analysis", type="secondary"):
+                st.session_state["analysis_result"] = {}
+                st.rerun()
+            _render_enhanced_ui(aggregated)
 
 
 def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:

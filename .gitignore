@@ -18,6 +18,8 @@ venv/
 
 # Streamlit secrets (contains API keys!)
 .streamlit/secrets.toml
+.streamlit/secrets.toml.save
+.streamlit/*.save
 
 # OS
 .DS_Store
