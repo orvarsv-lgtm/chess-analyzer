@@ -405,6 +405,24 @@ class GameInput:
     move_sans: list[str]
     fens_after_ply: list[str]
     num_plies: int
+    move_clocks: tuple  # Per-move clock data (tuple for hashability)
+    has_clock_data: bool
+
+
+def _extract_clock_from_comment(comment: str) -> int | None:
+    """Extract clock time in seconds from PGN comment like [%clk 0:05:30]."""
+    import re
+    # Try H:MM:SS format
+    match = re.search(r'\[%clk\s+(\d+):(\d+):(\d+)\]', comment)
+    if match:
+        hours, mins, secs = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        return hours * 3600 + mins * 60 + secs
+    # Try M:SS format
+    match = re.search(r'\[%clk\s+(\d+):(\d+)\]', comment)
+    if match:
+        mins, secs = int(match.group(1)), int(match.group(2))
+        return mins * 60 + secs
+    return None
 
 
 def _split_pgn_into_games(pgn_text: str, max_games: int) -> list[GameInput]:
@@ -418,11 +436,38 @@ def _split_pgn_into_games(pgn_text: str, max_games: int) -> list[GameInput]:
         headers = {k: str(v) for k, v in dict(game.headers).items() if v is not None}
         move_sans: list[str] = []
         fens_after_ply: list[str] = []
+        move_clocks: list[dict] = []
         board = game.board()
-        for mv in game.mainline_moves():
-            move_sans.append(board.san(mv))
-            board.push(mv)
+        
+        # Traverse game tree to get moves with comments
+        node = game
+        ply = 0
+        while node.variations:
+            next_node = node.variation(0)
+            move = next_node.move
+            san = board.san(move)
+            move_sans.append(san)
+            
+            # Extract clock from comment
+            clock_seconds = _extract_clock_from_comment(next_node.comment or "")
+            
+            ply += 1
+            move_number = (ply + 1) // 2
+            mover_color = "white" if board.turn == chess.WHITE else "black"
+            
+            move_clocks.append({
+                'move_number': move_number,
+                'ply': ply,
+                'color': mover_color,
+                'san': san,
+                'clock_seconds': clock_seconds,
+            })
+            
+            board.push(move)
             fens_after_ply.append(board.fen())
+            node = next_node
+        
+        has_clock = any(m['clock_seconds'] is not None for m in move_clocks)
 
         games.append(
             GameInput(
@@ -432,6 +477,8 @@ def _split_pgn_into_games(pgn_text: str, max_games: int) -> list[GameInput]:
                 move_sans=move_sans,
                 fens_after_ply=fens_after_ply,
                 num_plies=len(move_sans),
+                move_clocks=tuple(move_clocks),  # Convert to tuple for hashability
+                has_clock_data=has_clock,
             )
         )
     return games
@@ -1645,6 +1692,11 @@ def _render_analysis_input_form() -> None:
                         "black_rating": cached.get("black_rating"),
                         "focus_player_rating": cached.get("focus_player_rating"),
                         "_cached": True,
+                        # Clock data from current PGN (not cached, re-extract each time)
+                        "time_control": gi.headers.get("TimeControl") or "",
+                        "move_clocks": list(gi.move_clocks),
+                        "has_clock_data": gi.has_clock_data,
+                        "color": focus_color,
                     }
                     aggregated_games.append(game_data)
                     aggregated_rows.extend(cached.get("raw_analysis", []))
@@ -1712,6 +1764,10 @@ def _render_analysis_input_form() -> None:
                     "white_rating": white_rating,
                     "black_rating": black_rating,
                     "focus_player_rating": focus_player_rating,
+                    "time_control": gi.headers.get("TimeControl") or "",
+                    "move_clocks": list(gi.move_clocks),  # Per-move clock data
+                    "has_clock_data": gi.has_clock_data,
+                    "color": focus_color,  # Alias for time analysis compatibility
                 }
                 aggregated_games.append(game_data)
                 
@@ -1870,6 +1926,10 @@ def _render_analysis_input_form() -> None:
                         "white_rating": white_rating,
                         "black_rating": black_rating,
                         "focus_player_rating": focus_player_rating,
+                        "time_control": gi.headers.get("TimeControl") or "",
+                        "move_clocks": list(gi.move_clocks),
+                        "has_clock_data": gi.has_clock_data,
+                        "color": focus_color,
                     }
                 )
 
