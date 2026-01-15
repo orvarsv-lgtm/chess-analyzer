@@ -22,6 +22,8 @@
         margin: 0;
         padding: 0;
         background: transparent;
+        /* Prevent layout shift during load */
+        min-height: 420px;
       }
 
       .wrap {
@@ -385,12 +387,32 @@
         return q || candidates[0];
       }
 
+      // Cache key for localStorage to reduce flash on reload
+      const CACHE_KEY = "chessboard_cached_state";
+      
+      function getCachedState() {
+        try {
+          const cached = localStorage.getItem(CACHE_KEY);
+          if (cached) return JSON.parse(cached);
+        } catch (e) {}
+        return null;
+      }
+      
+      function setCachedState(state) {
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(state));
+        } catch (e) {}
+      }
+
+      // Try to get cached state for immediate render
+      const cachedState = getCachedState();
+      
       let args = {
-        fen: chessStartFen(),
-        orientation: "white",
-        legal_moves: [],
-        side_to_move: "w",
-        highlights: {
+        fen: cachedState?.fen || chessStartFen(),
+        orientation: cachedState?.orientation || "white",
+        legal_moves: cachedState?.legal_moves || [],
+        side_to_move: cachedState?.side_to_move || "w",
+        highlights: cachedState?.highlights || {
           legal_to: [],
           selected: null,
           correct_squares: [],
@@ -673,7 +695,7 @@
         setFrameHeight(Math.max(420, document.body.scrollHeight));
       }
 
-      let lastFen = "";
+      let lastFen = cachedState?.fen || "";
       
       window.addEventListener("message", (event) => {
         const data = event.data;
@@ -693,6 +715,16 @@
         }
         
         args = newArgs;
+        
+        // Cache state for faster reload next time
+        setCachedState({
+          fen: args.fen,
+          orientation: args.orientation,
+          legal_moves: args.legal_moves,
+          side_to_move: args.side_to_move,
+          highlights: args.highlights
+        });
+        
         render();
       });
 
