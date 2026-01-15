@@ -781,7 +781,12 @@ def render_play_vs_engine_tab() -> None:
             if is_player_turn:
                 try:
                     from streamlit_autorefresh import st_autorefresh
-                    # Refresh every 150ms to check for moves - this is invisible to user
+                    # Refresh every 150ms to check for moves
+                    # Use CSS to hide the autorefresh component
+                    st.markdown(
+                        '<style>[data-testid="stAutorefresh"] { display: none !important; }</style>',
+                        unsafe_allow_html=True
+                    )
                     st_autorefresh(interval=150, limit=None, key="move_autorefresh")
                 except ImportError:
                     pass  # Fall back to standard component behavior
@@ -797,8 +802,13 @@ def render_play_vs_engine_tab() -> None:
             )
             
             # Poll for moves via hidden component (only when it's player's turn)
+            # Use CSS to hide the poller iframe
             user_move = None
             if is_player_turn:
+                st.markdown(
+                    '<style>iframe[title="ui.move_poller_component.poll_for_move"] { display: none !important; height: 0 !important; }</style>',
+                    unsafe_allow_html=True
+                )
                 try:
                     from ui.move_poller_component import poll_for_move
                     user_move = poll_for_move(key="vs_engine_move_poller")
@@ -812,10 +822,7 @@ def render_play_vs_engine_tab() -> None:
             # Show status message below board
             if is_engine_turn:
                 st.caption("🤔 Engine is thinking...")
-            elif game.game_over:
-                pass  # Handled below
-            else:
-                st.caption("🎯 Your turn")
+            # Note: "Your turn" is shown in the else block below to avoid duplication
             
             # Handle engine turn using fragment to avoid full page reload
             if is_engine_turn:
