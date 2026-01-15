@@ -759,39 +759,21 @@ def render_play_vs_engine_tab() -> None:
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            # Check if it's engine's turn and engine hasn't moved yet
+            # Get pending move for highlighting (only in explanation mode)
+            pending_move = st.session_state.get("vs_engine_pending_move")
+            last_move = st.session_state.get("vs_engine_last_move")
+            
+            # Check if it's engine's turn
             is_engine_turn = not game.game_over and (
                 (game.board.turn == chess.WHITE and game.player_color == "black") or
                 (game.board.turn == chess.BLACK and game.player_color == "white")
             )
             
-            # If it's engine's turn, use timestamp-based delay (non-blocking)
+            # Show thinking message if engine is about to move
             if is_engine_turn:
-                move_time = st.session_state.get("vs_engine_move_timestamp", 0.0)
-                now = time.time()
-                delay_seconds = 1.2
-                
-                if move_time == 0.0:
-                    # Player just moved - set timestamp and trigger rerun to start delay
-                    st.session_state["vs_engine_move_timestamp"] = now
-                    st.rerun()
-                elif now - move_time >= delay_seconds:
-                    # Delay passed - make the engine move
-                    _make_engine_move(game)
-                    st.session_state["vs_engine_move_timestamp"] = 0.0  # Reset
-                    st.rerun()  # Rerun to show the new position
-                else:
-                    # Still waiting - show thinking and schedule rerun after remaining time
-                    st.caption("🤔 Engine is thinking...")
-                    remaining = delay_seconds - (now - move_time)
-                    time.sleep(remaining + 0.05)  # Sleep remaining time
-                    st.rerun()
+                st.caption("🤔 Engine is thinking...")
             
-            # Get pending move for highlighting (only in explanation mode)
-            pending_move = st.session_state.get("vs_engine_pending_move")
-            last_move = st.session_state.get("vs_engine_last_move")
-            
-            # Display board - animate the last engine move
+            # Display board FIRST - animate the last engine move
             user_move = _render_simple_board(
                 game.board, 
                 orientation=game.player_color,
@@ -802,6 +784,34 @@ def render_play_vs_engine_tab() -> None:
             # Clear the animation flag after this render
             if last_move:
                 st.session_state["vs_engine_last_move"] = None
+            
+            # NOW handle engine turn (after board is rendered)
+            if is_engine_turn:
+                move_time = st.session_state.get("vs_engine_move_timestamp", 0.0)
+                now = time.time()
+                delay_seconds = 1.0
+                
+                if move_time == 0.0:
+                    # Player just moved - set timestamp for delay tracking
+                    st.session_state["vs_engine_move_timestamp"] = now
+                    # Sleep briefly then rerun (board is already visible)
+                    time.sleep(delay_seconds)
+                    _make_engine_move(game)
+                    st.session_state["vs_engine_move_timestamp"] = 0.0
+                    st.rerun()
+                else:
+                    # Timestamp already set - this is a continuation
+                    elapsed = now - move_time
+                    if elapsed >= delay_seconds:
+                        _make_engine_move(game)
+                        st.session_state["vs_engine_move_timestamp"] = 0.0
+                        st.rerun()
+                    else:
+                        remaining = delay_seconds - elapsed
+                        time.sleep(remaining)
+                        _make_engine_move(game)
+                        st.session_state["vs_engine_move_timestamp"] = 0.0
+                        st.rerun()
             
             # If user made a move on the board
             last_processed = st.session_state.get("vs_engine_last_processed_move")
@@ -1008,29 +1018,14 @@ def _render_game_review(review: dict[str, Any]) -> None:
         progress = current_idx / max_idx if max_idx > 0 else 0
         st.progress(progress, text=f"Move {current_idx} of {max_idx}")
         
-        # Auto-play: advance to next position using non-blocking timestamp delay
+        # Auto-play: advance to next position (board already rendered above)
         if auto_playing and current_idx < max_idx:
-            auto_timestamp = st.session_state.get("review_auto_play_timestamp", 0.0)
-            now = time.time()
             delay_seconds = 1.2
-            
-            if auto_timestamp == 0.0:
-                # Just started auto-play - set timestamp
-                st.session_state["review_auto_play_timestamp"] = now
-                st.rerun()
-            elif now - auto_timestamp >= delay_seconds:
-                # Delay passed - advance to next move
-                st.session_state["review_move_index"] = current_idx + 1
-                st.session_state["review_auto_play_timestamp"] = now  # Reset for next move
-                st.rerun()
-            else:
-                # Still waiting - rerun after remaining time
-                remaining = delay_seconds - (now - auto_timestamp)
-                time.sleep(remaining + 0.05)
-                st.rerun()
+            time.sleep(delay_seconds)
+            st.session_state["review_move_index"] = current_idx + 1
+            st.rerun()
         elif auto_playing and current_idx >= max_idx:
             st.session_state["review_auto_play"] = False
-            st.session_state["review_auto_play_timestamp"] = 0.0
     
     with col_analysis:
         # Show analysis for the current move (if any)
