@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Move Poller</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 0; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <script>
+      // Streamlit component protocol
+      let _componentId = null;
+      function setComponentValue(value) {
+        if (!_componentId) return;
+        window.parent.postMessage({ type: "streamlit:setComponentValue", value, componentId: _componentId }, "*");
+      }
+      function setFrameHeight(h) {
+        if (!_componentId) return;
+        window.parent.postMessage({ type: "streamlit:setFrameHeight", height: h, componentId: _componentId }, "*");
+      }
+      function componentReady() {
+        window.parent.postMessage({ type: "streamlit:componentReady" }, "*");
+      }
+
+      const MOVE_KEY = "chessboard_pending_move";
+
+      function checkForMove() {
+        try {
+          const move = localStorage.getItem(MOVE_KEY);
+          if (move) {
+            // Clear it immediately to avoid double-processing
+            localStorage.removeItem(MOVE_KEY);
+            setComponentValue(move);
+          }
+        } catch (e) {}
+      }
+
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (!data || data.type !== "streamlit:render") return;
+        if (data.componentId) _componentId = data.componentId;
+        
+        // Check for pending move on each render
+        checkForMove();
+        
+        // Keep iframe tiny
+        setFrameHeight(0);
+      });
+
+      componentReady();
+      // Initial check
+      checkForMove();
+    </script>
+  </body>
+</html>

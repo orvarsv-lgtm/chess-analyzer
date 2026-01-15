@@ -389,6 +389,8 @@
 
       // Cache key for localStorage to reduce flash on reload
       const CACHE_KEY = "chessboard_cached_state";
+      // Key for storing pending moves (used in no-rerun mode)
+      const MOVE_KEY = "chessboard_pending_move";
       
       function getCachedState() {
         try {
@@ -402,6 +404,24 @@
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(state));
         } catch (e) {}
+      }
+      
+      // Store a move in localStorage (for no-rerun mode)
+      function storePendingMove(uci) {
+        try {
+          localStorage.setItem(MOVE_KEY, uci);
+        } catch (e) {}
+      }
+      
+      // Submit a move - either via Streamlit or localStorage depending on mode
+      function submitMove(uci) {
+        if (args.no_rerun_mode) {
+          // Store in localStorage - poller component will pick it up
+          storePendingMove(uci);
+        } else {
+          // Traditional mode - trigger Streamlit rerun
+          setComponentValue(uci);
+        }
       }
 
       // Try to get cached state for immediate render
@@ -423,6 +443,7 @@
           hint: "",
         },
         animate_move: null,  // UCI move to animate, e.g., "e2e4"
+        no_rerun_mode: false,  // When true, moves go to localStorage instead of triggering rerun
       };
 
       function chessStartFen() {
@@ -586,7 +607,7 @@
               if (!uci) return;
               // Clear selection BEFORE emitting to prevent stale state on rerender
               selectedSquare = null;
-              setComponentValue(uci);
+              submitMove(uci);
             });
 
             // Click-to-move
@@ -600,7 +621,7 @@
                 const uci = uciFromSquares(selectedSquare, sq, legalMoves);
                 if (uci) {
                   selectedSquare = null;
-                  setComponentValue(uci);
+                  submitMove(uci);
                   return;
                 }
 

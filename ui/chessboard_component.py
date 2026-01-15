@@ -24,6 +24,7 @@ def render_chessboard(
     highlights: Optional[Dict[str, Any]] = None,
     hint: str = "",
     animate_move: Optional[str] = None,
+    no_rerun_mode: bool = False,
     key: str = "chessboard",
 ) -> Optional[str]:
     """Render an interactive JS chessboard and return a UCI move when user plays.
@@ -36,10 +37,13 @@ def render_chessboard(
         highlights: Dict controlling UI highlights.
         hint: Small hint text under the board.
         animate_move: UCI move to animate (e.g., "e2e4"). Shows piece sliding.
+        no_rerun_mode: If True, moves are stored in localStorage instead of
+            triggering a Streamlit rerun. Use with poll_for_move() to retrieve.
         key: Streamlit component key.
 
     Returns:
         UCI string if the user made a move, else None.
+        In no_rerun_mode, always returns None (use poll_for_move instead).
     """
 
     if orientation not in {"white", "black"}:
@@ -55,6 +59,7 @@ def render_chessboard(
         "highlights": highlights or {},
         "ui": {"hint": hint},
         "animate_move": animate_move,
+        "no_rerun_mode": no_rerun_mode,
     }
 
     value = _chessboard_component(**payload, key=key, default=None)
