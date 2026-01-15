@@ -1,4 +1,5 @@
 import io
+import re
 import chess.pgn
 import requests
 from .opening_classifier import classify_opening
@@ -23,6 +24,7 @@ def fetch_lichess_pgn(username, max_games=50):
     params = {
         "max": max_games,
         "moves": True,
+        "clocks": True,  # Request per-move clock times
     }
     headers = {
         "Accept": "application/x-chess-pgn",
@@ -69,12 +71,49 @@ def parse_pgn(pgn_text, username):
             color = "black"
             score = "win" if result == "0-1" else "loss" if result == "1-0" else "draw"
 
-        # Extract moves as space-separated SAN notation
+        # Extract moves with clock times
         moves_list = []
+        move_clocks = []  # List of (move_number, color, san, clock_seconds)
         board = chess.Board()
-        for move in game.mainline_moves():
-            moves_list.append(board.san(move))
+        node = game
+        move_num = 0
+        
+        while node.variations:
+            next_node = node.variation(0)
+            move = next_node.move
+            san = board.san(move)
+            moves_list.append(san)
+            
+            # Determine whose move this is
+            mover_color = "white" if board.turn == chess.WHITE else "black"
+            ply = len(moves_list)
+            move_number = (ply + 1) // 2  # 1, 1, 2, 2, 3, 3...
+            
+            # Extract clock time from comment (format: [%clk H:MM:SS] or [%clk M:SS])
+            clock_seconds = None
+            comment = next_node.comment or ""
+            clock_match = re.search(r'\[%clk\s+(\d+):(\d+):(\d+)\]', comment)
+            if clock_match:
+                hours, mins, secs = int(clock_match.group(1)), int(clock_match.group(2)), int(clock_match.group(3))
+                clock_seconds = hours * 3600 + mins * 60 + secs
+            else:
+                # Try M:SS format
+                clock_match = re.search(r'\[%clk\s+(\d+):(\d+)\]', comment)
+                if clock_match:
+                    mins, secs = int(clock_match.group(1)), int(clock_match.group(2))
+                    clock_seconds = mins * 60 + secs
+            
+            move_clocks.append({
+                'move_number': move_number,
+                'ply': ply,
+                'color': mover_color,
+                'san': san,
+                'clock_seconds': clock_seconds,  # None if no clock data
+            })
+            
             board.push(move)
+            node = next_node
+        
         moves_pgn = " ".join(moves_list).strip()
 
         # Parse elo headers if present
@@ -98,6 +137,9 @@ def parse_pgn(pgn_text, username):
         opening_name = classify_opening(moves_pgn)
         if not opening_name or opening_name == "Unknown":
             opening_name = opening_hdr or "Unknown"
+        
+        # Check if we have clock data
+        has_clock_data = any(m['clock_seconds'] is not None for m in move_clocks)
 
         game_info = {
             "color": color,
@@ -111,6 +153,8 @@ def parse_pgn(pgn_text, username):
             "white_elo": white_elo,
             "black_elo": black_elo,
             "elo": elo,
+            "move_clocks": move_clocks,  # Per-move clock data
+            "has_clock_data": has_clock_data,
         }
 
         games.append(game_info)

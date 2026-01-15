@@ -304,6 +304,10 @@ Endgame games (40+ moves): {endgame_games}
 Endgame wins: {endgame_wins}
 Endgame win rate: {endgame_win_rate:.0f}%
 
+TIME MANAGEMENT
+---------------
+{_format_time_management(stats.get('time_management', {}))}
+
 DETERMINISTIC ANALYSIS SUMMARY
 (Rule-based findings—treat as ground truth)
 Primary weakness identified: {deterministic_weakness or 'None flagged'}
@@ -544,6 +548,45 @@ def _format_opponent_analysis(opponent_by_strength: dict) -> str:
             note = "punching up well" if win_rate >= expected else "expected range" if games >= 5 else ""
         
         lines.append(f"- {label}: {games} games, {win_rate:.0f}% wins{' — ' + note if note else ''}")
+    
+    return '\n'.join(lines)
+
+
+def _format_time_management(time_stats: dict) -> str:
+    """Format time management analysis for the prompt."""
+    if not time_stats or not time_stats.get('has_data'):
+        return "No clock data available for time management analysis"
+    
+    lines = []
+    
+    # Basic stats
+    games = time_stats.get('games_analyzed', 0)
+    tt_rate = time_stats.get('time_trouble_rate', 0)
+    tt_games = time_stats.get('time_trouble_games', 0)
+    tm_score = time_stats.get('avg_time_score', 0)
+    
+    lines.append(f"Games with clock data: {games}")
+    lines.append(f"Time trouble rate: {tt_rate:.0f}% ({tt_games} games)")
+    lines.append(f"Time management score: {tm_score}/100")
+    
+    # Phase times
+    phase_times = time_stats.get('avg_phase_times', {})
+    if phase_times:
+        opening_t = phase_times.get('opening', 0)
+        middle_t = phase_times.get('middlegame', 0)
+        endgame_t = phase_times.get('endgame', 0)
+        lines.append(f"Avg time per move: Opening {opening_t:.1f}s, Middlegame {middle_t:.1f}s, Endgame {endgame_t:.1f}s")
+    
+    # Patterns
+    patterns = time_stats.get('patterns', [])
+    if patterns:
+        lines.append("\nTime patterns detected:")
+        for p in patterns:
+            severity = p.get('severity', 'medium')
+            severity_icon = '🔴' if severity == 'high' else '🟢' if severity == 'positive' else '🟡'
+            lines.append(f"  {severity_icon} {p.get('description', 'Unknown pattern')}")
+            if p.get('recommendation'):
+                lines.append(f"     → {p.get('recommendation')}")
     
     return '\n'.join(lines)
 

@@ -49,6 +49,12 @@ from src.game_cache import (
     _hash_pgn,
 )
 
+# Time analysis for clock-based patterns
+from src.time_analysis import (
+    has_clock_data,
+    aggregate_time_analysis,
+)
+
 # New feature imports
 from src.database import get_db
 from src.game_replayer import render_game_replayer
@@ -1417,39 +1423,89 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
             if peer.weakest_vs_peers:
                 st.metric("📈 Needs Work", peer.weakest_vs_peers.title())
     
-    # --- Time Trouble Analysis (NEW) ---
+    # --- Time Management Analysis (uses Lichess clock data) ---
     st.divider()
-    st.subheader("⏱️ Time Trouble Analysis")
+    st.subheader("⏱️ Time Management Analysis")
     
-    # Aggregate all move evaluations from games
-    all_move_evals = []
-    for game in games:
-        moves_table = game.get("moves_table", [])
-        for move in moves_table:
-            all_move_evals.append({
-                "san": move.get("move_san", ""),
-                "cp_loss": move.get("cp_loss", 0),
-                "phase": move.get("phase", ""),
-                "move_num": move.get("ply", 0),
-                "time_remaining": move.get("time_remaining"),  # May not be present yet
-            })
-    
-    # Try to detect time trouble (may not have time data yet)
-    try:
-        # For now, we don't have time control or time remaining in the data
-        # This will be enhanced when Lichess time data is integrated
+    # Check if games have clock data
+    if has_clock_data(games):
+        time_stats = aggregate_time_analysis(games)
+        
+        if time_stats.get('has_data'):
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Games Analyzed", time_stats['games_analyzed'])
+            with col2:
+                st.metric(
+                    "Time Trouble Rate", 
+                    f"{time_stats['time_trouble_rate']:.0f}%",
+                    help="% of games where you entered time trouble"
+                )
+            with col3:
+                st.metric(
+                    "Time Management Score",
+                    f"{time_stats['avg_time_management_score']}/100",
+                    help="Overall time management quality"
+                )
+            with col4:
+                tt_games = time_stats['time_trouble_games']
+                st.metric("Games in Time Trouble", tt_games)
+            
+            # Average time per phase
+            st.write("**⏰ Average Time per Move by Phase:**")
+            avg_phase = time_stats.get('avg_phase_times', {})
+            phase_cols = st.columns(3)
+            with phase_cols[0]:
+                st.metric("Opening", f"{avg_phase.get('opening', 0):.1f}s")
+            with phase_cols[1]:
+                st.metric("Middlegame", f"{avg_phase.get('middlegame', 0):.1f}s")
+            with phase_cols[2]:
+                st.metric("Endgame", f"{avg_phase.get('endgame', 0):.1f}s")
+            
+            # Patterns detected
+            patterns = time_stats.get('patterns', [])
+            if patterns:
+                st.write("**🔄 Time Management Patterns:**")
+                for pattern in patterns:
+                    severity = pattern.get('severity', 'medium')
+                    if severity == 'high':
+                        st.error(f"🔴 **{pattern['description']}** — {pattern['recommendation']}")
+                    elif severity == 'positive':
+                        st.success(f"✅ **{pattern['description']}** — {pattern['recommendation']}")
+                    else:
+                        st.warning(f"🟡 **{pattern['description']}** — {pattern['recommendation']}")
+                    st.caption(f"   Affected: {pattern['stat']}")
+            else:
+                st.info("No significant time management patterns detected.")
+            
+            # Detailed per-game breakdown (collapsible)
+            with st.expander("📊 Per-Game Time Analysis", expanded=False):
+                per_game = time_stats.get('per_game_analysis', [])
+                if per_game:
+                    game_rows = []
+                    for i, ga in enumerate(per_game):
+                        ts = ga.get('time_score', {})
+                        tt = ga.get('time_trouble', {})
+                        game_rows.append({
+                            "#": i + 1,
+                            "Date": ga.get('date', ''),
+                            "Result": ga.get('result', '').title(),
+                            "Time Control": ga.get('time_control', ''),
+                            "Time Score": f"{ts.get('score', 0)}/100",
+                            "Grade": ts.get('grade', 'N/A'),
+                            "Time Trouble Moves": tt.get('time_trouble_moves_count', 0),
+                        })
+                    st.dataframe(pd.DataFrame(game_rows), width="stretch", hide_index=True)
+        else:
+            st.info(f"ℹ️ {time_stats.get('message', 'No clock data available.')}")
+    else:
         st.info(
-            "⏰ **Time trouble analysis requires time remaining data from Lichess API.**\n\n"
-            "This feature will detect blunders made when you're low on time and help you "
-            "improve your time management. Coming soon!"
+            "⏰ **Time management analysis requires clock data from Lichess.**\n\n"
+            "This feature analyzes your time usage patterns, identifies time trouble, "
+            "and provides insights on time management improvement. Clock data is now "
+            "automatically fetched when analyzing new games."
         )
-        
-        # Placeholder for future integration
-        # time_trouble_stats = detect_time_trouble(all_move_evals, time_control)
-        # render_time_trouble_analysis(time_trouble_stats)
-        
-    except Exception as e:
-        st.caption(f"Time trouble analysis unavailable: {e}")
         
         # Blunder rate comparison
         if peer.blunder_rate_percentile > 0 or peer.blunder_rate_vs_peers_pct != 0:

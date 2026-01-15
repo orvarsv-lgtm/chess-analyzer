@@ -965,7 +965,47 @@ def _merge_aggregated_data_into_stats(
     streak_stats = _compute_streak_stats(games)
     stats['streaks'] = streak_stats
     
+    # === From Time Analysis ===
+    # Compute time management stats if clock data available
+    time_stats = _compute_time_management_stats(games)
+    stats['time_management'] = time_stats
+    
     return stats
+
+
+def _compute_time_management_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute time management stats from games with clock data."""
+    try:
+        from src.time_analysis import has_clock_data, aggregate_time_analysis
+        
+        if not has_clock_data(games):
+            return {'has_data': False, 'message': 'No clock data available'}
+        
+        time_analysis = aggregate_time_analysis(games)
+        
+        # Extract key patterns for AI coach
+        patterns = time_analysis.get('patterns', [])
+        pattern_summary = []
+        for p in patterns:
+            pattern_summary.append({
+                'type': p.get('type', ''),
+                'severity': p.get('severity', 'medium'),
+                'description': p.get('description', ''),
+                'recommendation': p.get('recommendation', ''),
+                'stat': p.get('stat', ''),
+            })
+        
+        return {
+            'has_data': True,
+            'games_analyzed': time_analysis.get('games_analyzed', 0),
+            'time_trouble_rate': time_analysis.get('time_trouble_rate', 0),
+            'time_trouble_games': time_analysis.get('time_trouble_games', 0),
+            'avg_time_score': time_analysis.get('avg_time_management_score', 0),
+            'avg_phase_times': time_analysis.get('avg_phase_times', {}),
+            'patterns': pattern_summary,
+        }
+    except Exception as e:
+        return {'has_data': False, 'message': f'Error computing time stats: {str(e)}'}
 
 
 def _compute_opening_repertoire_stats(games: List[Dict[str, Any]]) -> Dict[str, Any]:
