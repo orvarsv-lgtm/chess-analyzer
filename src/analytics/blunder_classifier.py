@@ -920,6 +920,8 @@ def analyze_blunders(games_data: list[dict[str, Any]]) -> BlunderClassification:
 
             # Collect examples
             if len(examples) < 10:
+                # Determine color from move index (even = white, odd = black)
+                color = "white" if move_idx % 2 == 0 else "black"
                 examples.append(BlunderExample(
                     game_index=game_idx + 1,
                     move_number=move_number,
@@ -928,6 +930,7 @@ def analyze_blunders(games_data: list[dict[str, Any]]) -> BlunderClassification:
                     cp_loss=cp_loss,
                     phase=phase,
                     fen_before=fen_before,
+                    color=color,
                 ))
 
     # Compute aggregates

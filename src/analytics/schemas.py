@@ -47,6 +47,7 @@ class BlunderExample:
     cp_loss: int
     phase: str
     fen_before: str | None = None
+    color: str | None = None  # "white" or "black"
 
 
 @dataclass

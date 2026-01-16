@@ -1326,11 +1326,29 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
     # Blunder examples
     if blunder.examples:
         with st.expander(f"📋 Blunder Examples ({len(blunder.examples)} shown)", expanded=False):
-            for ex in blunder.examples[:5]:
-                st.write(
-                    f"**Game {ex.game_index}, Move {ex.move_number}:** `{ex.san}` "
-                    f"({ex.blunder_type.replace('_', ' ')}) - {ex.cp_loss}cp loss [{ex.phase}]"
-                )
+            for idx, ex in enumerate(blunder.examples[:5]):
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    # Add color indicator emoji
+                    color_indicator = "⬜" if ex.color == "white" else "⬛"
+                    st.write(
+                        f"{color_indicator} **Game {ex.game_index}, Move {ex.move_number}:** `{ex.san}` "
+                        f"({ex.blunder_type.replace('_', ' ')}) - {ex.cp_loss}cp loss [{ex.phase}]"
+                    )
+                with col2:
+                    if st.button("🎮 Show", key=f"show_blunder_{idx}", help="Jump to this move in game replayer"):
+                        # Set session state to jump to this game and move
+                        st.session_state['main_view'] = '🎮 Game Replayer'
+                        st.session_state['replayer_game_select'] = ex.game_index - 1  # game_index is 1-based
+                        # Calculate ply from move number and color
+                        # Ply = half-moves from starting position (0 = start, 1 = white's first move, 2 = black's first move, etc.)
+                        # For white moves: ply = (move_number - 1) * 2 + 1
+                        # For black moves: ply = move_number * 2
+                        if ex.color == "white":
+                            st.session_state['replay_ply'] = (ex.move_number - 1) * 2 + 1
+                        else:
+                            st.session_state['replay_ply'] = ex.move_number * 2
+                        st.rerun()
     
     # --- Endgame Breakdown ---
     endgame = coaching_report.endgame_breakdown
