@@ -113,7 +113,7 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         # Move navigation with slider
         st.write("")  # Spacing
         
-        move_num = (current_ply + 1) // 2 + 1
+        move_num = (current_ply + 1) // 2
         turn = "White" if current_ply % 2 == 0 else "Black"
         
         # Navigation buttons
@@ -344,7 +344,8 @@ def render_game_replayer_simple(moves_pgn: str, move_evals: List[Dict[str, Any]]
                 st.session_state.replay_ply = max(0, st.session_state.replay_ply - 1)
                 st.rerun()
         with nav_cols[1]:
-            st.write(f"Move {st.session_state.replay_ply + 1}/{max_ply}")
+            move_num = (st.session_state.replay_ply + 1) // 2
+            st.write(f"Move {move_num}/{(max_ply + 1) // 2}")
         with nav_cols[2]:
             if st.button("Next ▶️"):
                 st.session_state.replay_ply = min(max_ply, st.session_state.replay_ply + 1)
