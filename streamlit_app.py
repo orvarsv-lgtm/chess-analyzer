@@ -2539,6 +2539,7 @@ def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
     
     # Analyze openings from the games we have
     st.subheader("📖 Opening Repertoire")
+    st.caption("**Avg Pos** shows your average evaluation after the opening phase (moves 13-17). Positive = better position for you.")
     
     # Color filter
     color_filter = st.radio("Color", ["Both", "White", "Black"], horizontal=True)
@@ -2571,6 +2572,7 @@ def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
                 'wins': 0,
                 'draws': 0,
                 'losses': 0,
+                'opening_exit_evals': [],  # Track eval at end of opening
             }
         
         opening_stats[opening]['games'] += 1
@@ -2580,6 +2582,26 @@ def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
             opening_stats[opening]['draws'] += 1
         else:
             opening_stats[opening]['losses'] += 1
+        
+        # Extract evaluation at the end of opening phase (moves 13-17)
+        moves_table = game.get('moves_table', [])
+        if moves_table:
+            for move in moves_table:
+                move_num = move.get('move_num') or ((move.get('ply', 0) + 1) // 2)
+                phase = move.get('phase', '')
+                eval_after = move.get('eval_after') or move.get('score_cp')
+                
+                # Find the last opening move or first middlegame move
+                if 13 <= move_num <= 17 and eval_after is not None:
+                    try:
+                        eval_val = int(eval_after)
+                        # Normalize to player's perspective (positive = good for player)
+                        if focus_color == 'black':
+                            eval_val = -eval_val
+                        opening_stats[opening]['opening_exit_evals'].append(eval_val)
+                        break  # Take the first eval in this range
+                    except (ValueError, TypeError):
+                        pass
     
     if not opening_stats:
         st.info("No opening data yet. Play some games and analyze them to build your repertoire!")
@@ -2590,12 +2612,25 @@ def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
     for opening, stats in opening_stats.items():
         total = stats['games']
         win_rate = (stats['wins'] / total * 100) if total > 0 else 0
-        opening_rows.append({
+        
+        # Calculate average position after opening
+        exit_evals = stats.get('opening_exit_evals', [])
+        avg_exit_eval = sum(exit_evals) / len(exit_evals) if exit_evals else None
+        
+        row = {
             'Opening': f"{opening} ({stats['eco']})" if stats['eco'] else opening,
             'Games': total,
             'Win Rate': f"{win_rate:.1f}%",
             'W-D-L': f"{stats['wins']}-{stats['draws']}-{stats['losses']}",
-        })
+        }
+        
+        # Add position quality column if we have data
+        if avg_exit_eval is not None:
+            row['Avg Pos'] = f"{avg_exit_eval:+.0f}cp"
+        else:
+            row['Avg Pos'] = "N/A"
+        
+        opening_rows.append(row)
     
     # Sort by games played
     opening_rows = sorted(opening_rows, key=lambda x: x['Games'], reverse=True)

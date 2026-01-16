@@ -495,7 +495,16 @@ def identify_time_patterns(per_game_analysis: List[Dict[str, Any]]) -> List[Dict
         })
     
     # Pattern 4: Fast middlegame moves
-    fast_mg_games = [g for g in per_game_analysis if g['fast_moves']['fast_moves_by_phase'].get('middlegame', 0) >= 5]
+    # Only flag if they're making MORE fast moves in middlegame than opening
+    # (which would indicate true impulsiveness in complex positions)
+    fast_mg_games = []
+    for g in per_game_analysis:
+        mg_fast = g['fast_moves']['fast_moves_by_phase'].get('middlegame', 0)
+        opening_fast = g['fast_moves']['fast_moves_by_phase'].get('opening', 0)
+        # Flag if 5+ fast moves in middlegame AND more than in opening
+        if mg_fast >= 5 and mg_fast > opening_fast:
+            fast_mg_games.append(g)
+    
     if len(fast_mg_games) >= 2:
         patterns.append({
             'type': 'impulsive_middlegame',
