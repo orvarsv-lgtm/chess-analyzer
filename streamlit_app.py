@@ -1584,11 +1584,14 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
         else:
             st.info(f"ℹ️ {time_stats.get('message', 'No clock data available.')}")
     else:
-        st.info(
-            "⏰ **Time management analysis requires clock data from Lichess.**\n\n"
-            "This feature analyzes your time usage patterns, identifies time trouble, "
-            "and provides insights on time management improvement. Clock data is now "
-            "automatically fetched when analyzing new games."
+        st.error(
+            "⏰ **No time data available - Time management analysis disabled**\n\n"
+            "This feature analyzes your time usage patterns to identify time trouble and improve time management.\n\n"
+            "**If you downloaded games from Chess.com:**\n"
+            "Make sure the **\"Timestamps per move\"** option is enabled when exporting games. "
+            "Without this option, move timestamps are not included in the PGN file.\n\n"
+            "**For Lichess games:**\n"
+            "Clock data is automatically included in the PGN export."
         )
         
         # Blunder rate comparison
