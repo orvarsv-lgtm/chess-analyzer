@@ -1338,7 +1338,7 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
                 with col2:
                     if st.button("🎮 Show", key=f"show_blunder_{idx}", help="Jump to this move in game replayer"):
                         # Set session state to jump to this game and move
-                        st.session_state['main_view'] = '🎮 Game Replayer'
+                        st.session_state['main_view'] = f"🎮 {t('tab_replayer')}"
                         st.session_state['replayer_game_select'] = ex.game_index - 1  # game_index is 1-based
                         # Calculate ply from move number and color
                         # Ply = half-moves from starting position (0 = start, 1 = white's first move, 2 = black's first move, etc.)
