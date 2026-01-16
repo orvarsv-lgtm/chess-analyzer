@@ -147,12 +147,25 @@ def _derive_critical_issues(
     blunder_analysis: BlunderClassification,
     endgame_breakdown: EndgameMaterialBreakdown,
     recurring_patterns: RecurringPatternReport,
+    total_moves: int = 0,
 ) -> list[str]:
     """Derive critical issues from analytics."""
     issues: list[str] = []
 
-    # High blunder rate
-    if blunder_analysis.blunder_rate_per_100_moves >= 3.0:
+    # High blunder rate - adaptive threshold based on total moves
+    # 0-500: 10, 500-1000: 6, 1000-1500: 4, 1500-2000: 3, 2000+: 2
+    if total_moves <= 500:
+        blunder_threshold = 10.0
+    elif total_moves <= 1000:
+        blunder_threshold = 6.0
+    elif total_moves <= 1500:
+        blunder_threshold = 4.0
+    elif total_moves <= 2000:
+        blunder_threshold = 3.0
+    else:
+        blunder_threshold = 2.0
+    
+    if blunder_analysis.blunder_rate_per_100_moves >= blunder_threshold:
         issues.append(f"High blunder rate: {_ceil_int(blunder_analysis.blunder_rate_per_100_moves)} per 100 moves")
 
     # Dominant blunder type
@@ -306,11 +319,15 @@ def generate_coaching_report(
     # 5. Compute peer benchmark
     summary.peer_comparison = benchmark_from_games_data(games_data, player_rating)
 
+    # Calculate total moves for adaptive thresholds
+    total_moves = sum(len(game.get("move_evals", []) or []) for game in games_data)
+
     # 5. Derive prioritized insights
     summary.critical_issues = _derive_critical_issues(
         summary.blunder_analysis,
         summary.endgame_breakdown,
         summary.recurring_patterns,
+        total_moves=total_moves,
     )
 
     summary.secondary_patterns = _derive_secondary_patterns(
