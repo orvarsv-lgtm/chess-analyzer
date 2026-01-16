@@ -66,6 +66,8 @@ def detect_recurring_patterns(games_data: list[dict[str, Any]]) -> RecurringPatt
     phase_errors_games: dict[str, set[int]] = {}
     post_theory_blunders = 0
     post_theory_games: set[int] = set()
+    post_theory_later_blunders = 0  # Blunders after the transition window
+    post_theory_later_moves = 0  # Total moves after transition window
     time_pressure_errors = 0
     time_pressure_games: set[int] = set()
 
@@ -87,9 +89,21 @@ def detect_recurring_patterns(games_data: list[dict[str, Any]]) -> RecurringPatt
 
     for game_idx, game in enumerate(games_data):
         move_evals = game.get("move_evals", []) or []
-        game_info = game.get("game_info", {}) or {}
-
-        # Track if we've left theory in this game
+        game_infwhen we leave opening theory (first move >70 CPL or blunder)
+        theory_exit_move = None
+        
+        for m in move_evals:
+            cp_loss = int(m.get("cp_loss") or 0)
+            move_num = int(m.get("move_num") or m.get("move_number") or 1)
+            
+            # Detect exit from opening theory (first significant inaccuracy)
+            if theory_exit_move is None and cp_loss > 70:
+                theory_exit_move = move_num
+                break
+        
+        # If no exit detected, assume theory ends at move 15
+        if theory_exit_move is None:
+            theory_exit_move = 15 left theory in this game
         in_theory = True
         theory_depth = 0
 
@@ -106,10 +120,16 @@ def detect_recurring_patterns(games_data: list[dict[str, Any]]) -> RecurringPatt
             is_mistake = cp_loss >= MISTAKE_CP_THRESHOLD
 
             if not is_mistake:
-                continue
-
-            # Count by blunder subtype
-            if blunder_subtype and is_blunder:
+                continuewithin 10 moves of leaving theory)
+            if theory_exit_move <= move_num <= theory_exit_move + 10 and is_blunder:
+                post_theory_blunders += 1
+                post_theory_games.add(game_idx)
+            
+            # Count blunders and moves after the transition window (for comparison)
+            if move_num > theory_exit_move + 10:
+                post_theory_later_moves += 1
+                if is_blunder:
+                    post_theory_later_blunders += 1
                 blunder_types[blunder_subtype] += 1
                 blunder_types_games.setdefault(blunder_subtype, set()).add(game_idx)
 
@@ -159,16 +179,30 @@ def detect_recurring_patterns(games_data: list[dict[str, Any]]) -> RecurringPatt
                 description=f"Recurring {btype.replace('_', ' ')} blunders",
                 occurrences=count,
                 games_affected=games,
-                phase_concentration="all",
-                severity=_severity(count, games),
-            ))
-
-    # 2. Phase clustering
-    for phase, count in phase_errors.most_common():
-        games = len(phase_errors_games.get(phase, set()))
-        total_blunders = sum(phase_errors.values())
-        if total_blunders > 0 and count / total_blunders >= 0.5 and count >= MIN_OCCURRENCES_CRITICAL:
+                phase_concent (only if there's a spike in the transition window)
+    if post_theory_blunders >= MIN_OCCURRENCES_MODERATE:
+        # Calculate blunder rates
+        transition_window_moves = len([
+            m for game in games_data 
+            for m in (game.get("move_evals", []) or [])
+            if (m.get("move_num") or m.get("move_number") or 0) > 10  # Simplified, uses fixed move 10
+        ])
+        
+        # Only flag if transition window has higher blunder density
+        # or if we have significant blunders in the window
+        transition_rate = post_theory_blunders / max(transition_window_moves, 1) if transition_window_moves > 0 else 0
+        later_rate = post_theory_later_blunders / max(post_theory_later_moves, 1) if post_theory_later_moves > 0 else 0
+        
+        # Flag if transition rate is at least 1.5x higher than later rate, or if we have 10+ blunders
+        if transition_rate > later_rate * 1.5 or post_theory_blunders >= 10:
             patterns.append(RecurringPattern(
+                pattern_type="post_theory_errors",
+                description="Blunders spike after leaving opening theory (within 10 moves)",
+                occurrences=post_theory_blunders,
+                games_affected=len(post_theory_games),
+                phase_concentration="middlegame",
+                severity=_severity(post_theory_blunders, len(post_theory_games)),
+                patterns.append(RecurringPattern(
                 pattern_type=f"{phase}_weakness",
                 description=f"Errors concentrate in {phase} phase ({_ceil_int(count/total_blunders*100)}%)",
                 occurrences=count,
