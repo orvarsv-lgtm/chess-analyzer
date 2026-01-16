@@ -146,7 +146,7 @@ def analyze_opening_deviations(games_data: list[dict[str, Any]]) -> OpeningDevia
     all_deviation_moves: list[int] = []
     all_deviation_losses: list[int] = []
 
-    for game in games_data:
+    for game_idx, game in enumerate(games_data):
         move_evals = game.get("move_evals", []) or []
         game_info = game.get("game_info", {}) or {}
         player_color = (game_info.get("color") or "").lower()
@@ -213,11 +213,23 @@ def analyze_opening_deviations(games_data: list[dict[str, Any]]) -> OpeningDevia
                     "draws": 0,
                     "losses": 0,
                     "common_deviations": {},
+                    "examples": [],
                 }
 
             opening_stats[key]["games"] += 1
             opening_stats[key]["deviation_moves"].append(deviation_move_num)
             opening_stats[key]["eval_losses"].append(eval_loss)
+            
+            # Store example (limit to first 3 per opening)
+            if len(opening_stats[key]["examples"]) < 3:
+                from .schemas import DeviationExample
+                opening_stats[key]["examples"].append(DeviationExample(
+                    game_index=game_idx + 1,  # 1-based indexing to match BlunderExample
+                    deviation_ply=deviation_ply,
+                    deviation_move=deviation_san,
+                    eval_loss_cp=eval_loss,
+                    color=player_color if player_color in ("white", "black") else "white",
+                ))
 
             # Track common deviation moves
             if deviation_san:
@@ -272,6 +284,7 @@ def analyze_opening_deviations(games_data: list[dict[str, Any]]) -> OpeningDevia
             win_rate_pct=win_rate,
             draw_rate_pct=draw_rate,
             loss_rate_pct=loss_rate,
+            examples=stats.get("examples", [])[:3],
         ))
 
     # Sort by games descending

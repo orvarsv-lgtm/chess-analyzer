@@ -1400,6 +1400,25 @@ def _render_coaching_insights(coaching_report: CoachingSummary) -> None:
                         f"({dev_dict.get('common_deviation_move', '?')}) - "
                         f"Avg loss: {dev_dict.get('avg_eval_loss_cp', 0)}cp"
                     )
+                    
+                    # Show examples with navigation buttons
+                    examples = dev_dict.get('examples', [])
+                    if examples:
+                        cols = st.columns(len(examples))
+                        for idx, example in enumerate(examples):
+                            with cols[idx]:
+                                color_indicator = "⬜" if example.get('color') == 'white' else "⬛"
+                                if st.button(
+                                    f"{color_indicator} Show",
+                                    key=f"dev_{dev_dict.get('opening')}_{idx}",
+                                    help=f"Move {example.get('deviation_move')} ({example.get('eval_loss_cp')}cp loss)"
+                                ):
+                                    game_idx = example.get('game_index', 1) - 1  # Convert from 1-based to 0-based
+                                    deviation_ply = example.get('deviation_ply', 1)
+                                    st.session_state['main_view'] = f"🎮 {t('tab_replayer')}"
+                                    st.session_state['replayer_game_select'] = game_idx
+                                    st.session_state['replay_ply'] = deviation_ply
+                                    st.rerun()
     
     # --- Recurring Patterns ---
     patterns = coaching_report.recurring_patterns

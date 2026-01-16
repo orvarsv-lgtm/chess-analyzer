@@ -118,6 +118,16 @@ class EndgameMaterialBreakdown:
 
 
 @dataclass
+class DeviationExample:
+    """Example of an opening deviation."""
+    game_index: int
+    deviation_ply: int
+    deviation_move: str
+    eval_loss_cp: int
+    color: str  # "white" or "black"
+
+
+@dataclass
 class OpeningDeviation:
     """Single opening deviation record."""
     opening: str
@@ -129,9 +139,12 @@ class OpeningDeviation:
     win_rate_pct: int
     draw_rate_pct: int
     loss_rate_pct: int
+    examples: list[DeviationExample] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["examples"] = [asdict(ex) for ex in self.examples[:3]]  # Limit to 3 examples
+        return d
 
 
 @dataclass
