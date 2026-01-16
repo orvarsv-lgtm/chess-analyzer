@@ -159,14 +159,15 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
                 phase = current_eval.get('phase', 'middlegame')
                 st.metric("Phase", phase.title())
             
+            # Show best move suggestion
+            best_move = current_eval.get('best_move_san')
+            if best_move:
+                st.info(f"💡 **Best Move:** `{best_move}`")
+            
             # Show engine suggestion for blunders/mistakes
             if current_eval.get('blunder_type') in ['blunder', 'mistake']:
                 blunder_subtype = current_eval.get('blunder_subtype', 'Unknown')
                 st.error(f"⚠️ {current_eval['blunder_type'].title()}: {blunder_subtype.replace('_', ' ').title()}")
-                
-                # TODO: Show best move alternative
-                # This would require re-running Stockfish on this position
-                # For now, just show the classification
     
     with col2:
         # Move list with clickable moves

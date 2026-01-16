@@ -464,6 +464,16 @@ def _analyze_game_detailed_local(moves_pgn_str: str, *, depth: int | None = None
                 # eval before the move
                 info_before = engine.analyse(board, chess.engine.Limit(depth=depth_val))
                 eval_before, is_mate_before = _score_to_cp(info_before)
+                
+                # Extract best move from engine analysis
+                best_move_uci = None
+                best_move_san = None
+                try:
+                    if 'pv' in info_before and info_before['pv']:
+                        best_move_uci = info_before['pv'][0].uci()
+                        best_move_san = board.san(info_before['pv'][0])
+                except Exception:
+                    pass
 
                 # Keep board snapshot for heuristics (no extra engine calls)
                 board_before = board.copy()
@@ -593,6 +603,8 @@ def _analyze_game_detailed_local(moves_pgn_str: str, *, depth: int | None = None
                     "is_mate_after": is_mate_after,
                     "missed_mate": missed_mate,
                     "forced_loss": forced_loss,
+                    "best_move_san": best_move_san,
+                    "best_move_uci": best_move_uci,
                 }
 
                 move_evals.append(move_data)
