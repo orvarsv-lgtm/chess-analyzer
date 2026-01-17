@@ -2414,8 +2414,8 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     
     st.divider()
     
-    # Filtering options in a collapsible expander to reduce page jumps
-    with st.expander("🎯 Filter Puzzles", expanded=False):
+    # Filtering options in sidebar expander to avoid main view jumps
+    with st.sidebar.expander("🎯 Filter Puzzles", expanded=False):
         filter_col1, filter_col2, filter_col3 = st.columns(3)
         
         with filter_col1:
