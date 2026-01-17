@@ -689,6 +689,41 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         st.info("No puzzles to show.")
         return
 
+    # Inject CSS to prevent scroll jumping on first interaction
+    # This keeps the viewport stable when Streamlit reruns
+    st.markdown(
+        """
+        <style>
+        /* Prevent auto-scroll to changed elements */
+        [data-testid="stVerticalBlock"] {
+            scroll-margin-top: 0 !important;
+        }
+        /* Keep main container scroll stable */
+        .main .block-container {
+            scroll-behavior: auto !important;
+        }
+        </style>
+        <script>
+        // Save scroll position before Streamlit reruns
+        (function() {
+            const key = 'puzzle_scroll_y';
+            const saved = sessionStorage.getItem(key);
+            if (saved) {
+                // Restore scroll position after a short delay to let DOM settle
+                setTimeout(function() {
+                    window.scrollTo(0, parseInt(saved, 10));
+                }, 50);
+            }
+            // Save scroll position on any scroll
+            window.addEventListener('scroll', function() {
+                sessionStorage.setItem(key, window.scrollY);
+            }, {passive: true});
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
     progress = _get_progress()
 
     # Clamp index
