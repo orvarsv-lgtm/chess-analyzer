@@ -2542,8 +2542,10 @@ def _filter_puzzles(
             filter_key, filter_value = pattern_map[puzzle_type]
             filtered = []
             for p in result:
-                if p.tactical_patterns:
-                    patterns = p.tactical_patterns
+                # Safely access tactical_patterns - use getattr to handle old puzzles
+                tactical_patterns = getattr(p, "tactical_patterns", None)
+                if tactical_patterns:
+                    patterns = tactical_patterns
                     if filter_key == "composite_pattern":
                         if patterns.get("composite_pattern") == filter_value:
                             filtered.append(p)
@@ -2563,8 +2565,10 @@ def _filter_puzzles(
                            "smothered_mate", "removing_the_guard", "discovered_check"}
             filtered = []
             for p in result:
-                if p.tactical_patterns:
-                    composite = p.tactical_patterns.get("composite_pattern")
+                # Safely access tactical_patterns - use getattr to handle old puzzles
+                tactical_patterns = getattr(p, "tactical_patterns", None)
+                if tactical_patterns:
+                    composite = tactical_patterns.get("composite_pattern")
                     if composite is None or composite not in known_patterns:
                         filtered.append(p)
                 else:
