@@ -2369,16 +2369,40 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         hard = by_diff.get("hard", 0)
         st.metric("🔴 Hard", hard)
     
-    # Puzzle type breakdown
-    st.write("**Puzzle Types:**")
-    by_type = stats.get("by_type", {})
-    type_cols = st.columns(3)
-    with type_cols[0]:
-        st.write(f"⚔️ Missed Tactics: **{by_type.get('missed_tactic', 0)}**")
-    with type_cols[1]:
-        st.write(f"♟️ Endgame Technique: **{by_type.get('endgame_technique', 0)}**")
-    with type_cols[2]:
-        st.write(f"📖 Opening Errors: **{by_type.get('opening_error', 0)}**")
+    # Pattern breakdown - count patterns from tactical_patterns field
+    pattern_counts = {}
+    for p in puzzles:
+        if p.tactical_patterns:
+            composite = p.tactical_patterns.get("composite_pattern")
+            outcome = p.tactical_patterns.get("primary_outcome")
+            
+            if composite:
+                pattern_counts[composite] = pattern_counts.get(composite, 0) + 1
+            elif outcome:
+                pattern_counts[outcome] = pattern_counts.get(outcome, 0) + 1
+            else:
+                pattern_counts["other"] = pattern_counts.get("other", 0) + 1
+        else:
+            pattern_counts["other"] = pattern_counts.get("other", 0) + 1
+    
+    st.write("**Tactical Patterns:**")
+    # Show top patterns in columns
+    top_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)[:6]
+    if top_patterns:
+        pattern_cols = st.columns(min(len(top_patterns), 3))
+        pattern_icons = {
+            "fork": "⚔️", "pin": "📌", "skewer": "🗡️", 
+            "back_rank_mate": "🏁", "smothered_mate": "😤",
+            "double_check": "✓✓", "discovered_check": "👁️",
+            "checkmate": "♔", "material_win": "💰",
+            "removing_the_guard": "🛡️", "other": "🎯"
+        }
+        for i, (pattern, count) in enumerate(top_patterns):
+            col_idx = i % 3
+            icon = pattern_icons.get(pattern, "🎯")
+            display_name = pattern.replace("_", " ").title()
+            with pattern_cols[col_idx]:
+                st.write(f"{icon} {display_name}: **{count}**")
     
     st.divider()
     
@@ -2395,9 +2419,26 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         )
     
     with filter_col2:
+        # Updated pattern-based filter options
+        pattern_options = [
+            "All",
+            "Fork",
+            "Pin",
+            "Skewer",
+            "Discovered Attack",
+            "Double Check",
+            "Back Rank Mate",
+            "Smothered Mate",
+            "Removing the Guard",
+            "Trapped Piece",
+            "Overloaded Piece",
+            "Material Win",
+            "Checkmate",
+            "Other Tactics",
+        ]
         type_filter = st.selectbox(
-            "Type",
-            options=["All", "Missed Tactic", "Endgame Technique", "Opening Error"],
+            "Pattern",
+            options=pattern_options,
             key="puzzle_type_filter",
         )
     
@@ -2463,7 +2504,7 @@ def _filter_puzzles(
     puzzle_type: str,
     phase: str,
 ) -> List[Puzzle]:
-    """Apply filters to puzzle list."""
+    """Apply filters to puzzle list including pattern-based filtering."""
     result = puzzles
     
     # Difficulty filter
@@ -2477,16 +2518,57 @@ def _filter_puzzles(
         if target_diff:
             result = [p for p in result if p.difficulty == target_diff]
     
-    # Type filter
+    # Pattern/Type filter - updated to use tactical_patterns
     if puzzle_type != "All":
-        type_map = {
-            "Missed Tactic": PuzzleType.MISSED_TACTIC,
-            "Endgame Technique": PuzzleType.ENDGAME_TECHNIQUE,
-            "Opening Error": PuzzleType.OPENING_ERROR,
+        # Map display names to pattern values
+        pattern_map = {
+            "Fork": ("composite_pattern", "fork"),
+            "Pin": ("composite_pattern", "pin"),
+            "Skewer": ("composite_pattern", "skewer"),
+            "Discovered Attack": ("primary_constraints", "discovered_attack"),
+            "Double Check": ("composite_pattern", "double_check"),
+            "Back Rank Mate": ("composite_pattern", "back_rank_mate"),
+            "Smothered Mate": ("composite_pattern", "smothered_mate"),
+            "Removing the Guard": ("composite_pattern", "removing_the_guard"),
+            "Trapped Piece": ("primary_constraints", "piece_trapped"),
+            "Overloaded Piece": ("primary_constraints", "defender_overloaded"),
+            "Material Win": ("primary_outcome", "material_win"),
+            "Checkmate": ("primary_outcome", "checkmate"),
         }
-        target_type = type_map.get(puzzle_type)
-        if target_type:
-            result = [p for p in result if p.puzzle_type == target_type]
+        
+        if puzzle_type in pattern_map:
+            filter_key, filter_value = pattern_map[puzzle_type]
+            filtered = []
+            for p in result:
+                if p.tactical_patterns:
+                    patterns = p.tactical_patterns
+                    if filter_key == "composite_pattern":
+                        if patterns.get("composite_pattern") == filter_value:
+                            filtered.append(p)
+                    elif filter_key == "primary_outcome":
+                        if patterns.get("primary_outcome") == filter_value:
+                            filtered.append(p)
+                    elif filter_key == "primary_constraints":
+                        constraints = patterns.get("primary_constraints", [])
+                        for c in constraints:
+                            if c.get("constraint") == filter_value:
+                                filtered.append(p)
+                                break
+            result = filtered
+        elif puzzle_type == "Other Tactics":
+            # Puzzles that don't match any specific pattern
+            known_patterns = {"fork", "pin", "skewer", "double_check", "back_rank_mate", 
+                           "smothered_mate", "removing_the_guard", "discovered_check"}
+            filtered = []
+            for p in result:
+                if p.tactical_patterns:
+                    composite = p.tactical_patterns.get("composite_pattern")
+                    if composite is None or composite not in known_patterns:
+                        filtered.append(p)
+                else:
+                    # No pattern data - include in "Other"
+                    filtered.append(p)
+            result = filtered
     
     # Phase filter
     if phase != "All":
