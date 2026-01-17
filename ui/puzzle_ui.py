@@ -912,10 +912,9 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                 except Exception:
                     animate_move = None
         
-        # KEY CHANGES:
-        # 1. Reset 'opponent_just_moved' ONLY after the user interacts (makes their next move),
-        #    so the animation prop persists through the redraw.
-        # 2. Add 'key' nonce to force full remount if needed, but we try to keep it stable first.
+        # Use a stable key to avoid remounting the component (which causes blinking).
+        # The chessboard component handles FEN changes internally and re-renders smoothly.
+        # Only change the key when switching to a different puzzle.
         
         if debug_board:
             st.write("DEBUG: rendering board", puzzle_id, "animate_move=", animate_move)
@@ -927,7 +926,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             highlights=highlights,
             hint=hint,
             animate_move=animate_move,
-            key=f"puzzle_board_{st.session_state.puzzle_index}_{progress.board_nonce}",
+            key=f"puzzle_board_{st.session_state.puzzle_index}",
         )
         if debug_board:
             st.write("DEBUG: board rendered")
@@ -1024,7 +1023,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                         progress.opponent_last_uci = opponent_uci  # Store for highlighting
                         progress.last_result = None  # Not complete yet
                         progress.opponent_just_moved = True
-                        progress.board_nonce += 1  # Force chessboard remount
+                        # NOTE: We no longer increment board_nonce - the component handles FEN changes smoothly
                     else:
                         # No valid opponent response, puzzle complete
                         progress.current_fen = board.fen()
