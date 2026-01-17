@@ -2473,6 +2473,9 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         phase_filter,
     )
     
+    # Debug: show filter results
+    st.caption(f"🔍 Filter: {difficulty_filter} | {type_filter} | {phase_filter} → {len(filtered_puzzles)} of {len(puzzles)}")
+    
     # Sort filtered puzzles by rating quality (filters first, THEN rating)
     if filtered_puzzles and source_mode == "Other users":
         try:
@@ -2609,9 +2612,7 @@ def _filter_puzzles(
                             if c.get("constraint") == filter_value:
                                 filtered.append(p)
                                 break
-                # If no tactical_patterns, still include puzzle in results
-                # (puzzles without patterns are shown with "Other Tactics" until regenerated)
-            result = filtered if filtered else result  # If no matches with patterns, show all puzzles
+            result = filtered  # Always apply filter - don't fall back to all puzzles
         elif puzzle_type == "Other Tactics":
             # Puzzles that don't match any specific pattern
             known_patterns = {"fork", "pin", "skewer", "double_check", "back_rank_mate", 
