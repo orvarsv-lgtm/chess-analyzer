@@ -2372,9 +2372,11 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     # Pattern breakdown - count patterns from tactical_patterns field
     pattern_counts = {}
     for p in puzzles:
-        if p.tactical_patterns:
-            composite = p.tactical_patterns.get("composite_pattern")
-            outcome = p.tactical_patterns.get("primary_outcome")
+        # Safely check for tactical_patterns attribute
+        tactical_patterns = getattr(p, "tactical_patterns", None)
+        if tactical_patterns:
+            composite = tactical_patterns.get("composite_pattern") if isinstance(tactical_patterns, dict) else None
+            outcome = tactical_patterns.get("primary_outcome") if isinstance(tactical_patterns, dict) else None
             
             if composite:
                 pattern_counts[composite] = pattern_counts.get(composite, 0) + 1
