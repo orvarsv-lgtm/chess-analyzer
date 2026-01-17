@@ -2011,6 +2011,67 @@ def _render_analysis_input_form() -> None:
 
 
 def main() -> None:
+    # Apply global Libre Baskerville font styling
+    st.markdown("""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
+        
+        /* Global font application */
+        html, body, [class*="css"], .stApp, p, div, span, li, td, th, label, input, textarea, select {
+            font-family: 'Libre Baskerville', serif !important;
+        }
+        
+        /* Headers - make them bolder */
+        h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+            font-family: 'Libre Baskerville', serif !important;
+            font-weight: 700 !important;
+        }
+        
+        /* Streamlit title */
+        .stTitle, [data-testid="stHeader"] {
+            font-family: 'Libre Baskerville', serif !important;
+            font-weight: 700 !important;
+        }
+        
+        /* AI Coach output and markdown content */
+        .stMarkdown, .stMarkdown p, .stMarkdown div, .stMarkdown span {
+            font-family: 'Libre Baskerville', serif !important;
+        }
+        
+        /* Buttons */
+        button, .stButton button, [data-testid="baseButton-secondary"] {
+            font-family: 'Libre Baskerville', serif !important;
+            font-weight: 700 !important;
+        }
+        
+        /* Metrics and stats */
+        [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {
+            font-family: 'Libre Baskerville', serif !important;
+        }
+        
+        /* Sidebar */
+        [data-testid="stSidebar"], [data-testid="stSidebar"] * {
+            font-family: 'Libre Baskerville', serif !important;
+        }
+        
+        /* Tabs */
+        [data-baseweb="tab"], [data-baseweb="tab-list"] {
+            font-family: 'Libre Baskerville', serif !important;
+            font-weight: 700 !important;
+        }
+        
+        /* Text areas and inputs */
+        textarea, input, .stTextInput input, .stTextArea textarea {
+            font-family: 'Libre Baskerville', serif !important;
+        }
+        
+        /* Captions and smaller text */
+        .stCaption, small, .css-1dp5vir {
+            font-family: 'Libre Baskerville', serif !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.title(t("app_title"))
 
     # Render language selector and authentication sidebar

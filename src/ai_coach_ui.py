@@ -328,6 +328,20 @@ def render_ai_coach_tab(aggregated: Dict[str, Any]) -> None:
     Args:
         aggregated: Analyzed games data
     """
+    # Ensure AI Coach output uses Libre Baskerville
+    st.markdown("""
+    <style>
+        /* AI Coach specific styling */
+        .ai-coach-output {
+            font-family: 'Libre Baskerville', serif !important;
+            line-height: 1.7;
+        }
+        .ai-coach-output h1, .ai-coach-output h2, .ai-coach-output h3 {
+            font-weight: 700 !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.header("🤖 AI Chess Coach")
     st.caption("GPT-powered personalized coaching insights")
     
@@ -614,7 +628,8 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
     
     # Show the main analysis
     st.markdown("### 📊 Your Analysis")
-    st.markdown(result.get('analysis', 'No analysis available'))
+    analysis_html = f'<div class="ai-coach-output">{result.get("analysis", "No analysis available")}</div>'
+    st.markdown(analysis_html, unsafe_allow_html=True)
     
     # PDF Download button
     analysis_text = result.get('analysis', '')
@@ -819,7 +834,8 @@ def _render_ai_review(review: AICoachResponse):
         st.warning("⚠️ AI review returned empty content.")
         st.info("Try generating again. If this persists, check server logs for errors from the OpenAI call.")
     else:
-        st.markdown(narrative)
+        narrative_html = f'<div class="ai-coach-output">{narrative}</div>'
+        st.markdown(narrative_html, unsafe_allow_html=True)
     
     # Metadata
     with st.expander("ℹ️ Review Metadata", expanded=False):
