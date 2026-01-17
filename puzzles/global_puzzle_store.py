@@ -485,14 +485,6 @@ def load_global_puzzles(*, exclude_source_user: str | None = None) -> list[Puzzl
             except Exception:
                 continue
 
-    # Apply rating priority.
-    ratings = load_rating_counts()
-
-    def sort_key(item: tuple[str, Puzzle]) -> tuple:
-        key, p = item
-        rc = ratings.get(key, RatingCounts())
-        # Highest score first, then most likes, then most total votes, then stable key.
-        return (-rc.score, -rc.likes, -rc.total, key)
-
-    puzzles_sorted = sorted(puzzles, key=sort_key)
-    return [p for _, p in puzzles_sorted]
+    # Return unsorted puzzles - sorting by rating will happen AFTER filtering
+    # This ensures user filters take priority over rating quality
+    return [p for _, p in puzzles]

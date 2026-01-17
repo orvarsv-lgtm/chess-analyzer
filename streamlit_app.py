@@ -103,7 +103,7 @@ from puzzles.puzzle_store import from_legacy_puzzles
 from ui.puzzle_ui import render_puzzle_trainer
 
 # Cross-user shared puzzle bank + ratings
-from puzzles.global_puzzle_store import load_global_puzzles, save_puzzles_to_global_bank
+from puzzles.global_puzzle_store import load_global_puzzles, save_puzzles_to_global_bank, RatingCounts
 
 # Play vs Engine tab
 from src.play_vs_engine import render_play_vs_engine_tab
@@ -2462,6 +2462,29 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         type_filter,
         phase_filter,
     )
+    
+    # Sort filtered puzzles by rating quality (filters first, THEN rating)
+    if filtered_puzzles and source_mode == "Other users":
+        try:
+            from puzzles.global_puzzle_store import load_rating_counts
+            ratings = load_rating_counts()
+            
+            def sort_key_by_rating(puzzle):
+                # Get puzzle key to look up ratings
+                puzzle_key = getattr(puzzle, 'puzzle_key', None)
+                if not puzzle_key:
+                    # Fallback: create key from FEN and move
+                    from puzzles.global_puzzle_store import stable_global_puzzle_key
+                    puzzle_key = stable_global_puzzle_key(puzzle.fen, puzzle.best_move_san)
+                
+                rc = ratings.get(puzzle_key, RatingCounts())
+                # Highest score first, then most likes, then most total votes
+                return (-rc.score, -rc.likes, -rc.total)
+            
+            filtered_puzzles = sorted(filtered_puzzles, key=sort_key_by_rating)
+        except Exception:
+            # If rating lookup fails, keep original order
+            pass
     
     if not filtered_puzzles:
         # Distinguish between "no puzzles at all" vs "filters removed all puzzles"
