@@ -2460,7 +2460,21 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     )
     
     if not filtered_puzzles:
-        st.warning("No puzzles match your filters. Try different options.")
+        # Distinguish between "no puzzles at all" vs "filters removed all puzzles"
+        if not puzzles:
+            st.warning("No puzzles generated from your games. Try analyzing more games with tactical complexity.")
+        elif difficulty_filter != "All":
+            # Specific difficulty selected but no matches - suggest showing all
+            st.warning(f"No puzzles with difficulty '{difficulty_filter}'. Try selecting 'All' difficulty.")
+        elif type_filter != "All":
+            # Specific pattern selected but no matches - suggest "Other Tactics" or "All"
+            st.info(f"No puzzles found with pattern '{type_filter}'. Try selecting 'All' patterns or 'Other Tactics'.")
+        elif phase_filter != "All":
+            # Specific phase selected but no matches
+            st.warning(f"No puzzles in the '{phase_filter}' phase. Try selecting 'All' phases.")
+        else:
+            # All filters are "All" but still no puzzles - something is wrong
+            st.error("No puzzles available. This shouldn't happen - try running a new analysis.")
         return
     
     st.caption(f"Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
@@ -2558,7 +2572,9 @@ def _filter_puzzles(
                             if c.get("constraint") == filter_value:
                                 filtered.append(p)
                                 break
-            result = filtered
+                # If no tactical_patterns, still include puzzle in results
+                # (puzzles without patterns are shown with "Other Tactics" until regenerated)
+            result = filtered if filtered else result  # If no matches with patterns, show all puzzles
         elif puzzle_type == "Other Tactics":
             # Puzzles that don't match any specific pattern
             known_patterns = {"fork", "pin", "skewer", "double_check", "back_rank_mate", 
