@@ -2414,48 +2414,47 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     
     st.divider()
     
-    # Filtering options
-    st.subheader("🎯 Filter Puzzles")
-    
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
-    
-    with filter_col1:
-        difficulty_filter = st.selectbox(
-            "Difficulty",
-            options=["All", "Easy", "Medium", "Hard"],
-            key="puzzle_difficulty_filter",
-        )
-    
-    with filter_col2:
-        # Updated pattern-based filter options
-        pattern_options = [
-            "All",
-            "Fork",
-            "Pin",
-            "Skewer",
-            "Discovered Attack",
-            "Double Check",
-            "Back Rank Mate",
-            "Smothered Mate",
-            "Removing the Guard",
-            "Trapped Piece",
-            "Overloaded Piece",
-            "Material Win",
-            "Checkmate",
-            "Other Tactics",
-        ]
-        type_filter = st.selectbox(
-            "Pattern",
-            options=pattern_options,
-            key="puzzle_type_filter",
-        )
-    
-    with filter_col3:
-        phase_filter = st.selectbox(
-            "Phase",
-            options=["All", "Opening", "Middlegame", "Endgame"],
-            key="puzzle_phase_filter",
-        )
+    # Filtering options in a collapsible expander to reduce page jumps
+    with st.expander("🎯 Filter Puzzles", expanded=False):
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
+        
+        with filter_col1:
+            difficulty_filter = st.selectbox(
+                "Difficulty",
+                options=["All", "Easy", "Medium", "Hard"],
+                key="puzzle_difficulty_filter",
+            )
+        
+        with filter_col2:
+            # Updated pattern-based filter options
+            pattern_options = [
+                "All",
+                "Fork",
+                "Pin",
+                "Skewer",
+                "Discovered Attack",
+                "Double Check",
+                "Back Rank Mate",
+                "Smothered Mate",
+                "Removing the Guard",
+                "Trapped Piece",
+                "Overloaded Piece",
+                "Material Win",
+                "Checkmate",
+                "Other Tactics",
+            ]
+            type_filter = st.selectbox(
+                "Pattern",
+                options=pattern_options,
+                key="puzzle_type_filter",
+            )
+        
+        with filter_col3:
+            phase_filter = st.selectbox(
+                "Phase",
+                options=["All", "Opening", "Middlegame", "Endgame"],
+                key="puzzle_phase_filter",
+            )
     
     # Track filter changes and reset puzzle index when filters change
     current_filter_sig = f"{difficulty_filter}|{type_filter}|{phase_filter}"
