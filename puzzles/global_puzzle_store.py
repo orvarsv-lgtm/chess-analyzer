@@ -14,8 +14,53 @@ import chess
 
 from puzzles.puzzle_types import Puzzle
 
+# Import tactical pattern analysis for enriching old puzzles
+try:
+    from puzzles.tactical_patterns import analyze_tactical_patterns
+    HAS_TACTICAL_PATTERNS = True
+except ImportError:
+    HAS_TACTICAL_PATTERNS = False
+
 
 Rating = Literal["dislike", "meh", "like"]
+
+
+def _enrich_puzzle_with_patterns(puzzle: Puzzle) -> Puzzle:
+    """Add tactical patterns to a puzzle if missing.
+    
+    This allows old puzzles (saved before pattern analysis was added)
+    to be enriched with tactical pattern data on load.
+    """
+    if not HAS_TACTICAL_PATTERNS:
+        return puzzle
+    
+    # Skip if already has patterns
+    if puzzle.tactical_patterns:
+        return puzzle
+    
+    try:
+        board = chess.Board(puzzle.fen)
+        # Get best move as Move object
+        if puzzle.best_move_uci:
+            best_move = chess.Move.from_uci(puzzle.best_move_uci)
+        else:
+            best_move = board.parse_san(puzzle.best_move_san)
+        
+        # Analyze patterns (without engine for speed - just board analysis)
+        attribution = analyze_tactical_patterns(
+            board=board,
+            best_move=best_move,
+            engine=None,  # No engine for speed
+            eval_before=puzzle.eval_before,
+            eval_after=puzzle.eval_after,
+        )
+        
+        if attribution:
+            puzzle.tactical_patterns = attribution.to_dict()
+    except Exception:
+        pass  # Pattern analysis is optional
+    
+    return puzzle
 
 
 def _repo_root() -> Path:
@@ -487,4 +532,5 @@ def load_global_puzzles(*, exclude_source_user: str | None = None) -> list[Puzzl
 
     # Return unsorted puzzles - sorting by rating will happen AFTER filtering
     # This ensures user filters take priority over rating quality
-    return [p for _, p in puzzles]
+    # Enrich puzzles with tactical patterns if missing (for old puzzles)
+    return [_enrich_puzzle_with_patterns(p) for _, p in puzzles]

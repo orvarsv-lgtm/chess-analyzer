@@ -9,6 +9,13 @@ from typing import List
 
 from puzzles.puzzle_types import Puzzle
 
+# Import pattern enrichment from global store
+try:
+    from puzzles.global_puzzle_store import _enrich_puzzle_with_patterns
+    HAS_ENRICH = True
+except ImportError:
+    HAS_ENRICH = False
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -69,6 +76,11 @@ def load_cached_puzzles(games: List[dict], max_age_hours: int = 24) -> List[Puzz
             return None
         
         puzzles = [Puzzle.from_dict(p) for p in data["puzzles"]]
+        
+        # Enrich puzzles with tactical patterns if missing (for old cached puzzles)
+        if HAS_ENRICH:
+            puzzles = [_enrich_puzzle_with_patterns(p) for p in puzzles]
+        
         return puzzles
     except Exception:
         return None
