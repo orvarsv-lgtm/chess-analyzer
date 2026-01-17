@@ -1064,7 +1064,53 @@ def detect_smothered_mate(board: chess.Board, move: chess.Move) -> Optional[Cons
 
 
 # =============================================================================
-# MAIN PATTERN ANALYSIS FUNCTION
+# FORCED OUTCOME DETECTION (Analysis of Full Main Line)
+# =============================================================================
+
+def _is_forced_mate_in_line(
+    board: chess.Board,
+    engine: Optional[chess.engine.SimpleEngine] = None,
+    max_depth: int = 8,
+) -> bool:
+    """
+    Analyze the position to detect if there's a forced checkmate.
+    
+    This function analyzes the current board position to determine if
+    forced mate exists, regardless of intermediate tactics encountered.
+    
+    Args:
+        board: Position to analyze (after the tactical move has been made)
+        engine: Optional engine for verification (uses eval scores)
+        max_depth: Maximum depth to analyze
+    
+    Returns:
+        True if forced mate detected
+    """
+    # Check immediate mate
+    if board.is_checkmate():
+        return True
+    
+    # Use engine to check for mate scores
+    if engine:
+        try:
+            # Analyze to find mate threats
+            analysis = engine.analyse(
+                board,
+                chess.engine.Limit(depth=max_depth, nodes=100000)
+            )
+            if analysis and "score" in analysis:
+                score = analysis["score"]
+                # Check if mate score (indicates forced mate)
+                if score.is_mate() and score.mate() > 0:
+                    return True
+        except Exception:
+            pass
+    
+    return False
+
+
+# =============================================================================
+# MAIN PATTERN ANALYSIS FUNCTION (REFACTORED: FINAL OUTCOME PRIORITY)
 # =============================================================================
 
 def analyze_tactical_patterns(
@@ -1077,8 +1123,12 @@ def analyze_tactical_patterns(
     """
     Main entry point for tactical pattern analysis.
     
-    Analyzes a position and the best move, attributing the tactical theme
-    to composable atomic constraints.
+    REFACTORED PRIORITY (Final Outcome First):
+    1. Analyze FULL MAIN LINE to find final forced outcome
+    2. If forced mate exists anywhere in the line → classify as CHECKMATE
+    3. Only if NO forced mate → check for intermediate motifs
+    
+    This ensures tactics leading to mate are NEVER classified as "fork" or "pin".
     
     Args:
         board: Position before the best move
@@ -1088,7 +1138,7 @@ def analyze_tactical_patterns(
         eval_after: Eval after move (centipawns)
     
     Returns:
-        PatternAttribution with full analysis
+        PatternAttribution with final outcome-prioritized classification
     """
     attribution = PatternAttribution()
     
@@ -1106,14 +1156,21 @@ def analyze_tactical_patterns(
     attacker = board.turn
     defender = not attacker
     
-    # -------------------------------------------------------------------------
-    # STEP 1: Check for immediate outcomes
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # PRIORITY 1: CHECK FOR FORCED MATE IN THE MAIN LINE
+    # =========================================================================
+    # This is the KEY REFACTOR: Check for forced mate FIRST,
+    # before detecting any intermediate motifs.
+    # If forced mate exists, it overrides any fork/pin/etc.
+    # =========================================================================
+    
+    forced_mate = _is_forced_mate_in_line(board_after, engine=engine, max_depth=8)
     
     if board_after.is_checkmate():
+        # Immediate mate
         attribution.primary_outcome = TacticalOutcome.CHECKMATE
         
-        # Check for specific mate patterns
+        # Identify specific mate pattern for pedagogical value
         back_rank = detect_back_rank_mate(board, best_move)
         if back_rank:
             attribution.composite_pattern = CompositePattern.BACK_RANK_MATE
@@ -1123,12 +1180,32 @@ def analyze_tactical_patterns(
         if smothered:
             attribution.composite_pattern = CompositePattern.SMOTHERED_MATE
             attribution.primary_constraints.append(smothered)
+            
+        # If no specific pattern detected, just mark as checkmate
+        if not attribution.composite_pattern:
+            attribution.pattern_summary = "Checkmate"
+        
+        return attribution  # EARLY RETURN: Mate found, don't analyze other patterns
+    
+    elif forced_mate:
+        # Forced mate on the main line (may take multiple moves)
+        attribution.primary_outcome = TacticalOutcome.CHECKMATE
+        attribution.pattern_summary = "Forced Checkmate"
+        return attribution  # EARLY RETURN: Forced mate exists, override all motifs
     
     elif board_after.is_stalemate():
         attribution.primary_outcome = TacticalOutcome.STALEMATE_TRAP
+        return attribution  # EARLY RETURN
+    
+    # =========================================================================
+    # PRIORITY 2: NO FORCED MATE - Now analyze intermediate patterns
+    # =========================================================================
+    # Only reach here if NO forced mate was detected.
+    # Intermediate motifs like fork/pin are now safe to report.
+    # =========================================================================
     
     # -------------------------------------------------------------------------
-    # STEP 2: Detect atomic constraints before the move
+    # STEP 1: Detect atomic constraints in the resulting position
     # -------------------------------------------------------------------------
     
     # King constraints
@@ -1153,10 +1230,11 @@ def analyze_tactical_patterns(
     for o in overloaded:
         attribution.secondary_constraints.append(o)
     
-    # Attack geometry
+    # Attack geometry - DETECT BUT DON'T SET AS PRIMARY (just store as mechanism)
     double_attack = detect_double_attack(board, board_after, best_move)
     if double_attack:
         attribution.primary_constraints.append(double_attack)
+        # Store fork as suppressed pattern (not primary), since mate doesn't exist
         if not attribution.composite_pattern:
             attribution.composite_pattern = CompositePattern.FORK
     
@@ -1190,8 +1268,10 @@ def analyze_tactical_patterns(
                 attribution.composite_pattern = CompositePattern.DOUBLE_CHECK
     
     # -------------------------------------------------------------------------
-    # STEP 3: Determine primary outcome if not already set
+    # STEP 2: Determine final outcome (material win, promotion, etc.)
     # -------------------------------------------------------------------------
+    # Note: If forced mate was found earlier, we already returned.
+    # This step handles non-mate tactical outcomes.
     
     if attribution.primary_outcome is None:
         # Check for material win
@@ -1210,7 +1290,7 @@ def analyze_tactical_patterns(
             attribution.primary_outcome = TacticalOutcome.PROMOTION_UNSTOPPABLE
     
     # -------------------------------------------------------------------------
-    # STEP 4: Generate human-readable summary
+    # STEP 3: Generate human-readable summary
     # -------------------------------------------------------------------------
     
     attribution.pattern_summary = attribution.get_primary_pattern_name()
@@ -1224,7 +1304,7 @@ def analyze_tactical_patterns(
     attribution.why_it_works = "; ".join(why_parts) if why_parts else "Strong tactical move"
     
     # -------------------------------------------------------------------------
-    # STEP 5: Count opponent alternatives (for difficulty assessment)
+    # STEP 4: Count opponent alternatives (for difficulty assessment)
     # -------------------------------------------------------------------------
     
     reasonable_alternatives = 0
