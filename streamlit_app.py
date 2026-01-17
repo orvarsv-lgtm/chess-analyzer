@@ -2356,66 +2356,68 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
             )
         return
     
-    # Puzzle stats overview
-    stats = get_puzzle_stats(puzzles)
-    
-    st.subheader("📈 Puzzle Overview")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Puzzles", stats["total"])
-    with col2:
-        by_diff = stats.get("by_difficulty", {})
-        easy = by_diff.get("easy", 0)
-        st.metric("🟢 Easy", easy)
-    with col3:
-        medium = by_diff.get("medium", 0)
-        st.metric("🟡 Medium", medium)
-    with col4:
-        hard = by_diff.get("hard", 0)
-        st.metric("🔴 Hard", hard)
-    
-    # Pattern breakdown - count patterns from tactical_patterns field
-    pattern_counts = {}
-    for p in puzzles:
-        # Safely check for tactical_patterns attribute
-        tactical_patterns = getattr(p, "tactical_patterns", None)
-        if tactical_patterns:
-            composite = tactical_patterns.get("composite_pattern") if isinstance(tactical_patterns, dict) else None
-            outcome = tactical_patterns.get("primary_outcome") if isinstance(tactical_patterns, dict) else None
-            
-            if composite:
-                pattern_counts[composite] = pattern_counts.get(composite, 0) + 1
-            elif outcome:
-                pattern_counts[outcome] = pattern_counts.get(outcome, 0) + 1
+    # Stats and filters in a collapsed expander to keep puzzle board visible
+    with st.expander("📊 Stats & Filters", expanded=False):
+        # Puzzle stats overview
+        stats = get_puzzle_stats(puzzles)
+        
+        st.subheader("📈 Puzzle Overview")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Puzzles", stats["total"])
+        with col2:
+            by_diff = stats.get("by_difficulty", {})
+            easy = by_diff.get("easy", 0)
+            st.metric("🟢 Easy", easy)
+        with col3:
+            medium = by_diff.get("medium", 0)
+            st.metric("🟡 Medium", medium)
+        with col4:
+            hard = by_diff.get("hard", 0)
+            st.metric("🔴 Hard", hard)
+        
+        # Pattern breakdown - count patterns from tactical_patterns field
+        pattern_counts = {}
+        for p in puzzles:
+            # Safely check for tactical_patterns attribute
+            tactical_patterns = getattr(p, "tactical_patterns", None)
+            if tactical_patterns:
+                composite = tactical_patterns.get("composite_pattern") if isinstance(tactical_patterns, dict) else None
+                outcome = tactical_patterns.get("primary_outcome") if isinstance(tactical_patterns, dict) else None
+                
+                if composite:
+                    pattern_counts[composite] = pattern_counts.get(composite, 0) + 1
+                elif outcome:
+                    pattern_counts[outcome] = pattern_counts.get(outcome, 0) + 1
+                else:
+                    pattern_counts["other"] = pattern_counts.get("other", 0) + 1
             else:
                 pattern_counts["other"] = pattern_counts.get("other", 0) + 1
-        else:
-            pattern_counts["other"] = pattern_counts.get("other", 0) + 1
-    
-    st.write("**Tactical Patterns:**")
-    # Show top patterns in columns
-    top_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)[:6]
-    if top_patterns:
-        pattern_cols = st.columns(min(len(top_patterns), 3))
-        pattern_icons = {
-            "fork": "⚔️", "pin": "📌", "skewer": "🗡️", 
-            "back_rank_mate": "🏁", "smothered_mate": "😤",
-            "double_check": "✓✓", "discovered_check": "👁️",
-            "checkmate": "♔", "material_win": "💰",
-            "removing_the_guard": "🛡️", "other": "🎯"
-        }
-        for i, (pattern, count) in enumerate(top_patterns):
-            col_idx = i % 3
-            icon = pattern_icons.get(pattern, "🎯")
-            display_name = pattern.replace("_", " ").title()
-            with pattern_cols[col_idx]:
-                st.write(f"{icon} {display_name}: **{count}**")
-    
-    st.divider()
-    
-    # Filtering options in sidebar expander to avoid main view jumps
-    with st.sidebar.expander("🎯 Filter Puzzles", expanded=False):
+        
+        st.write("**Tactical Patterns:**")
+        # Show top patterns in columns
+        top_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)[:6]
+        if top_patterns:
+            pattern_cols = st.columns(min(len(top_patterns), 3))
+            pattern_icons = {
+                "fork": "⚔️", "pin": "📌", "skewer": "🗡️", 
+                "back_rank_mate": "🏁", "smothered_mate": "😤",
+                "double_check": "✓✓", "discovered_check": "👁️",
+                "checkmate": "♔", "material_win": "💰",
+                "removing_the_guard": "🛡️", "other": "🎯"
+            }
+            for i, (pattern, count) in enumerate(top_patterns):
+                col_idx = i % 3
+                icon = pattern_icons.get(pattern, "🎯")
+                display_name = pattern.replace("_", " ").title()
+                with pattern_cols[col_idx]:
+                    st.write(f"{icon} {display_name}: **{count}**")
+        
+        st.divider()
+        
+        # Filtering options
+        st.subheader("🎯 Filter Puzzles")
         filter_col1, filter_col2, filter_col3 = st.columns(3)
         
         with filter_col1:
