@@ -2284,6 +2284,8 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         st.session_state.pop("puzzle_difficulty_filter", None)
         st.session_state.pop("puzzle_type_filter", None)
         st.session_state.pop("puzzle_phase_filter", None)
+        # Reset filter signature so filters work fresh
+        st.session_state.pop("puzzle_filter_sig", None)
     st.session_state["puzzle_source_mode_prev"] = source_mode
     
     if source_mode == "My games":
@@ -2454,6 +2456,14 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
             options=["All", "Opening", "Middlegame", "Endgame"],
             key="puzzle_phase_filter",
         )
+    
+    # Track filter changes and reset puzzle index when filters change
+    current_filter_sig = f"{difficulty_filter}|{type_filter}|{phase_filter}"
+    prev_filter_sig = st.session_state.get("puzzle_filter_sig")
+    if prev_filter_sig != current_filter_sig:
+        # Filters changed - reset puzzle progress to start from first puzzle
+        st.session_state.pop("puzzle_progress_v2", None)
+        st.session_state["puzzle_filter_sig"] = current_filter_sig
     
     # Apply filters
     filtered_puzzles = _filter_puzzles(
