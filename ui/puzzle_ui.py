@@ -949,6 +949,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                         # Wait for solution line computation if still running
                         # This ensures we have the full multi-move solution before processing
                         _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True, puzzle_key=puzzle_key)
+                
+                # After harvest, re-fetch solution_moves from cache (might have been populated during wait)
+                solution_moves = progress.active_solution_moves or cache.get(cache_key) or puzzle.solution_moves
+                
                 # Good move - continue the puzzle
                 # Only recompute solution line if the move differs from expected
                 # (for viable/alternate moves) - this avoids expensive engine calls
