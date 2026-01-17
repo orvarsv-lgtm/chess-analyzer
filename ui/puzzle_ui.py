@@ -904,14 +904,6 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             progress.last_uci = uci
             progress.opponent_just_moved = False
             
-            # Show analyzing spinner while waiting for opponent response
-            # If the background computation is slow, this gives user feedback
-            if progress.active_solution_moves is None and cache.get(cache_key) is None:
-                with st.spinner("Analyzing opponent response..."):
-                    # Wait for solution line computation if still running
-                    # This ensures we have the full multi-move solution before processing
-                    _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True, puzzle_key=puzzle_key)
-            
             solution_moves = progress.active_solution_moves or cache.get(cache_key) or puzzle.solution_moves
 
             # Validate legality with python-chess
@@ -943,7 +935,20 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             else:
                 st.session_state["last_why_not_optimal"] = None
 
+            # FAIL FAST: Show incorrect immediately if move is wrong
+            if classification == "incorrect":
+                progress.last_result = "incorrect"
+                st.rerun()
+            
+            # Only show "analyzing opponent response" spinner for correct/viable moves
             if classification in ("correct", "viable"):
+                # For correct/viable moves, we may need the opponent's response
+                # Show analyzing spinner while waiting for opponent response
+                if progress.active_solution_moves is None and cache.get(cache_key) is None:
+                    with st.spinner("Analyzing opponent response..."):
+                        # Wait for solution line computation if still running
+                        # This ensures we have the full multi-move solution before processing
+                        _harvest_solution_line(puzzle.fen, first_uci, depth=depth, wait=True, puzzle_key=puzzle_key)
                 # Good move - continue the puzzle
                 # Only recompute solution line if the move differs from expected
                 # (for viable/alternate moves) - this avoids expensive engine calls
