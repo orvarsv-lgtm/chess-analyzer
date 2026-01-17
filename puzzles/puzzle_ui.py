@@ -413,7 +413,52 @@ def render_puzzle_info(puzzle: Puzzle) -> None:
 
 
 def render_puzzle_hint(puzzle: Puzzle) -> None:
-    """Display a hint for the puzzle."""
+    """Display a hint for the puzzle based on tactical patterns."""
+    
+    # Try to use tactical pattern for better hint
+    if puzzle.tactical_patterns:
+        patterns = puzzle.tactical_patterns
+        
+        # Get composite pattern for specific hint
+        composite = patterns.get("composite_pattern")
+        if composite:
+            pattern_hints = {
+                "fork": "💡 Look for a move that attacks two pieces at once!",
+                "pin": "💡 Can you pin a piece to the king or a more valuable piece?",
+                "skewer": "💡 Attack a valuable piece that must move, exposing something behind!",
+                "back_rank_mate": "💡 The back rank is weak - can you exploit it?",
+                "smothered_mate": "💡 The king is surrounded by its own pieces!",
+                "discovered_check": "💡 Move a piece to reveal an attack on the king!",
+                "double_check": "💡 Two pieces can give check at once!",
+                "removing_the_guard": "💡 Capture the piece that's defending something important!",
+                "zwischenzug": "💡 Before recapturing, is there an in-between move?",
+                "windmill": "💡 Repeated discovered attacks can win material!",
+                "greek_gift": "💡 A bishop sacrifice on h7/h2 might work!",
+            }
+            hint = pattern_hints.get(composite)
+            if hint:
+                st.info(hint)
+                return
+        
+        # Get primary constraint for hint
+        primary_constraints = patterns.get("primary_constraints", [])
+        if primary_constraints:
+            constraint = primary_constraints[0].get("constraint", "")
+            constraint_hints = {
+                "double_attack": "💡 One piece can attack two targets!",
+                "defender_pinned": "💡 A key defender cannot move!",
+                "defender_overloaded": "💡 A piece has too many duties!",
+                "king_in_check": "💡 Give check and see what happens!",
+                "king_confined": "💡 The king has very few escape squares!",
+                "no_flight_squares": "💡 A piece is trapped with nowhere to go!",
+                "piece_trapped": "💡 Look for a trapped piece!",
+            }
+            hint = constraint_hints.get(constraint)
+            if hint:
+                st.info(hint)
+                return
+    
+    # Fallback to basic hints
     hints = {
         PuzzleType.MISSED_TACTIC: "💡 Look for captures, checks, or forks!",
         PuzzleType.ENDGAME_TECHNIQUE: "💡 Think about pawn promotion or piece activity",
@@ -540,11 +585,21 @@ def render_puzzle_result(
     message: str,
     puzzle: Puzzle,
 ) -> None:
-    """Display the result of a puzzle attempt."""
+    """Display the result of a puzzle attempt with tactical pattern analysis."""
     if is_correct:
         st.success(message)
-        # Show explanation after correct answer
-        if puzzle.explanation:
+        # Show tactical pattern explanation after correct answer
+        if puzzle.tactical_patterns:
+            patterns = puzzle.tactical_patterns
+            pattern_name = patterns.get("pattern_summary", "")
+            why_it_works = patterns.get("why_it_works", "")
+            
+            if pattern_name or why_it_works:
+                explanation = f"**{pattern_name}**" if pattern_name else ""
+                if why_it_works:
+                    explanation += f" - {why_it_works}" if explanation else why_it_works
+                st.info(f"💡 {explanation}")
+        elif puzzle.explanation:
             st.info(f"💡 **Why this works:** {puzzle.explanation}")
         st.balloons()
     else:
@@ -553,8 +608,18 @@ def render_puzzle_result(
         # Show the played move that was a mistake
         st.caption(f"The mistake played was: **{puzzle.played_move_san}**")
         
-        # Show explanation for the correct move
-        if puzzle.explanation:
+        # Show tactical pattern explanation for the correct move
+        if puzzle.tactical_patterns:
+            patterns = puzzle.tactical_patterns
+            pattern_name = patterns.get("pattern_summary", "")
+            why_it_works = patterns.get("why_it_works", "")
+            
+            if pattern_name or why_it_works:
+                explanation = f"**{pattern_name}**" if pattern_name else ""
+                if why_it_works:
+                    explanation += f" - {why_it_works}" if explanation else why_it_works
+                st.info(f"💡 **The key idea:** {explanation}")
+        elif puzzle.explanation:
             st.info(f"💡 **Explanation:** {puzzle.explanation}")
 
 
@@ -702,7 +767,42 @@ def render_puzzle_page(
 
         # Explanation (deterministic, derived from the position)
         if st.checkbox("📖 Show explanation", key="puzzle_show_explanation"):
-            if puzzle.explanation:
+            # Try new tactical pattern explanation first
+            if puzzle.tactical_patterns:
+                patterns = puzzle.tactical_patterns
+                
+                # Show pattern name prominently
+                pattern_name = patterns.get("pattern_summary", "")
+                if pattern_name:
+                    st.markdown(f"### 🎯 {pattern_name}")
+                
+                # Show composite pattern if different
+                composite = patterns.get("composite_pattern")
+                if composite and composite != pattern_name.lower().replace(" ", "_"):
+                    st.markdown(f"**Pattern:** {composite.replace('_', ' ').title()}")
+                
+                # Show why it works
+                why_it_works = patterns.get("why_it_works")
+                if why_it_works:
+                    st.info(f"💡 **Why it works:** {why_it_works}")
+                
+                # Show primary constraints
+                primary_constraints = patterns.get("primary_constraints", [])
+                if primary_constraints:
+                    with st.expander("🔍 Constraint Analysis", expanded=False):
+                        for c in primary_constraints[:3]:
+                            desc = c.get("description", "")
+                            conf = c.get("confidence", 0)
+                            constraint_type = c.get("constraint", "").replace("_", " ").title()
+                            if desc:
+                                st.markdown(f"- **{constraint_type}** ({conf:.0%}): {desc}")
+                
+                # Show outcome
+                outcome = patterns.get("primary_outcome")
+                if outcome:
+                    st.markdown(f"**Outcome:** {outcome.replace('_', ' ').title()}")
+            
+            elif puzzle.explanation:
                 st.info(puzzle.explanation)
             else:
                 st.info("Explanation will appear once puzzles are regenerated.")

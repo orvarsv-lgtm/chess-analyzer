@@ -21,6 +21,18 @@ from .explanation_engine import (
     TacticalMotif,
     generate_puzzle_explanation_v2,
     generate_explanation_string,
+    get_tactical_pattern_explanation,
+)
+from .tactical_patterns import (
+    PatternAttribution,
+    AtomicConstraint,
+    TacticalOutcome,
+    CompositePattern,
+    AdvancedPattern,
+    ConstraintEvidence,
+    analyze_tactical_patterns,
+    explain_why_move_works,
+    get_all_constraints_for_position,
 )
 from .puzzle_ui import render_puzzle_board, render_puzzle_controls, PuzzleUIState, render_puzzle_page
 
@@ -33,6 +45,13 @@ __all__ = [
     "Difficulty",
     "PuzzleExplanation",
     "TacticalMotif",
+    # New Pattern Types
+    "PatternAttribution",
+    "AtomicConstraint",
+    "TacticalOutcome",
+    "CompositePattern",
+    "AdvancedPattern",
+    "ConstraintEvidence",
     # Functions
     "classify_difficulty",
     "generate_puzzles_from_games",
@@ -41,6 +60,11 @@ __all__ = [
     "generate_puzzle_explanation_detailed",
     "generate_puzzle_explanation_v2",
     "generate_explanation_string",
+    "get_tactical_pattern_explanation",
+    # New Pattern Functions
+    "analyze_tactical_patterns",
+    "explain_why_move_works",
+    "get_all_constraints_for_position",
     # Classes
     "PuzzleGenerator",
     "PuzzleUIState",

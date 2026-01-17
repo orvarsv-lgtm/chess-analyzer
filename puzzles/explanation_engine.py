@@ -1186,3 +1186,55 @@ def generate_explanation_string(
         phase=phase,
     )
     return explanation.human_readable_summary
+
+
+def get_tactical_pattern_explanation(
+    board: chess.Board,
+    best_move: chess.Move,
+    eval_before: Optional[int] = None,
+    eval_after: Optional[int] = None,
+) -> Optional[str]:
+    """
+    Generate explanation using the new tactical pattern module (engine-first).
+    
+    This provides constraint-based explanations of WHY a tactic works,
+    not just pattern matching.
+    
+    Returns None if the tactical_patterns module is not available.
+    """
+    try:
+        from .tactical_patterns import analyze_tactical_patterns, explain_why_move_works
+        
+        attribution = analyze_tactical_patterns(
+            board=board,
+            best_move=best_move,
+            eval_before=eval_before,
+            eval_after=eval_after,
+        )
+        
+        if not attribution:
+            return None
+        
+        parts = []
+        
+        # Primary pattern name
+        pattern_name = attribution.get_primary_pattern_name()
+        if pattern_name and pattern_name != "Tactical Position":
+            parts.append(f"**{pattern_name}**")
+        
+        # Why it works (constraint-based reasoning)
+        if attribution.why_it_works:
+            parts.append(attribution.why_it_works)
+        
+        # Primary constraints detail
+        if attribution.primary_constraints:
+            for constraint in attribution.primary_constraints[:2]:  # Limit to 2
+                if constraint.description and constraint.description not in parts:
+                    parts.append(constraint.description)
+        
+        return ". ".join(parts) if parts else None
+        
+    except ImportError:
+        return None
+    except Exception:
+        return None

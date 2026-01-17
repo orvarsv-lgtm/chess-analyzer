@@ -9,8 +9,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import json
+
+
+# Import pattern attribution types (lazy import to avoid circular deps)
+def _get_pattern_attribution_class():
+    """Lazy import to avoid circular dependencies."""
+    try:
+        from .tactical_patterns import PatternAttribution
+        return PatternAttribution
+    except ImportError:
+        return None
 
 
 class PuzzleType(str, Enum):
@@ -102,6 +112,9 @@ class Puzzle:
     is_forcing: bool = False  # True if only one move maintains advantage (gap ≥150cp)
     move_gap_cp: int = 0  # Gap between best move and second-best move in centipawns
     
+    # NEW: Tactical pattern attribution (engine-first, constraint-based)
+    tactical_patterns: Optional[Dict[str, Any]] = None  # Serialized PatternAttribution
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -126,6 +139,7 @@ class Puzzle:
             "fen_before_opponent": self.fen_before_opponent,
             "is_forcing": self.is_forcing,
             "move_gap_cp": self.move_gap_cp,
+            "tactical_patterns": self.tactical_patterns,
         }
     
     @classmethod
@@ -153,6 +167,7 @@ class Puzzle:
             fen_before_opponent=data.get("fen_before_opponent"),
             is_forcing=data.get("is_forcing", False),
             move_gap_cp=data.get("move_gap_cp", 0),
+            tactical_patterns=data.get("tactical_patterns"),
         )
     
     def to_json(self) -> str:

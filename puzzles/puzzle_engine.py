@@ -35,6 +35,17 @@ try:
 except ImportError:
     USE_STOCKFISH_EXPLAINER = False
 
+# Import the new tactical pattern detection module
+try:
+    from .tactical_patterns import (
+        analyze_tactical_patterns,
+        PatternAttribution,
+        explain_why_move_works,
+    )
+    USE_TACTICAL_PATTERNS = True
+except ImportError:
+    USE_TACTICAL_PATTERNS = False
+
 # Opponent mistake analysis removed for performance
 
 
@@ -855,6 +866,22 @@ class PuzzleGenerator:
 
                 # Lazy explanation generation: generate on-demand in UI, not here
                 explanation = None
+                
+                # NEW: Tactical pattern analysis (engine-first, constraint-based)
+                tactical_patterns = None
+                if USE_TACTICAL_PATTERNS:
+                    try:
+                        pattern_attribution = analyze_tactical_patterns(
+                            board=board,
+                            best_move=best_move_obj,
+                            engine=engine,
+                            eval_before=eval_before if isinstance(eval_before, int) else None,
+                            eval_after=eval_after if isinstance(eval_after, int) else None,
+                        )
+                        if pattern_attribution:
+                            tactical_patterns = pattern_attribution.to_dict()
+                    except Exception:
+                        pass  # Pattern analysis is optional
 
                 # Generate puzzle ID
                 puzzle_id = f"{game_index}_{move_num}_{side_to_move}"
@@ -882,6 +909,7 @@ class PuzzleGenerator:
                     fen_before_opponent=None,
                     is_forcing=is_forcing,
                     move_gap_cp=move_gap_cp,
+                    tactical_patterns=tactical_patterns,
                 )
 
                 puzzles.append(puzzle)
