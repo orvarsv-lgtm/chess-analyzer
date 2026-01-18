@@ -57,6 +57,8 @@ class EvalTrainerState:
     total_attempts: int = 0
     last_guess: Optional[str] = None
     revealed: bool = False
+    explanation_text: str = ""
+    explanation_submitted: bool = False
     games_fingerprint: str = ""  # Track which games positions came from
 
 
@@ -133,6 +135,172 @@ def _format_eval(eval_pawns: float) -> str:
     if eval_pawns > 0:
         return f"+{eval_pawns:.1f}"
     return f"{eval_pawns:.1f}"
+
+
+def _material_score(board: chess.Board, color: chess.Color) -> int:
+    values = {
+        chess.PAWN: 100,
+        chess.KNIGHT: 320,
+        chess.BISHOP: 330,
+        chess.ROOK: 500,
+        chess.QUEEN: 900,
+    }
+    total = 0
+    for piece_type, val in values.items():
+        total += len(board.pieces(piece_type, color)) * val
+    return total
+
+
+def _pawn_structure_penalty(board: chess.Board, color: chess.Color) -> int:
+    pawns = board.pieces(chess.PAWN, color)
+    files = {f: 0 for f in range(8)}
+    for sq in pawns:
+        files[chess.square_file(sq)] += 1
+    doubled = sum(max(0, c - 1) for c in files.values())
+    isolated = 0
+    for f, c in files.items():
+        if c == 0:
+            continue
+        left = files.get(f - 1, 0)
+        right = files.get(f + 1, 0)
+        if left == 0 and right == 0:
+            isolated += c
+    return doubled + isolated
+
+
+def _king_safety_penalty(board: chess.Board, color: chess.Color) -> int:
+    king_sq = board.king(color)
+    if king_sq is None:
+        return 0
+    attackers = len(board.attackers(not color, king_sq))
+    file_ = chess.square_file(king_sq)
+    rank = chess.square_rank(king_sq)
+    forward = 1 if color == chess.WHITE else -1
+    shield_files = [f for f in (file_ - 1, file_, file_ + 1) if 0 <= f <= 7]
+    shield_rank = rank + forward
+    missing_shield = 0
+    if 0 <= shield_rank <= 7:
+        for f in shield_files:
+            sq = chess.square(f, shield_rank)
+            if board.piece_at(sq) != chess.Piece(chess.PAWN, color):
+                missing_shield += 1
+    return attackers * 2 + missing_shield
+
+
+def _mobility_score(board: chess.Board, color: chess.Color) -> int:
+    temp = board.copy(stack=False)
+    temp.turn = color
+    return temp.legal_moves.count()
+
+
+def _initiative_indicator(board: chess.Board, color: chess.Color) -> str:
+    temp = board.copy(stack=False)
+    temp.turn = color
+    if temp.is_check():
+        return "The opponent is in check, so the initiative is immediate."
+    checks = 0
+    for mv in temp.legal_moves:
+        temp.push(mv)
+        if temp.is_check():
+            checks += 1
+        temp.pop()
+        if checks >= 2:
+            break
+    if checks >= 2:
+        return "There are forcing threats (multiple checks available), suggesting initiative."
+    if checks == 1:
+        return "There is at least one forcing check available, indicating some initiative."
+    return "No immediate forcing threats are available; the initiative is limited."
+
+
+def _analyze_position(board: chess.Board, perspective_color: chess.Color) -> dict:
+    opp = not perspective_color
+    material_diff = _material_score(board, perspective_color) - _material_score(board, opp)
+    king_safety_diff = _king_safety_penalty(board, opp) - _king_safety_penalty(board, perspective_color)
+    activity_diff = _mobility_score(board, perspective_color) - _mobility_score(board, opp)
+    pawn_diff = _pawn_structure_penalty(board, opp) - _pawn_structure_penalty(board, perspective_color)
+
+    return {
+        "material_diff": material_diff,
+        "king_safety_diff": king_safety_diff,
+        "activity_diff": activity_diff,
+        "pawn_diff": pawn_diff,
+    }
+
+
+def _build_explanation(board: chess.Board, perspective_color: chess.Color, eval_pawns: float) -> list[str]:
+    metrics = _analyze_position(board, perspective_color)
+    lines: list[str] = []
+
+    # Material
+    if abs(metrics["material_diff"]) >= 100:
+        if metrics["material_diff"] > 0:
+            lines.append("Material: you are up material, which supports the evaluation.")
+        else:
+            lines.append("Material: you are down material, which drags the evaluation.")
+    else:
+        lines.append("Material: roughly balanced, so the eval comes from positional factors.")
+
+    # King safety
+    if abs(metrics["king_safety_diff"]) >= 2:
+        if metrics["king_safety_diff"] > 0:
+            lines.append("King safety: your king is safer or the opponent’s king is more exposed.")
+        else:
+            lines.append("King safety: your king has more risk than the opponent’s.")
+
+    # Piece activity
+    if abs(metrics["activity_diff"]) >= 3:
+        if metrics["activity_diff"] > 0:
+            lines.append("Piece activity: your pieces have more mobility and coordination.")
+        else:
+            lines.append("Piece activity: your pieces are less active than the opponent’s.")
+
+    # Pawn structure
+    if abs(metrics["pawn_diff"]) >= 1:
+        if metrics["pawn_diff"] > 0:
+            lines.append("Pawn structure: the opponent has more weaknesses (isolated/doubled pawns).")
+        else:
+            lines.append("Pawn structure: your pawn structure has more weaknesses.")
+
+    # Initiative
+    lines.append(f"Initiative: {_initiative_indicator(board, perspective_color)}")
+
+    # Tone control for non-winning positions
+    if eval_pawns < 1.8:
+        lines.append("This is not a decisive position; small advantages or disadvantages are the main story.")
+
+    return lines
+
+
+def _extract_user_factors(text: str) -> set[str]:
+    t = (text or "").lower()
+    factors = set()
+    if any(k in t for k in ("material", "piece count", "exchange", "pawn up", "piece up")):
+        factors.add("material")
+    if any(k in t for k in ("king safety", "king", "exposed king", "castled", "attack")):
+        factors.add("king safety")
+    if any(k in t for k in ("activity", "active", "coordination", "development", "initiative")):
+        factors.add("piece activity")
+    if any(k in t for k in ("pawn structure", "isolated", "doubled", "passed pawn", "backward pawn")):
+        factors.add("pawn structure")
+    if any(k in t for k in ("initiative", "threat", "tempo", "pressure", "checks")):
+        factors.add("initiative")
+    return factors
+
+
+def _key_factors_from_metrics(metrics: dict) -> list[str]:
+    keys = []
+    if abs(metrics.get("material_diff", 0)) >= 100:
+        keys.append("material")
+    if abs(metrics.get("king_safety_diff", 0)) >= 2:
+        keys.append("king safety")
+    if abs(metrics.get("activity_diff", 0)) >= 3:
+        keys.append("piece activity")
+    if abs(metrics.get("pawn_diff", 0)) >= 1:
+        keys.append("pawn structure")
+    if not keys:
+        keys.append("initiative")
+    return keys[:2]
 
 
 def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: int = 500) -> List[EvalPosition]:
@@ -418,6 +586,10 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         state.current_index = 0
         state.score = 0
         state.total_attempts = 0
+        state.last_guess = None
+        state.revealed = False
+        state.explanation_text = ""
+        state.explanation_submitted = False
     elif not state.positions:
         # Fallback if no positions
         state.positions = _generate_sample_positions()
@@ -493,6 +665,12 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     side_name = "White" if side_to_move == chess.WHITE else "Black"
     eval_for_perspective = _get_eval_for_player(position.eval_cp, position.focus_color, side_to_move)
     correct_category = _classify_eval(eval_for_perspective)
+    if position.focus_color == "white":
+        perspective_color = chess.WHITE
+    elif position.focus_color == "black":
+        perspective_color = chess.BLACK
+    else:
+        perspective_color = side_to_move
     
     # Layout
     col_board, col_info = st.columns([2, 1])
@@ -531,6 +709,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
                     state.last_guess = "losing"
                     state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
                     state.total_attempts += 1
                     if state.last_guess == correct_category:
                         state.score += 1
@@ -539,6 +719,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
                     state.last_guess = "slightly_worse"
                     state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
                     state.total_attempts += 1
                     if state.last_guess == correct_category:
                         state.score += 1
@@ -547,6 +729,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
                     state.last_guess = "equal"
                     state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
                     state.total_attempts += 1
                     if state.last_guess == correct_category:
                         state.score += 1
@@ -556,6 +740,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
                     state.last_guess = "slightly_better"
                     state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
                     state.total_attempts += 1
                     if state.last_guess == correct_category:
                         state.score += 1
@@ -564,33 +750,69 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
                     state.last_guess = "winning"
                     state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
                     state.total_attempts += 1
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
         
         else:
-            # Show result
+            # Show result (correct/incorrect)
             is_correct = state.last_guess == correct_category
-            
             if is_correct:
                 st.success("✅ Correct!")
             else:
                 st.error("❌ Incorrect")
-            
-            # Show actual eval
-            perspective_label = "Your" if position.focus_color in {"white", "black"} else "Side-to-move"
-            st.markdown(f"**Actual eval ({perspective_label}):** {_format_eval(eval_for_perspective)}")
-            st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
-            
-            if not is_correct:
-                st.caption(f"You guessed: {BUTTON_LABELS[state.last_guess]}")
-            
-            st.markdown("---")
-            
-            # Next button
-            if st.button("➡️ Next Position", use_container_width=True, type="primary"):
-                state.current_index += 1
-                state.revealed = False
-                state.last_guess = None
-                st.rerun()
+
+            if not state.explanation_submitted:
+                st.markdown("**Explain why this position is evaluated as it is.**")
+                st.caption("Consider material, king safety, piece activity, pawn structure, and initiative.")
+                state.explanation_text = st.text_area(
+                    "Your explanation",
+                    value=state.explanation_text,
+                    height=120,
+                    key=f"eval_expl_{state.current_index}",
+                )
+                if st.button("Submit explanation", use_container_width=True, type="primary"):
+                    state.explanation_submitted = True
+                    st.rerun()
+            else:
+                # Reveal evaluation and AI explanation after user explanation
+                perspective_label = "Your" if position.focus_color in {"white", "black"} else "Side-to-move"
+                st.markdown(f"**Actual eval ({perspective_label}):** {_format_eval(eval_for_perspective)}")
+                st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
+                if not is_correct:
+                    st.caption(f"You guessed: {BUTTON_LABELS[state.last_guess]}")
+
+                st.markdown("---")
+                st.subheader("Why this evaluation")
+                explanation_lines = _build_explanation(board, perspective_color, eval_for_perspective)
+                for line in explanation_lines:
+                    st.markdown(f"- {line}")
+
+                st.markdown("---")
+                st.subheader("Your explanation feedback")
+                user_factors = _extract_user_factors(state.explanation_text)
+                key_factors = _key_factors_from_metrics(_analyze_position(board, perspective_color))
+                matched = [f for f in key_factors if f in user_factors]
+                missed = [f for f in key_factors if f not in user_factors]
+
+                if matched:
+                    st.success("You correctly mentioned: " + ", ".join(matched))
+                else:
+                    st.info("No key factors detected in your explanation.")
+
+                if missed:
+                    st.warning("Important factors to consider: " + ", ".join(missed))
+
+                st.markdown("---")
+
+                # Next button
+                if st.button("➡️ Next Position", use_container_width=True, type="primary"):
+                    state.current_index += 1
+                    state.revealed = False
+                    state.last_guess = None
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
+                    st.rerun()
