@@ -766,6 +766,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     
     position = state.positions[state.current_index]
     board = chess.Board(position.fen)
+    ai_explanations_enabled = st.session_state.get("eval_ai_enabled", False)
     
     # Determine side to move and eval from their perspective
     side_to_move = board.turn
@@ -873,7 +874,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
             else:
                 st.error("❌ Incorrect")
 
-            if not state.explanation_submitted:
+            if ai_explanations_enabled and not state.explanation_submitted:
                 st.markdown("**Explain why this position is evaluated as it is.**")
                 st.caption("Consider material, king safety, piece activity, pawn structure, and initiative.")
                 state.explanation_text = st.text_area(
@@ -906,7 +907,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     st.markdown(f"- {line}")
 
                 # Optionally show AI-generated explanation (may call OpenAI)
-                if st.session_state.get("eval_ai_enabled", False):
+                if ai_explanations_enabled:
                     try:
                         from src.ai_coach import generate_position_insight
 
@@ -924,22 +925,23 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     except Exception as e:
                         st.error(f"AI explanation failed: {e}")
 
-                st.markdown("---")
-                st.subheader("Your explanation feedback")
-                user_factors = _extract_user_factors(state.explanation_text)
-                key_factors = _key_factors_from_metrics(_analyze_position(board, perspective_color))
-                matched = [f for f in key_factors if f in user_factors]
-                missed = [f for f in key_factors if f not in user_factors]
+                if ai_explanations_enabled:
+                    st.markdown("---")
+                    st.subheader("Your explanation feedback")
+                    user_factors = _extract_user_factors(state.explanation_text)
+                    key_factors = _key_factors_from_metrics(_analyze_position(board, perspective_color))
+                    matched = [f for f in key_factors if f in user_factors]
+                    missed = [f for f in key_factors if f not in user_factors]
 
-                if matched:
-                    st.success("You correctly mentioned: " + ", ".join(matched))
-                else:
-                    st.info("No key factors detected in your explanation.")
+                    if matched:
+                        st.success("You correctly mentioned: " + ", ".join(matched))
+                    else:
+                        st.info("No key factors detected in your explanation.")
 
-                if missed:
-                    st.warning("Important factors to consider: " + ", ".join(missed))
+                    if missed:
+                        st.warning("Important factors to consider: " + ", ".join(missed))
 
-                st.markdown("---")
+                    st.markdown("---")
 
                 # Next button
                 if st.button("➡️ Next Position", use_container_width=True, type="primary"):
