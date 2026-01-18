@@ -252,6 +252,16 @@ def get_cached_games_for_user(
         
         result = {}
         for row in rows:
+            moves_table = json.loads(row["moves_table"]) if row["moves_table"] else []
+            
+            # Cache version check: if moves_table exists but lacks FEN data,
+            # skip this cached entry (force re-analysis)
+            if moves_table and len(moves_table) > 0:
+                first_move = moves_table[0]
+                if isinstance(first_move, dict) and "fen" not in first_move:
+                    # Old cache format without FEN - skip
+                    continue
+            
             result[row["game_id"]] = {
                 "game_id": row["game_id"],
                 "date": row["date"],
@@ -260,7 +270,7 @@ def get_cached_games_for_user(
                 "result": row["result"],
                 "eco": row["eco"],
                 "opening": row["opening"],
-                "moves_table": json.loads(row["moves_table"]) if row["moves_table"] else [],
+                "moves_table": moves_table,
                 "focus_color": row["focus_color"],
                 "white_rating": row["white_rating"],
                 "black_rating": row["black_rating"],
