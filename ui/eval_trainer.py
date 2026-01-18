@@ -731,6 +731,14 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         - 🙂 **Slightly Better**: +0.6 to +1.8
         - 😄 **Winning**: > +1.8
         """)
+        # Toggle to enable AI-generated explanations (optional, may incur API cost)
+        eval_ai_label = "Enable AI explanations (may use OpenAI API and incur cost)"
+        st.checkbox(
+            eval_ai_label,
+            value=st.session_state.get("eval_ai_enabled", False),
+            key="eval_ai_enabled",
+            help="Toggle AI-generated position explanations; disable to use deterministic explanations only.",
+        )
     
     # Check if we have positions
     if not state.positions:
@@ -896,6 +904,25 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 )
                 for line in explanation_lines:
                     st.markdown(f"- {line}")
+
+                # Optionally show AI-generated explanation (may call OpenAI)
+                if st.session_state.get("eval_ai_enabled", False):
+                    try:
+                        from src.ai_coach import generate_position_insight
+
+                        phase = "middlegame" if (position.move_number and position.move_number >= 12) else "opening"
+                        ai_explanation = generate_position_insight(
+                            fen=position.fen,
+                            eval_before=position.eval_cp,
+                            eval_after=position.eval_cp,
+                            best_move_san="",
+                            played_move_san="",
+                            phase=phase,
+                        )
+                        st.markdown("**AI explanation (short):**")
+                        st.info(ai_explanation)
+                    except Exception as e:
+                        st.error(f"AI explanation failed: {e}")
 
                 st.markdown("---")
                 st.subheader("Your explanation feedback")
