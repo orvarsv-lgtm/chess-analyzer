@@ -2018,19 +2018,47 @@ def main() -> None:
     st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
-        /* Material Icons (restore ligature-based icons so names like "double_arrow_right" render correctly) */
-        @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
-        @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Outlined');
-        @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Round');
-        @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Sharp');
         
-        /* Global font application - with emoji/symbol support.
-           IMPORTANT: Do NOT override icon elements (Material Icons/BaseWeb icons) to avoid text like "double_arrow_right" showing. */
-        html, body, .stApp,
-        p,
-        div:not(.material-icons):not(.material-icons-outlined):not(.material-icons-round):not(.material-icons-sharp):not([data-baseweb="icon"]),
-        span:not(.material-icons):not(.material-icons-outlined):not(.material-icons-round):not(.material-icons-sharp):not([data-baseweb="icon"]),
-        li, td, th, label, input, textarea, select {
+        /* =====================================================
+           ICON FONT PROTECTION - Must come FIRST
+           Streamlit uses icon fonts that render text like "double_arrow_right" as glyphs.
+           These rules ensure icon fonts are NEVER overridden.
+           ===================================================== */
+        
+        /* Protect ALL icon-related elements from font overrides */
+        [data-baseweb="icon"],
+        [data-baseweb="icon"] *,
+        svg,
+        path,
+        [class*="icon"],
+        [class*="Icon"],
+        span[aria-hidden="true"],
+        i[class*="material"],
+        .material-icons,
+        .material-icons-outlined,
+        .material-icons-round,
+        .material-icons-sharp,
+        [data-testid*="icon"],
+        [data-testid*="Icon"],
+        button svg,
+        button path,
+        [data-testid="stExpanderToggleIcon"],
+        [data-testid="stExpanderToggleIcon"] * {
+            font-family: inherit !important;
+        }
+        
+        /* =====================================================
+           GLOBAL FONT APPLICATION - Libre Baskerville
+           Applied to text elements only, NOT icons
+           ===================================================== */
+        
+        /* Base text elements */
+        html, body, .stApp {
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif;
+        }
+        
+        /* Paragraphs and text content */
+        p, li, td, th, label {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
@@ -2042,62 +2070,67 @@ def main() -> None:
         }
         
         /* Streamlit title */
-        .stTitle, [data-testid="stHeader"] {
+        .stTitle, [data-testid="stHeader"] h1 {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
         
-        /* AI Coach output and markdown content */
-        .stMarkdown, .stMarkdown p, .stMarkdown div, .stMarkdown span {
+        /* AI Coach output and markdown content - exclude icons */
+        .stMarkdown p, .stMarkdown li, .stMarkdown td, .stMarkdown th {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
-        /* Buttons - ensure emojis/symbols render properly */
-        button, .stButton button, [data-testid="baseButton-secondary"], [data-testid="baseButton-primary"] {
+        /* Button TEXT only (not icons inside buttons) */
+        button > div, 
+        button > span:not([data-baseweb="icon"]):not([aria-hidden="true"]),
+        .stButton button > div,
+        [data-testid="baseButton-secondary"] > div,
+        [data-testid="baseButton-primary"] > div {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
-
-        /* Explicitly restore Material Icons for any icon spans */
-        .material-icons {
-            font-family: 'Material Icons' !important;
-            font-weight: normal !important;
-            font-style: normal !important;
-            line-height: 1;
-            letter-spacing: normal;
-            text-transform: none;
-            display: inline-block;
-            white-space: nowrap;
-            word-wrap: normal;
-            direction: ltr;
-        }
-        .material-icons-outlined { font-family: 'Material Icons Outlined' !important; }
-        .material-icons-round { font-family: 'Material Icons Round' !important; }
-        .material-icons-sharp { font-family: 'Material Icons Sharp' !important; }
         
         /* Metrics and stats */
         [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
-        /* Sidebar */
-        [data-testid="stSidebar"], [data-testid="stSidebar"] * {
+        /* Sidebar TEXT elements only */
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] li,
+        [data-testid="stSidebar"] td,
+        [data-testid="stSidebar"] .stCaption {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
-        /* Tabs */
-        [data-baseweb="tab"], [data-baseweb="tab-list"] {
+        /* Tab TEXT only */
+        [data-baseweb="tab"] > div {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
         
-        /* Text areas and inputs */
+        /* Text inputs */
         textarea, input, .stTextInput input, .stTextArea textarea {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
-        /* Captions and smaller text */
-        .stCaption, small, .css-1dp5vir {
+        /* Select boxes - text only */
+        [data-baseweb="select"] > div:first-child {
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
+        }
+        
+        /* Expander header TEXT only */
+        [data-testid="stExpander"] summary > span:first-child {
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
+            font-weight: 700 !important;
+        }
+        
+        /* Captions */
+        .stCaption, small {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
     </style>
