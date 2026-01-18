@@ -44,6 +44,7 @@ class EvalPosition:
     eval_cp: int  # Centipawns from WHITE's perspective (standard)
     source_game: Optional[str] = None
     move_number: Optional[int] = None
+    focus_color: Optional[str] = None  # "white" or "black" when available
 
 
 @dataclass
@@ -100,6 +101,19 @@ def _get_eval_for_side_to_move(eval_cp: int, turn: chess.Color) -> float:
     return eval_pawns
 
 
+def _get_eval_for_player(eval_cp: int, focus_color: Optional[str], turn: chess.Color) -> float:
+    """
+    Convert eval (from white's perspective) to eval from player's perspective when known.
+    Falls back to side-to-move perspective if focus_color is unavailable.
+    Returns eval in pawns.
+    """
+    if focus_color == "white":
+        return eval_cp / 100.0
+    if focus_color == "black":
+        return -eval_cp / 100.0
+    return _get_eval_for_side_to_move(eval_cp, turn)
+
+
 def _classify_eval(eval_pawns: float) -> str:
     """Classify an evaluation into a category."""
     if eval_pawns <= -1.8:
@@ -154,6 +168,7 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             continue
         
         game_id = game.get("index", game.get("game_id", "unknown"))
+        focus_color = game.get("focus_color")
         
         for move_data in moves:
             if not isinstance(move_data, dict):
@@ -186,6 +201,7 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
                 eval_cp=eval_cp,
                 source_game=str(game_id),
                 move_number=move_num,
+                focus_color=focus_color,
             )
             
             # Categorize by evaluation using EVAL_RANGES
@@ -340,7 +356,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         games: Optional list of analyzed games to extract positions from
     """
     st.header("🎯 Evaluation Trainer")
-    st.caption("Guess the position's evaluation from the side to move's perspective")
+    st.caption("Guess the position's evaluation from your perspective when available")
     
     # Track navigation - detect when user just arrived at this tab
     last_view_key = "last_rendered_view"
@@ -475,8 +491,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     # Determine side to move and eval from their perspective
     side_to_move = board.turn
     side_name = "White" if side_to_move == chess.WHITE else "Black"
-    eval_for_side = _get_eval_for_side_to_move(position.eval_cp, side_to_move)
-    correct_category = _classify_eval(eval_for_side)
+    eval_for_perspective = _get_eval_for_player(position.eval_cp, position.focus_color, side_to_move)
+    correct_category = _classify_eval(eval_for_perspective)
     
     # Layout
     col_board, col_info = st.columns([2, 1])
@@ -563,7 +579,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 st.error("❌ Incorrect")
             
             # Show actual eval
-            st.markdown(f"**Actual eval:** {_format_eval(eval_for_side)}")
+            perspective_label = "Your" if position.focus_color in {"white", "black"} else "Side-to-move"
+            st.markdown(f"**Actual eval ({perspective_label}):** {_format_eval(eval_for_perspective)}")
             st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
             
             if not is_correct:
