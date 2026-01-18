@@ -663,11 +663,12 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     # Determine side to move and eval from their perspective
     side_to_move = board.turn
     side_name = "White" if side_to_move == chess.WHITE else "Black"
-    eval_for_perspective = _get_eval_for_player(position.eval_cp, position.focus_color, side_to_move)
+    focus_color = getattr(position, "focus_color", None)
+    eval_for_perspective = _get_eval_for_player(position.eval_cp, focus_color, side_to_move)
     correct_category = _classify_eval(eval_for_perspective)
-    if position.focus_color == "white":
+    if focus_color == "white":
         perspective_color = chess.WHITE
-    elif position.focus_color == "black":
+    elif focus_color == "black":
         perspective_color = chess.BLACK
     else:
         perspective_color = side_to_move
@@ -779,7 +780,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     st.rerun()
             else:
                 # Reveal evaluation and AI explanation after user explanation
-                perspective_label = "Your" if position.focus_color in {"white", "black"} else "Side-to-move"
+                perspective_label = "Your" if focus_color in {"white", "black"} else "Side-to-move"
                 st.markdown(f"**Actual eval ({perspective_label}):** {_format_eval(eval_for_perspective)}")
                 st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
                 if not is_correct:
