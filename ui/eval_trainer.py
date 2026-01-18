@@ -143,6 +143,11 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
         moves = game.get("moves_table", [])
         if not moves or not isinstance(moves, list):
             continue
+
+        # Ensure FENs are present (reconstruct from SAN if needed)
+        moves = _ensure_fens_in_moves_table(moves)
+        if not moves:
+            continue
         
         game_id = game.get("index", game.get("game_id", "unknown"))
         
@@ -251,6 +256,35 @@ def _generate_sample_positions() -> List[EvalPosition]:
     return samples
 
 
+def _ensure_fens_in_moves_table(moves_table: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Ensure moves_table entries include FENs by reconstructing from SAN if needed."""
+    if not moves_table:
+        return []
+
+    # If we already have FENs, return as-is
+    if any(isinstance(m, dict) and m.get("fen") for m in moves_table):
+        return moves_table
+
+    board = chess.Board()
+    enriched = []
+    for move_data in moves_table:
+        if not isinstance(move_data, dict):
+            continue
+        san = move_data.get("move_san")
+        if not san:
+            continue
+        try:
+            board.push_san(san)
+        except Exception:
+            # Stop reconstruction if SAN is invalid
+            break
+        enriched_move = dict(move_data)
+        enriched_move["fen"] = board.fen()
+        enriched.append(enriched_move)
+
+    return enriched
+
+
 def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     """
     Render the evaluation trainer UI.
@@ -279,12 +313,13 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         game_ids = [str(g.get("index", g.get("game_id", ""))) for g in games[:5]]
         games_fingerprint = f"{len(games)}_{','.join(game_ids)}"
         
-        # Count games that have moves_table entries with FENs
+        # Count games that have moves_table entries with FENs or SANs
         for g in games:
             moves_table = g.get("moves_table", [])
             if moves_table and isinstance(moves_table, list):
                 has_fen = any(isinstance(m, dict) and m.get("fen") for m in moves_table)
-                if has_fen:
+                has_san = any(isinstance(m, dict) and m.get("move_san") for m in moves_table)
+                if has_fen or has_san:
                     games_with_moves += 1
                     total_moves_found += len(moves_table)
     
@@ -330,7 +365,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     if using_sample:
         st.info(
             f"📚 Using sample positions (no game positions found with evaluation data). "
-            f"Games: {len(games) if games else 0}, with moves_table+FEN: {games_with_moves}"
+            f"Games: {len(games) if games else 0}, with moves_table: {games_with_moves}"
         )
     else:
         st.success(f"🎮 Using {pool_size} positions from your analyzed games")
