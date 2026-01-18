@@ -256,6 +256,9 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         # Fall back to sample positions if no games or no valid positions extracted
         if not state.positions:
             state.positions = _generate_sample_positions()
+        
+        # Shuffle positions on initial load
+        random.shuffle(state.positions)
     
     # Sidebar controls
     with st.sidebar:
