@@ -108,11 +108,16 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
     """
     Extract positions with evaluations from analyzed games.
     Only includes positions with eval between -3 and +3 pawns.
+    Distributes positions across opening, middlegame, and endgame phases.
     """
-    positions = []
+    positions_by_phase = {
+        "opening": [],
+        "middlegame": [],
+        "endgame": []
+    }
     
     if not games:
-        return positions
+        return []
     
     for game in games:
         moves = game.get("moves", [])
@@ -136,20 +141,44 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             if abs(eval_cp) > 300:
                 continue
             
-            # Skip very early moves (opening theory)
-            if move_num < 8:
-                continue
-                
-            positions.append(EvalPosition(
+            position = EvalPosition(
                 fen=fen,
                 eval_cp=eval_cp,
                 source_game=game_id,
                 move_number=move_num,
-            ))
+            )
+            
+            # Categorize by phase (using move number as proxy)
+            if move_num <= 15:
+                positions_by_phase["opening"].append(position)
+            elif move_num <= 40:
+                positions_by_phase["middlegame"].append(position)
+            else:
+                positions_by_phase["endgame"].append(position)
     
-    # Shuffle and limit
-    random.shuffle(positions)
-    return positions[:max_positions]
+    # Distribute positions evenly across phases
+    target_per_phase = max_positions // 3
+    all_positions = []
+    
+    # Shuffle each phase separately
+    for phase in positions_by_phase.values():
+        random.shuffle(phase)
+    
+    # Take equal amounts from each phase
+    for phase in positions_by_phase.values():
+        all_positions.extend(phase[:target_per_phase])
+    
+    # If we need more positions, fill remaining slots from any phase
+    while len(all_positions) < max_positions:
+        for phase in positions_by_phase.values():
+            if len(all_positions) < max_positions:
+                remaining = [p for p in phase if p not in all_positions]
+                if remaining:
+                    all_positions.append(remaining[0])
+    
+    # Final shuffle to randomize order
+    random.shuffle(all_positions)
+    return all_positions[:max_positions]
 
 
 def _generate_sample_positions() -> List[EvalPosition]:
