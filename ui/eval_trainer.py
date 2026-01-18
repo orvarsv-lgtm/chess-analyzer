@@ -286,55 +286,67 @@ def _analyze_position(board: chess.Board, perspective_color: chess.Color) -> dic
     }
 
 
-def _build_explanation(board: chess.Board, perspective_color: chess.Color, eval_pawns: float) -> list[str]:
+def _build_explanation(
+    board: chess.Board,
+    perspective_color: chess.Color,
+    eval_pawns: float,
+    focus_color: Optional[str],
+    side_to_move: chess.Color,
+) -> list[str]:
     metrics = _analyze_position(board, perspective_color)
     lines: list[str] = []
     opp = not perspective_color
-    side_label = "your" if perspective_color == chess.WHITE else "your"
+
+    if focus_color in {"white", "black"}:
+        you_label = "you"
+        opp_label = "your opponent"
+    else:
+        you_label = "side to move"
+        opp_label = "the opponent"
 
     # Material
     if abs(metrics["material_diff"]) >= 100:
         if metrics["material_diff"] > 0:
-            lines.append("Material: you are up material, which supports the evaluation.")
+            lines.append(f"Material: {you_label} are up material, which supports the evaluation.")
         else:
-            lines.append("Material: you are down material, which drags the evaluation.")
+            lines.append(f"Material: {you_label} are down material, which drags the evaluation.")
     else:
         lines.append("Material: roughly balanced, so the eval comes from positional factors.")
 
     # King safety
-    if abs(metrics["king_safety_diff"]) >= 2:
+    if abs(metrics["king_safety_diff"]) >= 3:
         if metrics["king_safety_diff"] > 0:
-            lines.append("King safety: your king is safer or the opponent’s king is more exposed.")
+            lines.append(f"King safety: {you_label} king is safer or {opp_label} king is more exposed.")
         else:
-            lines.append("King safety: your king has more risk than the opponent’s.")
+            lines.append(f"King safety: {you_label} king has more risk than {opp_label}.")
 
     # Piece activity (with specifics)
     your_activity_summary, your_inactive = _piece_activity_details(board, perspective_color)
     opp_activity_summary, opp_inactive = _piece_activity_details(board, opp)
-    if abs(metrics["activity_diff"]) >= 3:
+    if abs(metrics["activity_diff"]) >= 4:
         if metrics["activity_diff"] > 0:
             detail = f" For example, opponent has underactive {', '.join(opp_inactive)}." if opp_inactive else ""
-            lines.append("Piece activity: your pieces are more active overall." + detail)
+            lines.append(f"Piece activity: {you_label} pieces are more active overall." + detail)
         else:
             detail = f" For example, you have underactive {', '.join(your_inactive)}." if your_inactive else ""
-            lines.append("Piece activity: your pieces are less active than the opponent’s." + detail)
+            lines.append(f"Piece activity: {you_label} pieces are less active than {opp_label}." + detail)
     else:
         if your_inactive:
-            lines.append(f"Piece activity: some of your pieces are underactive ({', '.join(your_inactive)}).")
+            lines.append(f"Piece activity: some of {you_label} pieces are underactive ({', '.join(your_inactive)}).")
 
     # Pawn structure (with specifics)
     your_pawns = _pawn_structure_details(board, perspective_color)
     opp_pawns = _pawn_structure_details(board, opp)
-    if abs(metrics["pawn_diff"]) >= 1:
+    if abs(metrics["pawn_diff"]) >= 2:
         if metrics["pawn_diff"] > 0:
             detail = f" Notably, {', '.join(opp_pawns)}." if opp_pawns else ""
-            lines.append("Pawn structure: the opponent has more weaknesses." + detail)
+            lines.append(f"Pawn structure: {opp_label} has more weaknesses." + detail)
         else:
             detail = f" For example, {', '.join(your_pawns)}." if your_pawns else ""
-            lines.append("Pawn structure: your pawn structure has more weaknesses." + detail)
+            lines.append(f"Pawn structure: {you_label} pawn structure has more weaknesses." + detail)
     else:
         if your_pawns:
-            lines.append(f"Pawn structure: you have weaknesses such as {', '.join(your_pawns)}.")
+            lines.append(f"Pawn structure: {you_label} have weaknesses such as {', '.join(your_pawns)}.")
 
     # Initiative / open lines
     open_files = _open_file_details(board)
@@ -343,7 +355,9 @@ def _build_explanation(board: chess.Board, perspective_color: chess.Color, eval_
     lines.append(f"Initiative: {_initiative_indicator(board, perspective_color)}")
 
     # Tone control for non-winning positions
-    if eval_pawns < 1.8:
+    if abs(eval_pawns) <= 0.6:
+        lines.append("Overall: the position is essentially equal; any edge is small and depends on precise play.")
+    elif abs(eval_pawns) < 1.8:
         lines.append("This is not a decisive position; small advantages or disadvantages are the main story.")
 
     return lines
@@ -873,7 +887,13 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
 
                 st.markdown("---")
                 st.subheader("Why this evaluation")
-                explanation_lines = _build_explanation(board, perspective_color, eval_for_perspective)
+                explanation_lines = _build_explanation(
+                    board,
+                    perspective_color,
+                    eval_for_perspective,
+                    focus_color,
+                    side_to_move,
+                )
                 for line in explanation_lines:
                     st.markdown(f"- {line}")
 
