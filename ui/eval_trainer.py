@@ -144,7 +144,11 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
         if not moves or not isinstance(moves, list):
             continue
 
-        # Ensure FENs are present (reconstruct from SAN if needed)
+        # Attach FENs from per-game FEN list if available, then reconstruct from SAN if needed
+        fens_after_ply = game.get("fens_after_ply", [])
+        if fens_after_ply and isinstance(fens_after_ply, list):
+            moves = _attach_fens_from_game(moves, fens_after_ply)
+
         moves = _ensure_fens_in_moves_table(moves)
         if not moves:
             continue
@@ -285,6 +289,28 @@ def _ensure_fens_in_moves_table(moves_table: List[Dict[str, Any]]) -> List[Dict[
     return enriched
 
 
+def _attach_fens_from_game(moves_table: List[Dict[str, Any]], fens_after_ply: List[str]) -> List[Dict[str, Any]]:
+    """Attach FENs to moves_table using per-ply FENs when available."""
+    if not moves_table or not fens_after_ply:
+        return moves_table
+
+    enriched = []
+    for move_data in moves_table:
+        if not isinstance(move_data, dict):
+            continue
+        ply = move_data.get("ply")
+        fen = None
+        if isinstance(ply, int) and ply > 0 and ply - 1 < len(fens_after_ply):
+            fen = fens_after_ply[ply - 1]
+
+        enriched_move = dict(move_data)
+        if fen:
+            enriched_move["fen"] = fen
+        enriched.append(enriched_move)
+
+    return enriched
+
+
 def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     """
     Render the evaluation trainer UI.
@@ -313,13 +339,15 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         game_ids = [str(g.get("index", g.get("game_id", ""))) for g in games[:5]]
         games_fingerprint = f"{len(games)}_{','.join(game_ids)}"
         
-        # Count games that have moves_table entries with FENs or SANs
+        # Count games that have moves_table entries with FENs, SANs, or fens_after_ply
         for g in games:
             moves_table = g.get("moves_table", [])
+            fens_after_ply = g.get("fens_after_ply", [])
             if moves_table and isinstance(moves_table, list):
                 has_fen = any(isinstance(m, dict) and m.get("fen") for m in moves_table)
                 has_san = any(isinstance(m, dict) and m.get("move_san") for m in moves_table)
-                if has_fen or has_san:
+                has_fens_list = isinstance(fens_after_ply, list) and len(fens_after_ply) > 0
+                if has_fen or has_san or has_fens_list:
                     games_with_moves += 1
                     total_moves_found += len(moves_table)
     
