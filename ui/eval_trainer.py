@@ -165,19 +165,21 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             ply = move_data.get("ply", 0)
             move_num = (ply + 1) // 2  # Convert ply to move number
             
-            if eval_cp is None or fen is None:
+            # Fill missing FEN from fens_after_ply if possible
+            if not fen and fens_after_ply and isinstance(ply, int) and ply > 0 and ply - 1 < len(fens_after_ply):
+                fen = fens_after_ply[ply - 1]
+
+            if fen is None:
                 continue
             
             # Skip opening positions (move 1-11) - focus on complex middlegame/endgame
             if move_num < 12:
                 continue
             
-            # Convert cp to pawns
+            # Convert cp to pawns (fallback to 0 if missing)
+            if eval_cp is None:
+                eval_cp = 0
             eval_pawns = eval_cp / 100.0
-            
-            # Filter to defined range
-            if abs(eval_pawns) > 3.0:
-                continue
             
             position = EvalPosition(
                 fen=fen,
@@ -277,11 +279,30 @@ def _ensure_fens_in_moves_table(moves_table: List[Dict[str, Any]]) -> List[Dict[
         san = move_data.get("move_san")
         if not san:
             continue
+
+        pushed = False
+        # Try SAN first
         try:
             board.push_san(san)
+            pushed = True
         except Exception:
-            # Stop reconstruction if SAN is invalid
-            break
+            pass
+
+        # Try UCI as fallback (e2e4, e7e8q, etc.)
+        if not pushed:
+            try:
+                if isinstance(san, str) and len(san) in (4, 5):
+                    move = chess.Move.from_uci(san)
+                    if move in board.legal_moves:
+                        board.push(move)
+                        pushed = True
+            except Exception:
+                pass
+
+        if not pushed:
+            # Skip unparseable move, but keep trying the rest
+            continue
+
         enriched_move = dict(move_data)
         enriched_move["fen"] = board.fen()
         enriched.append(enriched_move)

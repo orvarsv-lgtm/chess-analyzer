@@ -51,6 +51,14 @@ from typing import List, Optional, Set, Tuple, Dict
 import chess
 import chess.engine
 import os
+import sys
+import types
+
+# Workaround for rare import edge-case where __module__ is missing from sys.modules
+# This can surface in Python 3.13 during dataclass annotation processing.
+if sys.modules.get(__name__) is None:
+    sys.modules[__name__] = types.ModuleType(__name__)
+    sys.modules[__name__].__dict__.update(globals())
 
 # =============================================================================
 # PATTERN TAXONOMY ENUMS
