@@ -55,7 +55,7 @@ class EvalTrainerState:
     total_attempts: int = 0
     last_guess: Optional[str] = None
     revealed: bool = False
-    session_id: str = ""  # Track when positions were loaded
+    games_fingerprint: str = ""  # Track which games positions came from
 
 
 _STATE_KEY = "eval_trainer_state_v1"
@@ -107,7 +107,8 @@ def _format_eval(eval_pawns: float) -> str:
 
 def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: int = 50) -> List[EvalPosition]:
     """
-    Extract positions with evaluations from analyzed games.
+    Extract complex positions with evaluations from analyzed games.
+    Focuses on middlegame/endgame positions (move 12+) for complexity.
     Distributes positions evenly across EVAL_RANGES categories.
     """
     positions_by_category = {
@@ -121,21 +122,11 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
     if not games:
         return []
     
-    # Limit iterations to speed up extraction for large game sets
-    max_moves_per_game = 30
-    max_games_to_scan = 200  # Stop scanning after enough positions found
-    moves_scanned = 0
-    
     for game in games:
-        if len([p for positions in positions_by_category.values() for p in positions]) > max_positions * 3:
-            break  # Stop if we have enough positions
-            
         moves = game.get("moves", [])
         if not moves or not isinstance(moves, list):
             continue
         
-        # Limit moves per game for performance
-        moves = moves[:max_moves_per_game]
         game_id = game.get("game_id", "unknown")
         
         for move_data in moves:
@@ -147,6 +138,10 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             move_num = move_data.get("move_num", 0)
             
             if eval_cp is None or fen is None:
+                continue
+            
+            # Skip opening positions (move 1-11) - focus on complex middlegame/endgame
+            if move_num < 12:
                 continue
             
             # Convert cp to pawns
@@ -249,15 +244,24 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     
     state = _get_state()
     
-    # Generate a unique session identifier for this render
-    import hashlib
-    current_session = hashlib.md5(str(id(games) if games else "sample").encode()).hexdigest()[:8]
+    # Track which games we're working with (by game count and first game ID)
+    # This ensures new positions when analyzing different games, but same positions
+    # when returning to the same analysis
+    games_fingerprint = ""
+    if games:
+        game_ids = [g.get("game_id", "") for g in games[:5]]
+        games_fingerprint = f"{len(games)}_{','.join(game_ids)}"
     
-    # Initialize or refresh positions if this is a new session
-    # Handle case where old state doesn't have session_id field
-    previous_session = getattr(state, 'session_id', None)
+    # Check if we need new positions:
+    # 1. No positions yet
+    # 2. Different games being analyzed
+    previous_fingerprint = getattr(state, 'games_fingerprint', None)
+    needs_new_positions = (
+        not state.positions or 
+        previous_fingerprint != games_fingerprint
+    )
     
-    if not state.positions or previous_session != current_session:
+    if needs_new_positions:
         if games:
             state.positions = _extract_positions_from_games(games)
         
@@ -267,7 +271,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         
         # Shuffle positions for variety
         random.shuffle(state.positions)
-        state.session_id = current_session
+        state.games_fingerprint = games_fingerprint
         state.current_index = 0
         state.score = 0
         state.total_attempts = 0
