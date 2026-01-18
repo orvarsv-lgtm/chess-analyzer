@@ -50,6 +50,7 @@ class EvalPosition:
 class EvalTrainerState:
     """State for the evaluation trainer."""
     positions: List[EvalPosition] = field(default_factory=list)
+    all_eligible_positions: List[EvalPosition] = field(default_factory=list)  # Pool to sample from
     current_index: int = 0
     score: int = 0
     total_attempts: int = 0
@@ -69,8 +70,23 @@ def _get_state() -> EvalTrainerState:
 
 
 def _reset_state() -> None:
-    """Reset trainer state."""
-    st.session_state[_STATE_KEY] = EvalTrainerState()
+    """Reset trainer state - keeps eligible positions but samples new ones."""
+    old_state = st.session_state.get(_STATE_KEY)
+    new_state = EvalTrainerState()
+    
+    # Preserve the pool of eligible positions and fingerprint
+    if old_state:
+        all_eligible = getattr(old_state, 'all_eligible_positions', [])
+        new_state.all_eligible_positions = all_eligible
+        new_state.games_fingerprint = getattr(old_state, 'games_fingerprint', "")
+        
+        # Sample new positions from the pool
+        if all_eligible:
+            sample_size = min(50, len(all_eligible))
+            new_state.positions = random.sample(all_eligible, sample_size)
+            random.shuffle(new_state.positions)
+    
+    st.session_state[_STATE_KEY] = new_state
 
 
 def _get_eval_for_side_to_move(eval_cp: int, turn: chess.Color) -> float:
@@ -245,8 +261,6 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     state = _get_state()
     
     # Track which games we're working with (by game count and first game ID)
-    # This ensures new positions when analyzing different games, but same positions
-    # when returning to the same analysis
     games_fingerprint = ""
     if games:
         game_ids = [g.get("game_id", "") for g in games[:5]]
@@ -254,27 +268,32 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     
     # Check if we need new positions:
     # 1. No positions yet
-    # 2. Different games being analyzed
+    # 2. Different games being analyzed (user ran new analysis)
     previous_fingerprint = getattr(state, 'games_fingerprint', None)
-    needs_new_positions = (
-        not state.positions or 
-        previous_fingerprint != games_fingerprint
-    )
+    different_games = previous_fingerprint != games_fingerprint
     
-    if needs_new_positions:
+    if not state.positions or different_games:
+        # Extract ALL eligible positions from games
+        all_eligible = []
         if games:
-            state.positions = _extract_positions_from_games(games)
+            all_eligible = _extract_positions_from_games(games, max_positions=500)
         
-        # Fall back to sample positions if no games or no valid positions extracted
-        if not state.positions:
-            state.positions = _generate_sample_positions()
-        
-        # Shuffle positions for variety
-        random.shuffle(state.positions)
+        # Store all eligible positions for random sampling
+        state.all_eligible_positions = all_eligible if all_eligible else _generate_sample_positions()
         state.games_fingerprint = games_fingerprint
-        state.current_index = 0
+    
+    # Always pick a fresh random sample when entering the trainer
+    # (unless user is mid-session with current_index > 0)
+    if state.current_index == 0 and hasattr(state, 'all_eligible_positions') and state.all_eligible_positions:
+        # Sample 50 random positions from all eligible
+        sample_size = min(50, len(state.all_eligible_positions))
+        state.positions = random.sample(state.all_eligible_positions, sample_size)
+        random.shuffle(state.positions)
         state.score = 0
         state.total_attempts = 0
+    elif not state.positions:
+        # Fallback if no positions
+        state.positions = _generate_sample_positions()
     
     # Sidebar controls
     with st.sidebar:
