@@ -120,11 +120,21 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
     if not games:
         return []
     
+    # Limit iterations to speed up extraction for large game sets
+    max_moves_per_game = 30
+    max_games_to_scan = 200  # Stop scanning after enough positions found
+    moves_scanned = 0
+    
     for game in games:
+        if len([p for positions in positions_by_category.values() for p in positions]) > max_positions * 3:
+            break  # Stop if we have enough positions
+            
         moves = game.get("moves", [])
         if not moves or not isinstance(moves, list):
             continue
-            
+        
+        # Limit moves per game for performance
+        moves = moves[:max_moves_per_game]
         game_id = game.get("game_id", "unknown")
         
         for move_data in moves:
@@ -168,21 +178,19 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
     target_per_category = max_positions // 5
     all_positions = []
     
-    # Shuffle each category separately
+    # Shuffle each category separately and take equal amounts
     for category in positions_by_category.values():
         random.shuffle(category)
-    
-    # Take equal amounts from each category
-    for category in positions_by_category.values():
         all_positions.extend(category[:target_per_category])
     
-    # If we need more positions, fill remaining slots from any category
-    while len(all_positions) < max_positions:
+    # Fill any remaining slots from categories with extras
+    filled = len(all_positions)
+    if filled < max_positions:
+        extras = []
         for category in positions_by_category.values():
-            if len(all_positions) < max_positions:
-                remaining = [p for p in category if p not in all_positions]
-                if remaining:
-                    all_positions.append(remaining[0])
+            extras.extend(category[target_per_category:])
+        random.shuffle(extras)
+        all_positions.extend(extras[:max_positions - filled])
     
     # Final shuffle to randomize order
     random.shuffle(all_positions)
