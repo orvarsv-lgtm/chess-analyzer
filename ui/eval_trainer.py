@@ -107,13 +107,14 @@ def _format_eval(eval_pawns: float) -> str:
 def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: int = 50) -> List[EvalPosition]:
     """
     Extract positions with evaluations from analyzed games.
-    Only includes positions with eval between -3 and +3 pawns.
-    Distributes positions across opening, middlegame, and endgame phases.
+    Distributes positions evenly across EVAL_RANGES categories.
     """
-    positions_by_phase = {
-        "opening": [],
-        "middlegame": [],
-        "endgame": []
+    positions_by_category = {
+        "losing": [],
+        "slightly_worse": [],
+        "equal": [],
+        "slightly_better": [],
+        "winning": []
     }
     
     if not games:
@@ -137,8 +138,11 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             if eval_cp is None or fen is None:
                 continue
             
-            # Filter to reasonable eval range (-300 to +300 cp = -3 to +3 pawns)
-            if abs(eval_cp) > 300:
+            # Convert cp to pawns
+            eval_pawns = eval_cp / 100.0
+            
+            # Filter to defined range
+            if abs(eval_pawns) > 3.0:
                 continue
             
             position = EvalPosition(
@@ -148,31 +152,35 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
                 move_number=move_num,
             )
             
-            # Categorize by phase (using move number as proxy)
-            if move_num <= 15:
-                positions_by_phase["opening"].append(position)
-            elif move_num <= 40:
-                positions_by_phase["middlegame"].append(position)
+            # Categorize by evaluation using EVAL_RANGES
+            if eval_pawns < EVAL_RANGES["losing"][1]:
+                positions_by_category["losing"].append(position)
+            elif eval_pawns < EVAL_RANGES["slightly_worse"][1]:
+                positions_by_category["slightly_worse"].append(position)
+            elif eval_pawns <= EVAL_RANGES["equal"][1]:
+                positions_by_category["equal"].append(position)
+            elif eval_pawns <= EVAL_RANGES["slightly_better"][1]:
+                positions_by_category["slightly_better"].append(position)
             else:
-                positions_by_phase["endgame"].append(position)
+                positions_by_category["winning"].append(position)
     
-    # Distribute positions evenly across phases
-    target_per_phase = max_positions // 3
+    # Distribute positions evenly across categories
+    target_per_category = max_positions // 5
     all_positions = []
     
-    # Shuffle each phase separately
-    for phase in positions_by_phase.values():
-        random.shuffle(phase)
+    # Shuffle each category separately
+    for category in positions_by_category.values():
+        random.shuffle(category)
     
-    # Take equal amounts from each phase
-    for phase in positions_by_phase.values():
-        all_positions.extend(phase[:target_per_phase])
+    # Take equal amounts from each category
+    for category in positions_by_category.values():
+        all_positions.extend(category[:target_per_category])
     
-    # If we need more positions, fill remaining slots from any phase
+    # If we need more positions, fill remaining slots from any category
     while len(all_positions) < max_positions:
-        for phase in positions_by_phase.values():
+        for category in positions_by_category.values():
             if len(all_positions) < max_positions:
-                remaining = [p for p in phase if p not in all_positions]
+                remaining = [p for p in category if p not in all_positions]
                 if remaining:
                     all_positions.append(remaining[0])
     
