@@ -258,6 +258,13 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     st.header("🎯 Evaluation Trainer")
     st.caption("Guess the position's evaluation from the side to move's perspective")
     
+    # Track navigation - detect when user just arrived at this tab
+    last_view_key = "last_rendered_view"
+    current_view = "Evaluations"
+    previous_view = st.session_state.get(last_view_key, "")
+    just_entered = previous_view != current_view
+    st.session_state[last_view_key] = current_view
+    
     state = _get_state()
     
     # Track which games we're working with (by game count and first game ID)
@@ -266,13 +273,12 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         game_ids = [g.get("game_id", "") for g in games[:5]]
         games_fingerprint = f"{len(games)}_{','.join(game_ids)}"
     
-    # Check if we need new positions:
-    # 1. No positions yet
-    # 2. Different games being analyzed (user ran new analysis)
+    # Check if we need to rebuild the position pool:
+    # Different games being analyzed (user ran new analysis)
     previous_fingerprint = getattr(state, 'games_fingerprint', None)
     different_games = previous_fingerprint != games_fingerprint
     
-    if not state.positions or different_games:
+    if different_games or not getattr(state, 'all_eligible_positions', None):
         # Extract ALL eligible positions from games
         all_eligible = []
         if games:
@@ -281,14 +287,15 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         # Store all eligible positions for random sampling
         state.all_eligible_positions = all_eligible if all_eligible else _generate_sample_positions()
         state.games_fingerprint = games_fingerprint
+        just_entered = True  # Force new sample when games change
     
-    # Always pick a fresh random sample when entering the trainer
-    # (unless user is mid-session with current_index > 0)
-    if state.current_index == 0 and hasattr(state, 'all_eligible_positions') and state.all_eligible_positions:
-        # Sample 50 random positions from all eligible
-        sample_size = min(50, len(state.all_eligible_positions))
-        state.positions = random.sample(state.all_eligible_positions, sample_size)
+    # Pick a fresh random sample when first entering the trainer
+    if just_entered and getattr(state, 'all_eligible_positions', None):
+        pool = state.all_eligible_positions
+        sample_size = min(50, len(pool))
+        state.positions = random.sample(pool, sample_size)
         random.shuffle(state.positions)
+        state.current_index = 0
         state.score = 0
         state.total_attempts = 0
     elif not state.positions:
@@ -308,6 +315,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         
         if st.button("🔄 New Set", use_container_width=True):
             _reset_state()
+            st.rerun()
             st.rerun()
         
         st.markdown("---")
