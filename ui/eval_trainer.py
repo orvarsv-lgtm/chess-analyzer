@@ -359,10 +359,14 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             if move_num < 12:
                 continue
             
-            # Convert cp to pawns (fallback to 0 if missing)
+            # Convert cp to pawns (skip if missing)
             if eval_cp is None:
-                eval_cp = 0
+                continue
             eval_pawns = eval_cp / 100.0
+
+            # Filter to defined range (-3 to +3 pawns)
+            if abs(eval_pawns) > 3.0:
+                continue
             
             position = EvalPosition(
                 fen=fen,
