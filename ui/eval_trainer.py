@@ -254,7 +254,10 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     current_session = hashlib.md5(str(id(games) if games else "sample").encode()).hexdigest()[:8]
     
     # Initialize or refresh positions if this is a new session
-    if not state.positions or state.session_id != current_session:
+    # Handle case where old state doesn't have session_id field
+    previous_session = getattr(state, 'session_id', None)
+    
+    if not state.positions or previous_session != current_session:
         if games:
             state.positions = _extract_positions_from_games(games)
         
