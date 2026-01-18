@@ -193,6 +193,64 @@ def _mobility_score(board: chess.Board, color: chess.Color) -> int:
     return temp.legal_moves.count()
 
 
+def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str, list[str]]:
+    temp = board.copy(stack=False)
+    temp.turn = color
+    move_counts: dict[int, int] = {}
+    for mv in temp.legal_moves:
+        move_counts[mv.from_square] = move_counts.get(mv.from_square, 0) + 1
+
+    inactive = []
+    for piece_type in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT):
+        for sq in board.pieces(piece_type, color):
+            count = move_counts.get(sq, 0)
+            if count <= 1:
+                name = chess.piece_name(piece_type)
+                inactive.append(f"{name} on {chess.square_name(sq)}")
+
+    summary = "Pieces are generally active." if not inactive else "Some pieces are underactive."
+    return summary, inactive[:2]
+
+
+def _pawn_structure_details(board: chess.Board, color: chess.Color) -> list[str]:
+    pawns = board.pieces(chess.PAWN, color)
+    if not pawns:
+        return []
+    files = {f: [] for f in range(8)}
+    for sq in pawns:
+        files[chess.square_file(sq)].append(sq)
+
+    details = []
+    # Doubled pawns
+    for f, squares in files.items():
+        if len(squares) > 1:
+            details.append(f"doubled pawns on the {chr(ord('a') + f)}-file")
+
+    # Isolated pawns
+    for f, squares in files.items():
+        if not squares:
+            continue
+        left = files.get(f - 1, [])
+        right = files.get(f + 1, [])
+        if not left and not right:
+            for sq in squares:
+                details.append(f"isolated pawn on {chess.square_name(sq)}")
+
+    return details[:2]
+
+
+def _open_file_details(board: chess.Board) -> list[str]:
+    files = []
+    for f in range(8):
+        file_squares = [chess.square(f, r) for r in range(8)]
+        has_pawn = any(board.piece_at(sq) == chess.Piece(chess.PAWN, chess.WHITE) or
+                       board.piece_at(sq) == chess.Piece(chess.PAWN, chess.BLACK)
+                       for sq in file_squares)
+        if not has_pawn:
+            files.append(f"open {chr(ord('a') + f)}-file")
+    return files[:1]
+
+
 def _initiative_indicator(board: chess.Board, color: chess.Color) -> str:
     temp = board.copy(stack=False)
     temp.turn = color
@@ -231,6 +289,8 @@ def _analyze_position(board: chess.Board, perspective_color: chess.Color) -> dic
 def _build_explanation(board: chess.Board, perspective_color: chess.Color, eval_pawns: float) -> list[str]:
     metrics = _analyze_position(board, perspective_color)
     lines: list[str] = []
+    opp = not perspective_color
+    side_label = "your" if perspective_color == chess.WHITE else "your"
 
     # Material
     if abs(metrics["material_diff"]) >= 100:
@@ -248,21 +308,38 @@ def _build_explanation(board: chess.Board, perspective_color: chess.Color, eval_
         else:
             lines.append("King safety: your king has more risk than the opponent’s.")
 
-    # Piece activity
+    # Piece activity (with specifics)
+    your_activity_summary, your_inactive = _piece_activity_details(board, perspective_color)
+    opp_activity_summary, opp_inactive = _piece_activity_details(board, opp)
     if abs(metrics["activity_diff"]) >= 3:
         if metrics["activity_diff"] > 0:
-            lines.append("Piece activity: your pieces have more mobility and coordination.")
+            detail = f" For example, opponent has underactive {', '.join(opp_inactive)}." if opp_inactive else ""
+            lines.append("Piece activity: your pieces are more active overall." + detail)
         else:
-            lines.append("Piece activity: your pieces are less active than the opponent’s.")
+            detail = f" For example, you have underactive {', '.join(your_inactive)}." if your_inactive else ""
+            lines.append("Piece activity: your pieces are less active than the opponent’s." + detail)
+    else:
+        if your_inactive:
+            lines.append(f"Piece activity: some of your pieces are underactive ({', '.join(your_inactive)}).")
 
-    # Pawn structure
+    # Pawn structure (with specifics)
+    your_pawns = _pawn_structure_details(board, perspective_color)
+    opp_pawns = _pawn_structure_details(board, opp)
     if abs(metrics["pawn_diff"]) >= 1:
         if metrics["pawn_diff"] > 0:
-            lines.append("Pawn structure: the opponent has more weaknesses (isolated/doubled pawns).")
+            detail = f" Notably, {', '.join(opp_pawns)}." if opp_pawns else ""
+            lines.append("Pawn structure: the opponent has more weaknesses." + detail)
         else:
-            lines.append("Pawn structure: your pawn structure has more weaknesses.")
+            detail = f" For example, {', '.join(your_pawns)}." if your_pawns else ""
+            lines.append("Pawn structure: your pawn structure has more weaknesses." + detail)
+    else:
+        if your_pawns:
+            lines.append(f"Pawn structure: you have weaknesses such as {', '.join(your_pawns)}.")
 
-    # Initiative
+    # Initiative / open lines
+    open_files = _open_file_details(board)
+    if open_files:
+        lines.append(f"Open lines: {', '.join(open_files)}, which can increase pressure if controlled.")
     lines.append(f"Initiative: {_initiative_indicator(board, perspective_color)}")
 
     # Tone control for non-winning positions
@@ -285,6 +362,8 @@ def _extract_user_factors(text: str) -> set[str]:
         factors.add("pawn structure")
     if any(k in t for k in ("initiative", "threat", "tempo", "pressure", "checks")):
         factors.add("initiative")
+    if any(k in t for k in ("file", "square", "outpost", "weak pawn", "weakness", "open file")):
+        factors.add("concrete feature")
     return factors
 
 
@@ -300,6 +379,8 @@ def _key_factors_from_metrics(metrics: dict) -> list[str]:
         keys.append("pawn structure")
     if not keys:
         keys.append("initiative")
+    if "concrete feature" not in keys:
+        keys.append("concrete feature")
     return keys[:2]
 
 
