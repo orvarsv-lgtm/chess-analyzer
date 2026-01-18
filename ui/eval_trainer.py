@@ -55,6 +55,7 @@ class EvalTrainerState:
     total_attempts: int = 0
     last_guess: Optional[str] = None
     revealed: bool = False
+    session_id: str = ""  # Track when positions were loaded
 
 
 _STATE_KEY = "eval_trainer_state_v1"
@@ -248,8 +249,12 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     
     state = _get_state()
     
-    # Initialize positions if needed
-    if not state.positions:
+    # Generate a unique session identifier for this render
+    import hashlib
+    current_session = hashlib.md5(str(id(games) if games else "sample").encode()).hexdigest()[:8]
+    
+    # Initialize or refresh positions if this is a new session
+    if not state.positions or state.session_id != current_session:
         if games:
             state.positions = _extract_positions_from_games(games)
         
@@ -257,8 +262,12 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         if not state.positions:
             state.positions = _generate_sample_positions()
         
-        # Shuffle positions on initial load
+        # Shuffle positions for variety
         random.shuffle(state.positions)
+        state.session_id = current_session
+        state.current_index = 0
+        state.score = 0
+        state.total_attempts = 0
     
     # Sidebar controls
     with st.sidebar:
