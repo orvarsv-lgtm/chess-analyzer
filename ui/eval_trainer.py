@@ -121,7 +121,7 @@ def _format_eval(eval_pawns: float) -> str:
     return f"{eval_pawns:.1f}"
 
 
-def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: int = 50) -> List[EvalPosition]:
+def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: int = 500) -> List[EvalPosition]:
     """
     Extract complex positions with evaluations from analyzed games.
     Focuses on middlegame/endgame positions (move 12+) for complexity.
@@ -139,19 +139,22 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
         return []
     
     for game in games:
-        moves = game.get("moves", [])
+        # Use moves_table which contains the analysis data
+        moves = game.get("moves_table", [])
         if not moves or not isinstance(moves, list):
             continue
         
-        game_id = game.get("game_id", "unknown")
+        game_id = game.get("index", game.get("game_id", "unknown"))
         
         for move_data in moves:
             if not isinstance(move_data, dict):
                 continue
             
-            eval_cp = move_data.get("eval_before")
-            fen = move_data.get("fen_before")
-            move_num = move_data.get("move_num", 0)
+            # Get eval (score_cp) and FEN from moves_table structure
+            eval_cp = move_data.get("score_cp")
+            fen = move_data.get("fen")
+            ply = move_data.get("ply", 0)
+            move_num = (ply + 1) // 2  # Convert ply to move number
             
             if eval_cp is None or fen is None:
                 continue
@@ -170,7 +173,7 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             position = EvalPosition(
                 fen=fen,
                 eval_cp=eval_cp,
-                source_game=game_id,
+                source_game=str(game_id),
                 move_number=move_num,
             )
             

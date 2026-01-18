@@ -676,10 +676,13 @@ def _compute_cp_loss_rows(
             try:
                 board = chess.Board(fens_after_ply[i])
                 phase = _classify_phase(i, total_plies, board)
+                fen = fens_after_ply[i]
             except Exception:
                 phase = _phase_for_ply(i, total_plies)
+                fen = None
         else:
             phase = _phase_for_ply(i, total_plies)
+            fen = None
         out.append(
             {
                 "ply": i + 1,
@@ -690,6 +693,7 @@ def _compute_cp_loss_rows(
                 "actual_cp_loss": actual_cp_loss,  # For display in move list
                 "phase": phase,
                 "cpl_included": bool(cpl_included),
+                "fen": fen,  # Store FEN for eval trainer
             }
         )
     return out
