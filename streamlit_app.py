@@ -2016,58 +2016,58 @@ def main() -> None:
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
         
-        /* Global font application */
+        /* Global font application - with emoji/symbol support */
         html, body, [class*="css"], .stApp, p, div, span, li, td, th, label, input, textarea, select {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
         /* Headers - make them bolder */
         h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
         
         /* Streamlit title */
         .stTitle, [data-testid="stHeader"] {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
         
         /* AI Coach output and markdown content */
         .stMarkdown, .stMarkdown p, .stMarkdown div, .stMarkdown span {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
-        /* Buttons */
-        button, .stButton button, [data-testid="baseButton-secondary"] {
-            font-family: 'Libre Baskerville', serif !important;
+        /* Buttons - ensure emojis/symbols render properly */
+        button, .stButton button, [data-testid="baseButton-secondary"], [data-testid="baseButton-primary"] {
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
         
         /* Metrics and stats */
         [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
         /* Sidebar */
         [data-testid="stSidebar"], [data-testid="stSidebar"] * {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
         /* Tabs */
         [data-baseweb="tab"], [data-baseweb="tab-list"] {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
         
         /* Text areas and inputs */
         textarea, input, .stTextInput input, .stTextArea textarea {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
         /* Captions and smaller text */
         .stCaption, small, .css-1dp5vir {
-            font-family: 'Libre Baskerville', serif !important;
+            font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -2111,15 +2111,45 @@ def main() -> None:
 def _render_pinned_navigation(view_options: list[str]) -> str:
     """Render pinned navigation as two rows of buttons."""
     
-    # Custom CSS for navigation buttons to ensure text fitting
+    # Custom CSS for navigation buttons - improved styling and spacing
     st.markdown("""
         <style>
+        /* Navigation button improvements */
+        div[data-testid="column"] {
+            padding: 0 4px !important;
+        }
+        
         div[data-testid="column"] button {
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            padding: 0.4rem 0.1rem !important;
-            font-size: 0.85rem !important;
+            padding: 0.65rem 0.5rem !important;
+            font-size: 0.95rem !important;
+            min-height: 2.8rem !important;
+            font-weight: 700 !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        /* Primary buttons (selected state) */
+        div[data-testid="column"] button[data-testid="baseButton-primary"] {
+            background-color: #ff4b4b !important;
+            border: 2px solid #ff4b4b !important;
+        }
+        
+        /* Secondary buttons (unselected state) */
+        div[data-testid="column"] button[data-testid="baseButton-secondary"] {
+            border: 2px solid #e0e0e0 !important;
+        }
+        
+        div[data-testid="column"] button:hover {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1) !important;
+        }
+        
+        /* Navigation container spacing */
+        .navigation-container {
+            margin-bottom: 1.5rem;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -2141,6 +2171,8 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
     row1 = view_options[:5]
     row2 = view_options[5:]
 
+    st.markdown('<div class="navigation-container">', unsafe_allow_html=True)
+    
     # Row 1
     cols1 = st.columns(5, gap="small")
     for i, (col, option) in enumerate(zip(cols1, row1)):
@@ -2152,7 +2184,8 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
     for i, (col, option) in enumerate(zip(cols2, row2)):
         with col:
             _render_nav_button_logic(option, label_map, i + 5)
-            
+    
+    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("---")
     return st.session_state.get("main_view", view_options[0])
 
