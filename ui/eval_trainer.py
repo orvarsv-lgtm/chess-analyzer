@@ -269,9 +269,19 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     
     # Track which games we're working with (by game count and first game ID)
     games_fingerprint = ""
+    games_with_moves = 0
+    total_moves_found = 0
+    
     if games:
         game_ids = [g.get("game_id", "") for g in games[:5]]
         games_fingerprint = f"{len(games)}_{','.join(game_ids)}"
+        
+        # Count games that have move data
+        for g in games:
+            moves = g.get("moves", [])
+            if moves and isinstance(moves, list) and len(moves) > 0:
+                games_with_moves += 1
+                total_moves_found += len(moves)
     
     # Check if we need to rebuild the position pool:
     # Different games being analyzed (user ran new analysis)
@@ -285,7 +295,12 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
             all_eligible = _extract_positions_from_games(games, max_positions=500)
         
         # Store all eligible positions for random sampling
-        state.all_eligible_positions = all_eligible if all_eligible else _generate_sample_positions()
+        if all_eligible:
+            state.all_eligible_positions = all_eligible
+            state.using_sample = False
+        else:
+            state.all_eligible_positions = _generate_sample_positions()
+            state.using_sample = True
         state.games_fingerprint = games_fingerprint
         just_entered = True  # Force new sample when games change
     
@@ -301,6 +316,16 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     elif not state.positions:
         # Fallback if no positions
         state.positions = _generate_sample_positions()
+        state.using_sample = True
+    
+    # Show info about position source
+    using_sample = getattr(state, 'using_sample', True)
+    pool_size = len(getattr(state, 'all_eligible_positions', []))
+    
+    if using_sample:
+        st.info(f"📚 Using sample positions (no game positions found with evaluation data). Games: {len(games) if games else 0}, with moves: {games_with_moves}")
+    else:
+        st.success(f"🎮 Using {pool_size} positions from your analyzed games")
     
     # Sidebar controls
     with st.sidebar:
