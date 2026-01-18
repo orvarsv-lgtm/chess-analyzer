@@ -111,14 +111,20 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
     """
     positions = []
     
+    if not games:
+        return positions
+    
     for game in games:
         moves = game.get("moves", [])
-        if not moves:
+        if not moves or not isinstance(moves, list):
             continue
             
         game_id = game.get("game_id", "unknown")
         
         for move_data in moves:
+            if not isinstance(move_data, dict):
+                continue
+            
             eval_cp = move_data.get("eval_before")
             fen = move_data.get("fen_before")
             move_num = move_data.get("move_num", 0)
