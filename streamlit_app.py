@@ -108,6 +108,9 @@ from puzzles.global_puzzle_store import load_global_puzzles, save_puzzles_to_glo
 # Play vs Engine tab
 from src.play_vs_engine import render_play_vs_engine_tab
 
+# Evaluation Trainer
+from ui.eval_trainer import render_eval_trainer
+
 # Pricing page
 from src.pricing_ui import render_pricing_page
 from src.legal_ui import (
@@ -2015,14 +2018,25 @@ def main() -> None:
     st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
+        /* Material Icons (restore ligature-based icons so names like "double_arrow_right" render correctly) */
+        @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
+        @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Outlined');
+        @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Round');
+        @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Sharp');
         
-        /* Global font application - with emoji/symbol support */
-        html, body, [class*="css"], .stApp, p, div, span, li, td, th, label, input, textarea, select {
+        /* Global font application - with emoji/symbol support.
+           IMPORTANT: Do NOT override icon elements (Material Icons/BaseWeb icons) to avoid text like "double_arrow_right" showing. */
+        html, body, .stApp,
+        p,
+        div:not(.material-icons):not(.material-icons-outlined):not(.material-icons-round):not(.material-icons-sharp):not([data-baseweb="icon"]),
+        span:not(.material-icons):not(.material-icons-outlined):not(.material-icons-round):not(.material-icons-sharp):not([data-baseweb="icon"]),
+        li, td, th, label, input, textarea, select {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
         }
         
         /* Headers - make them bolder */
-        h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+        h1, h2, h3, h4, h5, h6,
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
@@ -2043,6 +2057,23 @@ def main() -> None:
             font-family: 'Libre Baskerville', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', serif !important;
             font-weight: 700 !important;
         }
+
+        /* Explicitly restore Material Icons for any icon spans */
+        .material-icons {
+            font-family: 'Material Icons' !important;
+            font-weight: normal !important;
+            font-style: normal !important;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+        }
+        .material-icons-outlined { font-family: 'Material Icons Outlined' !important; }
+        .material-icons-round { font-family: 'Material Icons Round' !important; }
+        .material-icons-sharp { font-family: 'Material Icons Sharp' !important; }
         
         /* Metrics and stats */
         [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {
@@ -2163,11 +2194,12 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
         "Opponent Analysis": "Opponent",
         "Streaks": "Streaks",
         "Puzzles": "Puzzles",
+        "Evaluations": "Evals",
         "Play vs Engine": "Vs Engine",
         "Pricing": "Pricing",
     }
 
-    # Split into two rows (5 items top, 4 items bottom)
+    # Split into two rows (5 items top, 5 items bottom)
     row1 = view_options[:5]
     row2 = view_options[5:]
 
@@ -2180,7 +2212,7 @@ def _render_pinned_navigation(view_options: list[str]) -> str:
             _render_nav_button_logic(option, label_map, i)
 
     # Row 2
-    cols2 = st.columns(4, gap="small")
+    cols2 = st.columns(5, gap="small")
     for i, (col, option) in enumerate(zip(cols2, row2)):
         with col:
             _render_nav_button_logic(option, label_map, i + 5)
@@ -2225,6 +2257,7 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
         f"⚔️ Opponent Analysis",
         f"🏆 Streaks",
         f"♟️ {t('tab_puzzles')}",
+        f"🎯 Evaluations",
         f"🤺 Play vs Engine",
         f"💎 Pricing",
     ]
@@ -2280,6 +2313,10 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
             st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to see your Streaks.")
         else:
             _render_streaks_tab(aggregated)
+    elif "Evaluations" in view:
+        # Eval trainer can work with or without analyzed games
+        games = aggregated.get("games", []) if has_analysis else []
+        render_eval_trainer(games)
     elif "Play vs Engine" in view:
         render_play_vs_engine_tab()
     elif "Pricing" in view:
