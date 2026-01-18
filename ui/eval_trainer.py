@@ -894,20 +894,22 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                 if not is_correct:
                     st.caption(f"You guessed: {BUTTON_LABELS[state.last_guess]}")
 
-                st.markdown("---")
-                st.subheader("Why this evaluation")
-                explanation_lines = _build_explanation(
-                    board,
-                    perspective_color,
-                    eval_for_perspective,
-                    focus_color,
-                    side_to_move,
-                )
-                for line in explanation_lines:
-                    st.markdown(f"- {line}")
-
-                # Optionally show AI-generated explanation (may call OpenAI)
+                # Only show the full deterministic explanation and feedback when AI explanations
+                # are enabled in the sidebar. Otherwise keep the UI minimal.
                 if ai_explanations_enabled:
+                    st.markdown("---")
+                    st.subheader("Why this evaluation")
+                    explanation_lines = _build_explanation(
+                        board,
+                        perspective_color,
+                        eval_for_perspective,
+                        focus_color,
+                        side_to_move,
+                    )
+                    for line in explanation_lines:
+                        st.markdown(f"- {line}")
+
+                    # Optionally show AI-generated explanation (may call OpenAI)
                     try:
                         from src.ai_coach import generate_position_insight
 
@@ -925,7 +927,6 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     except Exception as e:
                         st.error(f"AI explanation failed: {e}")
 
-                if ai_explanations_enabled:
                     st.markdown("---")
                     st.subheader("Your explanation feedback")
                     user_factors = _extract_user_factors(state.explanation_text)
