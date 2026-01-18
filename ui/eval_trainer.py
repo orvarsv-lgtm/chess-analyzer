@@ -276,15 +276,17 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     total_moves_found = 0
     
     if games:
-        game_ids = [g.get("game_id", "") for g in games[:5]]
+        game_ids = [str(g.get("index", g.get("game_id", ""))) for g in games[:5]]
         games_fingerprint = f"{len(games)}_{','.join(game_ids)}"
         
-        # Count games that have move data
+        # Count games that have moves_table entries with FENs
         for g in games:
-            moves = g.get("moves", [])
-            if moves and isinstance(moves, list) and len(moves) > 0:
-                games_with_moves += 1
-                total_moves_found += len(moves)
+            moves_table = g.get("moves_table", [])
+            if moves_table and isinstance(moves_table, list):
+                has_fen = any(isinstance(m, dict) and m.get("fen") for m in moves_table)
+                if has_fen:
+                    games_with_moves += 1
+                    total_moves_found += len(moves_table)
     
     # Check if we need to rebuild the position pool:
     # Different games being analyzed (user ran new analysis)
@@ -326,7 +328,10 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     pool_size = len(getattr(state, 'all_eligible_positions', []))
     
     if using_sample:
-        st.info(f"📚 Using sample positions (no game positions found with evaluation data). Games: {len(games) if games else 0}, with moves: {games_with_moves}")
+        st.info(
+            f"📚 Using sample positions (no game positions found with evaluation data). "
+            f"Games: {len(games) if games else 0}, with moves_table+FEN: {games_with_moves}"
+        )
     else:
         st.success(f"🎮 Using {pool_size} positions from your analyzed games")
     

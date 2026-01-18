@@ -1718,39 +1718,51 @@ def _render_analysis_input_form() -> None:
                 # Check if this game is already cached
                 if game_id and game_id in cached_games:
                     cached = cached_games[game_id]
-                    # Verify it's the same game (PGN hash check would be here)
-                    status.info(f"Game {i} of {games_to_analyze}: ✅ Using cached analysis")
-                    cache_hits += 1
-                    
-                    # Reconstruct game data from cache
-                    focus_color = _infer_focus_color(gi.headers, focus_player)
-                    game_data = {
-                        "index": gi.index,
-                        "date": cached.get("date") or gi.headers.get("UTCDate") or gi.headers.get("Date") or "",
-                        "white": cached.get("white") or gi.headers.get("White") or "",
-                        "black": cached.get("black") or gi.headers.get("Black") or "",
-                        "result": cached.get("result") or gi.headers.get("Result") or "",
-                        "eco": cached.get("eco") or gi.headers.get("ECO") or "",
-                        "opening": cached.get("opening") or gi.headers.get("Opening") or "",
-                        "moves": int((gi.num_plies + 1) // 2),
-                        "moves_table": cached.get("moves_table", []),
-                        "focus_color": focus_color,
-                        "white_rating": cached.get("white_rating"),
-                        "black_rating": cached.get("black_rating"),
-                        "focus_player_rating": cached.get("focus_player_rating"),
-                        "_cached": True,
-                        # Clock data from current PGN (not cached, re-extract each time)
-                        "time_control": gi.headers.get("TimeControl") or "",
-                        "move_clocks": list(gi.move_clocks),
-                        "has_clock_data": gi.has_clock_data,
-                        "color": focus_color,
-                    }
-                    aggregated_games.append(game_data)
-                    aggregated_rows.extend(cached.get("raw_analysis", []))
-                    
-                    progress.progress(int((i / games_to_analyze) * 100))
-                    cache_info.caption(f"📦 Cache: {cache_hits} hits, {cache_misses} new")
-                    continue
+                    moves_table = cached.get("moves_table", [])
+                    cache_has_fen = (
+                        isinstance(moves_table, list)
+                        and len(moves_table) > 0
+                        and isinstance(moves_table[0], dict)
+                        and "fen" in moves_table[0]
+                    )
+
+                    if not cache_has_fen:
+                        status.info(f"Game {i} of {games_to_analyze}: ♻️ Cache outdated (no FEN). Re-analyzing...")
+                        cache_misses += 1
+                    else:
+                        # Verify it's the same game (PGN hash check would be here)
+                        status.info(f"Game {i} of {games_to_analyze}: ✅ Using cached analysis")
+                        cache_hits += 1
+                        
+                        # Reconstruct game data from cache
+                        focus_color = _infer_focus_color(gi.headers, focus_player)
+                        game_data = {
+                            "index": gi.index,
+                            "date": cached.get("date") or gi.headers.get("UTCDate") or gi.headers.get("Date") or "",
+                            "white": cached.get("white") or gi.headers.get("White") or "",
+                            "black": cached.get("black") or gi.headers.get("Black") or "",
+                            "result": cached.get("result") or gi.headers.get("Result") or "",
+                            "eco": cached.get("eco") or gi.headers.get("ECO") or "",
+                            "opening": cached.get("opening") or gi.headers.get("Opening") or "",
+                            "moves": int((gi.num_plies + 1) // 2),
+                            "moves_table": cached.get("moves_table", []),
+                            "focus_color": focus_color,
+                            "white_rating": cached.get("white_rating"),
+                            "black_rating": cached.get("black_rating"),
+                            "focus_player_rating": cached.get("focus_player_rating"),
+                            "_cached": True,
+                            # Clock data from current PGN (not cached, re-extract each time)
+                            "time_control": gi.headers.get("TimeControl") or "",
+                            "move_clocks": list(gi.move_clocks),
+                            "has_clock_data": gi.has_clock_data,
+                            "color": focus_color,
+                        }
+                        aggregated_games.append(game_data)
+                        aggregated_rows.extend(cached.get("raw_analysis", []))
+                        
+                        progress.progress(int((i / games_to_analyze) * 100))
+                        cache_info.caption(f"📦 Cache: {cache_hits} hits, {cache_misses} new")
+                        continue
                 
                 # Not in cache - analyze with engine
                 cache_misses += 1
