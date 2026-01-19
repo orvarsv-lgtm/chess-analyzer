@@ -488,7 +488,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         games: Optional list of analyzed games to extract positions from
     """
     st.header("🎯 Evaluation Trainer")
-    st.caption("Guess the position's evaluation from your perspective when available")
+    st.caption("Guess the position's evaluation (White POV: + = White better, − = Black better)")
     
     # Track navigation - detect when user just arrived at this tab
     last_view_key = "last_rendered_view"
@@ -633,12 +633,12 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     board = chess.Board(position.fen)
     ai_explanations_enabled = st.session_state.get("eval_ai_enabled", False)
     
-    # Determine side to move and eval from their perspective
+    # Determine side to move and eval from White's perspective
     side_to_move = board.turn
     side_name = "White" if side_to_move == chess.WHITE else "Black"
     focus_color = _normalize_focus_color(getattr(position, "focus_color", None))
-    eval_for_perspective = _get_eval_for_player(position.eval_cp, focus_color, side_to_move)
-    correct_category = _classify_eval(eval_for_perspective)
+    eval_white_pov = position.eval_cp / 100.0
+    correct_category = _classify_eval(eval_white_pov)
     if focus_color == "white":
         perspective_color = chess.WHITE
     elif focus_color == "black":
@@ -773,12 +773,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     st.rerun()
             else:
                 # Reveal evaluation and AI explanation after user explanation
-                perspective_label = "Your" if focus_color in {"white", "black"} else "Side-to-move"
-                eval_white_pov = position.eval_cp / 100.0
-                st.markdown(f"**Actual eval ({perspective_label}):** {_format_eval(eval_for_perspective)}")
-                st.caption(
-                    f"White perspective (− = Black better, + = White better): {_format_eval(eval_white_pov)}"
-                )
+                st.markdown(f"**Actual eval (White POV):** {_format_eval(eval_white_pov)}")
                 st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
                 if not is_correct:
                     st.caption(f"You guessed: {BUTTON_LABELS[state.last_guess]}")
@@ -791,7 +786,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     explanation_lines = _build_explanation(
                         board,
                         perspective_color,
-                        eval_for_perspective,
+                        eval_white_pov,
                         focus_color,
                         side_to_move,
                     )
