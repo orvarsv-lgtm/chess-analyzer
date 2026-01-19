@@ -30,9 +30,9 @@ EVAL_RANGES = {
 
 BUTTON_LABELS = {
     "losing": "😰 Losing",
-    "slightly_worse": "😕 Slightly Worse",
+    "slightly_worse": "😕 Worse",
     "equal": "😐 Equal",
-    "slightly_better": "🙂 Slightly Better",
+    "slightly_better": "🙂 Better",
     "winning": "😄 Winning",
 }
 
@@ -214,34 +214,6 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
         summary = "All major pieces have reasonable activity"
 
     return summary, inactive_unique
-
-    # Pawn structure (with specifics)
-    your_pawns = _pawn_structure_details(board, perspective_color)
-    opp_pawns = _pawn_structure_details(board, opp)
-    if abs(metrics["pawn_diff"]) >= 2:
-        if metrics["pawn_diff"] > 0:
-            detail = f" Notably, {', '.join(opp_pawns)}." if opp_pawns else ""
-            lines.append(f"Pawn structure: {opp_label} has more weaknesses." + detail)
-        else:
-            detail = f" For example, {', '.join(your_pawns)}." if your_pawns else ""
-            lines.append(f"Pawn structure: {you_label} pawn structure has more weaknesses." + detail)
-    else:
-        if your_pawns:
-            lines.append(f"Pawn structure: {you_label} have weaknesses such as {', '.join(your_pawns)}.")
-
-    # Initiative / open lines
-    open_files = _open_file_details(board)
-    if open_files:
-        lines.append(f"Open lines: {', '.join(open_files)}, which can increase pressure if controlled.")
-    lines.append(f"Initiative: {_initiative_indicator(board, perspective_color)}")
-
-    # Tone control for non-winning positions
-    if abs(eval_pawns) <= 0.6:
-        lines.append("Overall: the position is essentially equal; any edge is small and depends on precise play.")
-    elif abs(eval_pawns) < 1.8:
-        lines.append("This is not a decisive position; small advantages or disadvantages are the main story.")
-
-    return lines
 
 
 def _extract_user_factors(text: str) -> set[str]:
@@ -607,9 +579,9 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         st.markdown("""
         **Evaluation Ranges:**
         - 😰 **Losing**: < -1.8
-        - 😕 **Slightly Worse**: -1.8 to -0.6
+        - 😕 **Worse**: -1.8 to -0.6
         - 😐 **Equal**: -0.6 to +0.6
-        - 🙂 **Slightly Better**: +0.6 to +1.8
+        - 🙂 **Better**: +0.6 to +1.8
         - 😄 **Winning**: > +1.8
         """)
         # Toggle to enable AI-generated explanations (optional, may incur API cost)
@@ -694,11 +666,20 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
             st.markdown(
                 """
                 <style>
-                .eval-buttons .stButton button {
-                    min-height: 56px;
-                    font-size: 1rem;
+                section.main div.stButton > button {
+                    width: 100%;
+                    padding: 0px 4px;
+                    height: 60px;
+                    min-height: 60px;
+                    font-size: 14px;
                     font-weight: 600;
-                    border-radius: 12px;
+                    border-radius: 8px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
                 }
                 </style>
                 """,
