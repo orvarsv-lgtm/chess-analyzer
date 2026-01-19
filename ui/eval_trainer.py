@@ -213,11 +213,6 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
                 font-weight: 600;
                 border-radius: 18px;
             }
-            .eval-buttons .equal-button .stButton button {
-                background: linear-gradient(120deg, #2563eb, #3b82f6) !important;
-                color: white !important;
-                border: none !important;
-            }
             </style>
             """,
             unsafe_allow_html=True,
@@ -250,10 +245,9 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
                         state.score += 1
                     st.rerun()
             
-            # Middle row (equal spans wide)
-            col_mid = st.columns([0.5, 1, 0.5], gap="small")
-            with col_mid[1]:
-                st.markdown("<div class='equal-button'>", unsafe_allow_html=True)
+            # Middle row (single button, same width as others)
+            col_mid1, col_mid2 = st.columns(2, gap="small")
+            with col_mid1:
                 if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
                     state.last_guess = "equal"
                     state.revealed = True
@@ -263,7 +257,8 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
+            with col_mid2:
+                st.empty()
 
             # Bottom row
             col_bot1, col_bot2 = st.columns(2, gap="small")
