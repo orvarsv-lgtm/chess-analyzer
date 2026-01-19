@@ -202,101 +202,18 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
 
     inactive = []
     for piece_type in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT):
-        st.markdown("---")
-        
-        st.markdown(
-            """
-            <style>
-            .eval-buttons .stButton button {
-                min-height: 56px;
-                font-size: 1rem;
-                font-weight: 600;
-                border-radius: 18px;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        
-        if not state.revealed:
-            st.markdown("<div class='eval-buttons'>", unsafe_allow_html=True)
-            st.markdown("**What's the evaluation?**")
-            
-            # Single row with five equal-width buttons
-            cols = st.columns(5, gap="small")
-            with cols[0]:
-                if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
-                    state.last_guess = "losing"
-                    state.revealed = True
-                    state.explanation_text = ""
-                    state.explanation_submitted = False
-                    state.total_attempts += 1
-                    if state.last_guess == correct_category:
-                        state.score += 1
-                    st.rerun()
-            with cols[1]:
-                if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
-                    state.last_guess = "slightly_worse"
-                    state.revealed = True
-                    state.explanation_text = ""
-                    state.explanation_submitted = False
-                    state.total_attempts += 1
-                    if state.last_guess == correct_category:
-                        state.score += 1
-                    st.rerun()
-            with cols[2]:
-                if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
-                    state.last_guess = "equal"
-                    state.revealed = True
-                    state.explanation_text = ""
-                    state.explanation_submitted = False
-                    state.total_attempts += 1
-                    if state.last_guess == correct_category:
-                        state.score += 1
-                    st.rerun()
-            with cols[3]:
-                if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
-                    state.last_guess = "slightly_better"
-                    state.revealed = True
-                    state.explanation_text = ""
-                    state.explanation_submitted = False
-                    state.total_attempts += 1
-                    if state.last_guess == correct_category:
-                        state.score += 1
-                    st.rerun()
-            with cols[4]:
-                if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
-                    state.last_guess = "winning"
-                    state.revealed = True
-                    state.explanation_text = ""
-                    state.explanation_submitted = False
-                    state.total_attempts += 1
-                    if state.last_guess == correct_category:
-                        state.score += 1
-                    st.rerun()
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+        for sq in board.pieces(piece_type, color):
+            cnt = move_counts.get(sq, 0)
+            if cnt <= 1:
+                inactive.append(chess.piece_name(piece_type))
 
-    # King safety
-    if abs(metrics["king_safety_diff"]) >= 3:
-        if metrics["king_safety_diff"] > 0:
-            lines.append(f"King safety: {you_label} king is safer or {opp_label} king is more exposed.")
-        else:
-            lines.append(f"King safety: {you_label} king has more risk than {opp_label}.")
-
-    # Piece activity (with specifics)
-    your_activity_summary, your_inactive = _piece_activity_details(board, perspective_color)
-    opp_activity_summary, opp_inactive = _piece_activity_details(board, opp)
-    if abs(metrics["activity_diff"]) >= 4:
-        if metrics["activity_diff"] > 0:
-            detail = f" For example, opponent has underactive {', '.join(opp_inactive)}." if opp_inactive else ""
-            lines.append(f"Piece activity: {you_label} pieces are more active overall." + detail)
-        else:
-            detail = f" For example, you have underactive {', '.join(your_inactive)}." if your_inactive else ""
-            lines.append(f"Piece activity: {you_label} pieces are less active than {opp_label}." + detail)
+    inactive_unique = sorted(set(inactive))
+    if inactive_unique:
+        summary = f"Underactive pieces: {', '.join(inactive_unique)}"
     else:
-        if your_inactive:
-            lines.append(f"Piece activity: some of {you_label} pieces are underactive ({', '.join(your_inactive)}).")
+        summary = "All major pieces have reasonable activity"
+
+    return summary, inactive_unique
 
     # Pawn structure (with specifics)
     your_pawns = _pawn_structure_details(board, perspective_color)
@@ -774,11 +691,22 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         # Guess buttons (only if not revealed)
         if not state.revealed:
             st.markdown("**What's the evaluation?**")
-            
-            # Create 5-button grid: 2 on top, 1 in middle, 2 on bottom (centered)
-            # Top row: Losing, Slightly Worse
-            col_top1, col_top2 = st.columns([1, 1], gap="small")
-            with col_top1:
+            st.markdown(
+                """
+                <style>
+                .eval-buttons .stButton button {
+                    min-height: 56px;
+                    font-size: 1rem;
+                    font-weight: 600;
+                    border-radius: 12px;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            cols = st.columns(5, gap="small")
+            with cols[0]:
                 if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
                     state.last_guess = "losing"
                     state.revealed = True
@@ -788,8 +716,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            
-            with col_top2:
+            with cols[1]:
                 if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
                     state.last_guess = "slightly_worse"
                     state.revealed = True
@@ -799,10 +726,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            
-            # Middle row: Equal (centered)
-            col_mid_l, col_mid_c, col_mid_r = st.columns([1, 2, 1], gap="small")
-            with col_mid_c:
+            with cols[2]:
                 if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
                     state.last_guess = "equal"
                     state.revealed = True
@@ -812,10 +736,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            
-            # Bottom row: Slightly Better, Winning
-            col_bot1, col_bot2 = st.columns([1, 1], gap="small")
-            with col_bot1:
+            with cols[3]:
                 if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
                     state.last_guess = "slightly_better"
                     state.revealed = True
@@ -825,8 +746,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            
-            with col_bot2:
+            with cols[4]:
                 if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
                     state.last_guess = "winning"
                     state.revealed = True
