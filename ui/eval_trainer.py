@@ -811,10 +811,10 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         if not state.revealed:
             st.markdown("**What's the evaluation?**")
             
-            # Create button grid
-            col1, col2 = st.columns(2)
-            
-            with col1:
+            # Create 5-button grid: 2 on top, 1 in middle, 2 on bottom (centered)
+            # Top row: Losing, Slightly Worse
+            col_top1, col_top2 = st.columns([1, 1], gap="small")
+            with col_top1:
                 if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
                     state.last_guess = "losing"
                     state.revealed = True
@@ -824,7 +824,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-                
+            
+            with col_top2:
                 if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
                     state.last_guess = "slightly_worse"
                     state.revealed = True
@@ -834,7 +835,10 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-                
+            
+            # Middle row: Equal (centered)
+            col_mid_l, col_mid_c, col_mid_r = st.columns([1, 2, 1], gap="small")
+            with col_mid_c:
                 if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
                     state.last_guess = "equal"
                     state.revealed = True
@@ -845,7 +849,9 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                         state.score += 1
                     st.rerun()
             
-            with col2:
+            # Bottom row: Slightly Better, Winning
+            col_bot1, col_bot2 = st.columns([1, 1], gap="small")
+            with col_bot1:
                 if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
                     state.last_guess = "slightly_better"
                     state.revealed = True
@@ -855,7 +861,8 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-                
+            
+            with col_bot2:
                 if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
                     state.last_guess = "winning"
                     state.revealed = True
