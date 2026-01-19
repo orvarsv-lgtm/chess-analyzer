@@ -222,9 +222,9 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
             st.markdown("<div class='eval-buttons'>", unsafe_allow_html=True)
             st.markdown("**What's the evaluation?**")
             
-            # Top row
-            col_top1, col_top2 = st.columns(2, gap="small")
-            with col_top1:
+            # Single row with five equal-width buttons
+            cols = st.columns(5, gap="small")
+            with cols[0]:
                 if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
                     state.last_guess = "losing"
                     state.revealed = True
@@ -234,7 +234,7 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            with col_top2:
+            with cols[1]:
                 if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
                     state.last_guess = "slightly_worse"
                     state.revealed = True
@@ -244,10 +244,7 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            
-            # Middle row (single button, same width as others)
-            col_mid1, col_mid2 = st.columns(2, gap="small")
-            with col_mid1:
+            with cols[2]:
                 if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
                     state.last_guess = "equal"
                     state.revealed = True
@@ -257,12 +254,7 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            with col_mid2:
-                st.empty()
-
-            # Bottom row
-            col_bot1, col_bot2 = st.columns(2, gap="small")
-            with col_bot1:
+            with cols[3]:
                 if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
                     state.last_guess = "slightly_better"
                     state.revealed = True
@@ -272,7 +264,7 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-            with col_bot2:
+            with cols[4]:
                 if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
                     state.last_guess = "winning"
                     state.revealed = True
