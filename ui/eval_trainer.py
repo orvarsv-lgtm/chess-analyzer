@@ -109,11 +109,23 @@ def _get_eval_for_player(eval_cp: int, focus_color: Optional[str], turn: chess.C
     Falls back to side-to-move perspective if focus_color is unavailable.
     Returns eval in pawns.
     """
+    focus_color = _normalize_focus_color(focus_color)
     if focus_color == "white":
         return eval_cp / 100.0
     if focus_color == "black":
         return -eval_cp / 100.0
     return _get_eval_for_side_to_move(eval_cp, turn)
+
+
+def _normalize_focus_color(focus_color: Optional[str]) -> Optional[str]:
+    if not focus_color:
+        return None
+    normalized = str(focus_color).strip().lower()
+    if normalized in {"white", "w"}:
+        return "white"
+    if normalized in {"black", "b"}:
+        return "black"
+    return None
 
 
 def _classify_eval(eval_pawns: float) -> str:
@@ -624,7 +636,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     # Determine side to move and eval from their perspective
     side_to_move = board.turn
     side_name = "White" if side_to_move == chess.WHITE else "Black"
-    focus_color = getattr(position, "focus_color", None)
+    focus_color = _normalize_focus_color(getattr(position, "focus_color", None))
     eval_for_perspective = _get_eval_for_player(position.eval_cp, focus_color, side_to_move)
     correct_category = _classify_eval(eval_for_perspective)
     if focus_color == "white":
@@ -762,7 +774,11 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
             else:
                 # Reveal evaluation and AI explanation after user explanation
                 perspective_label = "Your" if focus_color in {"white", "black"} else "Side-to-move"
+                eval_white_pov = position.eval_cp / 100.0
                 st.markdown(f"**Actual eval ({perspective_label}):** {_format_eval(eval_for_perspective)}")
+                st.caption(
+                    f"White perspective (− = Black better, + = White better): {_format_eval(eval_white_pov)}"
+                )
                 st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
                 if not is_correct:
                     st.caption(f"You guessed: {BUTTON_LABELS[state.last_guess]}")
