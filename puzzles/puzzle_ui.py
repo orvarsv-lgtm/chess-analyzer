@@ -143,6 +143,21 @@ class PuzzleUIState:
         """Clear last result."""
         if "puzzle_last_result" in st.session_state:
             del st.session_state["puzzle_last_result"]
+    
+    @classmethod
+    def get_solution_sequence_pos(cls) -> int:
+        """Get current position in multi-move puzzle solution sequence (0-indexed)."""
+        return st.session_state.get("puzzle_solution_pos", 0)
+    
+    @classmethod
+    def set_solution_sequence_pos(cls, pos: int) -> None:
+        """Set position in solution sequence."""
+        st.session_state["puzzle_solution_pos"] = pos
+    
+    @classmethod
+    def reset_solution_sequence_pos(cls) -> None:
+        """Reset to start of solution sequence."""
+        st.session_state["puzzle_solution_pos"] = 0
 
 
 # =============================================================================
@@ -340,19 +355,40 @@ def check_puzzle_answer(
     board: chess.Board,
     user_move: chess.Move,
     correct_move_san: str,
+    solution_moves: Optional[List[str]] = None,
+    solution_index: int = 0,
 ) -> Tuple[bool, str]:
     """
     Check if user's move matches the puzzle's correct answer.
     
+    For multi-move puzzles, validates against the solution sequence at the current index.
+    
     Args:
         board: Current board position
         user_move: User's move object
-        correct_move_san: Correct answer in SAN
+        correct_move_san: Correct answer in SAN (for backward compatibility)
+        solution_moves: Full solution sequence (UCI moves)
+        solution_index: Current position in solution sequence (0-indexed)
     
     Returns:
         (is_correct, message)
     """
-    # Convert user move to SAN
+    # Use solution_moves if available (multi-move puzzle)
+    if solution_moves and 0 <= solution_index < len(solution_moves):
+        expected_uci = solution_moves[solution_index]
+        user_uci = user_move.uci()
+        if user_uci == expected_uci:
+            return True, "Correct! ✅"
+        else:
+            # Try to convert expected move to SAN for display
+            try:
+                expected_move = chess.Move.from_uci(expected_uci)
+                expected_san = board.san(expected_move)
+            except Exception:
+                expected_san = expected_uci
+            return False, f"Incorrect. The best move was {expected_san}"
+    
+    # Fallback to original logic (single-move puzzle)
     user_san = board.san(user_move)
     
     # Parse correct move
@@ -708,6 +744,31 @@ def _render_upgrade_placeholder() -> None:
 # =============================================================================
 
 
+def _load_solution_moves_for_puzzle(puzzle: Puzzle) -> Optional[List[str]]:
+    """
+    Load the full solution line for a puzzle from the global store.
+    
+    Args:
+        puzzle: The puzzle to load the solution for
+    
+    Returns:
+        List of UCI moves if available, else None
+    """
+    if puzzle.solution_moves:
+        # Already loaded
+        return puzzle.solution_moves
+    
+    try:
+        from puzzles.global_supabase_store import get_cached_solution_line
+        # Compute puzzle_key same way as in global_puzzle_store.py
+        puzzle_key = f"{puzzle.source_game_index}_{puzzle.move_number}_{puzzle.puzzle_id}"
+        solution_line = get_cached_solution_line(puzzle_key)
+        return solution_line
+    except Exception:
+        # Supabase not available or solution not found
+        return None
+
+
 def render_puzzle_page(
     puzzles: List[Puzzle],
     is_premium: bool = False,
@@ -738,8 +799,15 @@ def render_puzzle_page(
         if st.button("🔄 Reset Puzzles", key="puzzle_reset_all"):
             session.reset()
             PuzzleUIState.clear_selected_square()
+            PuzzleUIState.reset_solution_sequence_pos()
             st.rerun()
         return
+    
+    # Load solution_moves from Supabase if not already loaded
+    if not puzzle.solution_moves:
+        solution_moves = _load_solution_moves_for_puzzle(puzzle)
+        if solution_moves:
+            puzzle.solution_moves = solution_moves
     
     # Check if already solved current puzzle
     current_attempts = session.get_attempts_for_current()
@@ -841,10 +909,20 @@ def render_puzzle_page(
                     move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
             
             if move in board.legal_moves:
-                is_correct, result_msg = check_puzzle_answer(board, move, puzzle.best_move_san)
+                solution_index = PuzzleUIState.get_solution_sequence_pos()
+                is_correct, result_msg = check_puzzle_answer(
+                    board, move, puzzle.best_move_san,
+                    solution_moves=puzzle.solution_moves,
+                    solution_index=solution_index,
+                )
                 user_san = board.san(move)
                 session.record_attempt(user_san, is_correct)
                 PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
+                
+                # If correct and multi-move puzzle, advance sequence
+                if is_correct and puzzle.solution_moves:
+                    PuzzleUIState.set_solution_sequence_pos(solution_index + 1)
+                
                 PuzzleUIState.clear_selected_square()
                 st.rerun()
     
@@ -868,6 +946,7 @@ def render_puzzle_page(
         if session.advance_to_next():
             PuzzleUIState.clear_last_result()
             PuzzleUIState.clear_selected_square()
+            PuzzleUIState.reset_solution_sequence_pos()  # Reset for new puzzle
             st.rerun()
     
     if prev_clicked:
@@ -875,12 +954,14 @@ def render_puzzle_page(
             session.current_index -= 1
             PuzzleUIState.clear_last_result()
             PuzzleUIState.clear_selected_square()
+            PuzzleUIState.reset_solution_sequence_pos()  # Reset for new puzzle
             st.rerun()
     
     if reset_clicked:
         session.reset()
         PuzzleUIState.clear_last_result()
         PuzzleUIState.clear_selected_square()
+        PuzzleUIState.reset_solution_sequence_pos()  # Reset for new puzzle
         st.rerun()
     
     # Stats at bottom

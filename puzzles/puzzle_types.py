@@ -115,6 +115,9 @@ class Puzzle:
     # NEW: Tactical pattern attribution (engine-first, constraint-based)
     tactical_patterns: Optional[Dict[str, Any]] = None  # Serialized PatternAttribution
     
+    # NEW: Full solution line for multi-move puzzles (UCI moves: [player_move, opponent_response, player_move, ...])
+    solution_moves: Optional[List[str]] = None  # Lazy-loaded from solution_line table if multi-move
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -140,6 +143,7 @@ class Puzzle:
             "is_forcing": self.is_forcing,
             "move_gap_cp": self.move_gap_cp,
             "tactical_patterns": self.tactical_patterns,
+            "solution_moves": self.solution_moves,
         }
     
     @classmethod
@@ -168,6 +172,7 @@ class Puzzle:
             is_forcing=data.get("is_forcing", False),
             move_gap_cp=data.get("move_gap_cp", 0),
             tactical_patterns=data.get("tactical_patterns"),
+            solution_moves=data.get("solution_moves"),
         )
     
     def to_json(self) -> str:
