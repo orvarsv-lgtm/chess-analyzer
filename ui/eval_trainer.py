@@ -202,116 +202,93 @@ def _piece_activity_details(board: chess.Board, color: chess.Color) -> tuple[str
 
     inactive = []
     for piece_type in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT):
-        for sq in board.pieces(piece_type, color):
-            count = move_counts.get(sq, 0)
-            if count <= 1:
-                name = chess.piece_name(piece_type)
-                inactive.append(f"{name} on {chess.square_name(sq)}")
+        st.markdown("---")
+        
+        st.markdown(
+            """
+            <style>
+            .eval-buttons .stButton button {
+                min-height: 56px;
+                font-size: 1rem;
+                font-weight: 600;
+                border-radius: 18px;
+            }
+            .eval-buttons .equal-button .stButton button {
+                background: linear-gradient(120deg, #2563eb, #3b82f6) !important;
+                color: white !important;
+                border: none !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+        if not state.revealed:
+            st.markdown("<div class='eval-buttons'>", unsafe_allow_html=True)
+            st.markdown("**What's the evaluation?**")
+            
+            # Top row
+            col_top1, col_top2 = st.columns(2, gap="small")
+            with col_top1:
+                if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
+                    state.last_guess = "losing"
+                    state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
+                    state.total_attempts += 1
+                    if state.last_guess == correct_category:
+                        state.score += 1
+                    st.rerun()
+            with col_top2:
+                if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
+                    state.last_guess = "slightly_worse"
+                    state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
+                    state.total_attempts += 1
+                    if state.last_guess == correct_category:
+                        state.score += 1
+                    st.rerun()
+            
+            # Middle row (equal spans wide)
+            col_mid = st.columns([0.5, 1, 0.5], gap="small")
+            with col_mid[1]:
+                st.markdown("<div class='equal-button'>", unsafe_allow_html=True)
+                if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
+                    state.last_guess = "equal"
+                    state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
+                    state.total_attempts += 1
+                    if state.last_guess == correct_category:
+                        state.score += 1
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
-    summary = "Pieces are generally active." if not inactive else "Some pieces are underactive."
-    return summary, inactive[:2]
-
-
-def _pawn_structure_details(board: chess.Board, color: chess.Color) -> list[str]:
-    pawns = board.pieces(chess.PAWN, color)
-    if not pawns:
-        return []
-    files = {f: [] for f in range(8)}
-    for sq in pawns:
-        files[chess.square_file(sq)].append(sq)
-
-    details = []
-    # Doubled pawns
-    for f, squares in files.items():
-        if len(squares) > 1:
-            details.append(f"doubled pawns on the {chr(ord('a') + f)}-file")
-
-    # Isolated pawns
-    for f, squares in files.items():
-        if not squares:
-            continue
-        left = files.get(f - 1, [])
-        right = files.get(f + 1, [])
-        if not left and not right:
-            for sq in squares:
-                details.append(f"isolated pawn on {chess.square_name(sq)}")
-
-    return details[:2]
-
-
-def _open_file_details(board: chess.Board) -> list[str]:
-    files = []
-    for f in range(8):
-        file_squares = [chess.square(f, r) for r in range(8)]
-        has_pawn = any(board.piece_at(sq) == chess.Piece(chess.PAWN, chess.WHITE) or
-                       board.piece_at(sq) == chess.Piece(chess.PAWN, chess.BLACK)
-                       for sq in file_squares)
-        if not has_pawn:
-            files.append(f"open {chr(ord('a') + f)}-file")
-    return files[:1]
-
-
-def _initiative_indicator(board: chess.Board, color: chess.Color) -> str:
-    temp = board.copy(stack=False)
-    temp.turn = color
-    if temp.is_check():
-        return "The opponent is in check, so the initiative is immediate."
-    checks = 0
-    for mv in temp.legal_moves:
-        temp.push(mv)
-        if temp.is_check():
-            checks += 1
-        temp.pop()
-        if checks >= 2:
-            break
-    if checks >= 2:
-        return "There are forcing threats (multiple checks available), suggesting initiative."
-    if checks == 1:
-        return "There is at least one forcing check available, indicating some initiative."
-    return "No immediate forcing threats are available; the initiative is limited."
-
-
-def _analyze_position(board: chess.Board, perspective_color: chess.Color) -> dict:
-    opp = not perspective_color
-    material_diff = _material_score(board, perspective_color) - _material_score(board, opp)
-    king_safety_diff = _king_safety_penalty(board, opp) - _king_safety_penalty(board, perspective_color)
-    activity_diff = _mobility_score(board, perspective_color) - _mobility_score(board, opp)
-    pawn_diff = _pawn_structure_penalty(board, opp) - _pawn_structure_penalty(board, perspective_color)
-
-    return {
-        "material_diff": material_diff,
-        "king_safety_diff": king_safety_diff,
-        "activity_diff": activity_diff,
-        "pawn_diff": pawn_diff,
-    }
-
-
-def _build_explanation(
-    board: chess.Board,
-    perspective_color: chess.Color,
-    eval_pawns: float,
-    focus_color: Optional[str],
-    side_to_move: chess.Color,
-) -> list[str]:
-    metrics = _analyze_position(board, perspective_color)
-    lines: list[str] = []
-    opp = not perspective_color
-
-    if focus_color in {"white", "black"}:
-        you_label = "you"
-        opp_label = "your opponent"
-    else:
-        you_label = "side to move"
-        opp_label = "the opponent"
-
-    # Material
-    if abs(metrics["material_diff"]) >= 100:
-        if metrics["material_diff"] > 0:
-            lines.append(f"Material: {you_label} are up material, which supports the evaluation.")
-        else:
-            lines.append(f"Material: {you_label} are down material, which drags the evaluation.")
-    else:
-        lines.append("Material: roughly balanced, so the eval comes from positional factors.")
+            # Bottom row
+            col_bot1, col_bot2 = st.columns(2, gap="small")
+            with col_bot1:
+                if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
+                    state.last_guess = "slightly_better"
+                    state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
+                    state.total_attempts += 1
+                    if state.last_guess == correct_category:
+                        state.score += 1
+                    st.rerun()
+            with col_bot2:
+                if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
+                    state.last_guess = "winning"
+                    state.revealed = True
+                    state.explanation_text = ""
+                    state.explanation_submitted = False
+                    state.total_attempts += 1
+                    if state.last_guess == correct_category:
+                        state.score += 1
+                    st.rerun()
+            
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # King safety
     if abs(metrics["king_safety_diff"]) >= 3:
