@@ -396,17 +396,19 @@ def check_puzzle_answer(
     
     # Determine what the expected move is
     expected_uci = None
+    expected_san = None
     expected_display = correct_move_san  # Default display
     
     # For multi-move puzzles, get the expected move at current index
     if solution_moves and len(solution_moves) > 0:
         if 0 <= solution_index < len(solution_moves):
             expected_uci = solution_moves[solution_index]
-            # Try to get SAN for display
+            # Try to get SAN for display and comparison
             try:
                 expected_move_obj = chess.Move.from_uci(expected_uci)
                 if expected_move_obj in board.legal_moves:
-                    expected_display = board.san(expected_move_obj)
+                    expected_san = board.san(expected_move_obj)
+                    expected_display = expected_san
             except Exception:
                 expected_display = expected_uci
     
@@ -415,24 +417,28 @@ def check_puzzle_answer(
         try:
             expected_move_obj = board.parse_san(correct_move_san)
             expected_uci = expected_move_obj.uci()
+            expected_san = correct_move_san
             expected_display = correct_move_san
         except Exception:
             # Last resort: just use the SAN as-is for comparison
             expected_uci = None
+            expected_san = correct_move_san
             expected_display = correct_move_san
     
-    # Compare moves
+    # Compare moves - UCI comparison is primary
     if expected_uci and user_uci == expected_uci:
         return True, "Correct! ✅"
     
-    # Also try direct SAN comparison as fallback
-    try:
-        user_san = board.san(user_move)
-        clean_user = re.sub(r"[+#?!]+$", "", user_san).strip()
-        clean_expected = re.sub(r"[+#?!]+$", "", correct_move_san).strip()
-        if clean_user == clean_expected:
-            return True, "Correct! ✅"
-    except Exception:
+    # Also try direct SAN comparison as fallback (use expected_san, NOT correct_move_san)
+    if expected_san:
+        try:
+            user_san = board.san(user_move)
+            clean_user = re.sub(r"[+#?!]+$", "", user_san).strip()
+            clean_expected = re.sub(r"[+#?!]+$", "", expected_san).strip()
+            if clean_user == clean_expected:
+                return True, "Correct! ✅"
+        except Exception:
+            pass
         pass
     
     return False, f"Incorrect. The best move was {expected_display}"
@@ -1034,6 +1040,9 @@ def render_puzzle_page(
                 
                 PuzzleUIState.clear_selected_square()
                 st.rerun()
+    
+    # DEBUG: Show state values
+    st.caption(f"DEBUG: last_result={last_result}, solution_moves={puzzle.solution_moves}, seq_pos={PuzzleUIState.get_solution_sequence_pos()}")
     
     # Show result if available
     if last_result:

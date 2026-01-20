@@ -477,7 +477,7 @@ def _attach_fens_from_game(moves_table: List[Dict[str, Any]], fens_after_ply: Li
             enriched_move["fen"] = fen
         enriched.append(enriched_move)
 
-    return enriched
+    return enrichedI
 
 
 def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
