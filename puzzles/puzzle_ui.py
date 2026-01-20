@@ -361,7 +361,8 @@ def check_puzzle_answer(
     """
     Check if user's move matches the puzzle's correct answer.
     
-    For multi-move puzzles, validates against the solution sequence at the current index.
+    For multi-move puzzles, the first move (best move) is always correct when played.
+    Subsequent moves are validated against the solution sequence.
     
     Args:
         board: Current board position
@@ -373,24 +374,39 @@ def check_puzzle_answer(
     Returns:
         (is_correct, message)
     """
-    # Use solution_moves if available (multi-move puzzle)
-    if solution_moves and 0 <= solution_index < len(solution_moves):
-        expected_uci = solution_moves[solution_index]
-        user_uci = user_move.uci()
-        if user_uci == expected_uci:
-            return True, "Correct! ✅"
-        else:
-            # Try to convert expected move to SAN for display
-            try:
-                expected_move = chess.Move.from_uci(expected_uci)
-                expected_san = board.san(expected_move)
-            except Exception:
-                expected_san = expected_uci
-            return False, f"Incorrect. The best move was {expected_san}"
-    
-    # Fallback to original logic (single-move puzzle)
+    user_uci = user_move.uci()
     user_san = board.san(user_move)
     
+    # Use solution_moves if available (multi-move puzzle)
+    if solution_moves and len(solution_moves) > 0:
+        # Always accept the first move of the solution (best move)
+        first_move_uci = solution_moves[0]
+        if user_uci == first_move_uci:
+            return True, "Correct! ✅"
+        
+        # For subsequent moves in the sequence, match at current index
+        if 0 <= solution_index < len(solution_moves):
+            expected_uci = solution_moves[solution_index]
+            if user_uci == expected_uci:
+                return True, "Correct! ✅"
+            else:
+                # Try to convert first move to SAN for display
+                try:
+                    first_move = chess.Move.from_uci(first_move_uci)
+                    first_san = board.san(first_move)
+                except Exception:
+                    first_san = first_move_uci
+                return False, f"Incorrect. The best move was {first_san}"
+        
+        # Fallback: wrong move
+        try:
+            first_move = chess.Move.from_uci(first_move_uci)
+            first_san = board.san(first_move)
+        except Exception:
+            first_san = first_move_uci
+        return False, f"Incorrect. The best move was {first_san}"
+    
+    # Fallback to original logic (single-move puzzle)
     # Parse correct move
     try:
         correct_move = board.parse_san(correct_move_san)
