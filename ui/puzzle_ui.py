@@ -1027,7 +1027,8 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
                         # Update state for continuation
                         progress.current_fen = board.fen()
                         progress.solution_move_index = next_player_idx
-                        progress.last_uci = None  # Clear last move to prevent stale component output being reprocessed
+                        # DON'T clear last_uci - keep it to prevent reprocessing the same move
+                        # progress.last_uci = None  # REMOVED - this caused the move to be reprocessed
                         progress.opponent_last_uci = opponent_uci  # Store for highlighting
                         progress.last_result = None  # Not complete yet
                         progress.opponent_just_moved = True
