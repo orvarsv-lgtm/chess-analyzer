@@ -159,6 +159,22 @@ class PuzzleUIState:
         """Reset to start of solution sequence."""
         st.session_state["puzzle_solution_pos"] = 0
 
+    @classmethod
+    def get_opponent_played_msg(cls) -> Optional[str]:
+        return st.session_state.get("puzzle_opponent_played")
+
+    @classmethod
+    def set_opponent_played_msg(cls, msg: Optional[str]) -> None:
+        if msg:
+            st.session_state["puzzle_opponent_played"] = msg
+        elif "puzzle_opponent_played" in st.session_state:
+            del st.session_state["puzzle_opponent_played"]
+
+    @classmethod
+    def clear_opponent_played_msg(cls) -> None:
+        if "puzzle_opponent_played" in st.session_state:
+            del st.session_state["puzzle_opponent_played"]
+
 
 # =============================================================================
 # PERFORMANCE-OPTIMIZED LEGAL MOVE COMPUTATION
@@ -439,6 +455,42 @@ def check_puzzle_answer(
         return True, "Correct! ✅"
     
     return False, f"Incorrect. The best move was {correct_move_san}"
+
+
+def _parse_solution_move(board: chess.Board, move_str: str) -> Optional[chess.Move]:
+    candidate = (move_str or "").strip()
+    if not candidate:
+        return None
+    if re.match(r"^[a-h][1-8][a-h][1-8][qrbn]?$", candidate):
+        try:
+            move = chess.Move.from_uci(candidate)
+            if move in board.legal_moves:
+                return move
+        except Exception:
+            pass
+    try:
+        return board.parse_san(candidate)
+    except Exception:
+        try:
+            cleaned = re.sub(r"[+#?!]+$", "", candidate)
+            return board.parse_san(cleaned)
+        except Exception:
+            return None
+
+
+def _build_board_for_sequence(puzzle: Puzzle, sequence_pos: int) -> chess.Board:
+    board = chess.Board(puzzle.fen)
+    if not puzzle.solution_moves:
+        return board
+    limit = min(sequence_pos, len(puzzle.solution_moves))
+    for idx in range(limit):
+        move = _parse_solution_move(board, puzzle.solution_moves[idx])
+        if not move:
+            break
+        if move not in board.legal_moves:
+            break
+        board.push(move)
+    return board
 
 
 def get_legal_moves_display(board: chess.Board) -> List[str]:
@@ -847,6 +899,7 @@ def render_puzzle_page(
     current_attempts = session.get_attempts_for_current()
     already_solved = any(a.is_correct for a in current_attempts)
     last_result = PuzzleUIState.get_last_result()
+    opponent_played_msg = PuzzleUIState.get_opponent_played_msg()
     selected_square = PuzzleUIState.get_selected_square()
     
     # Free limit check
@@ -911,7 +964,8 @@ def render_puzzle_page(
     
     with col_board:
         try:
-            board = chess.Board(puzzle.fen)
+            sequence_pos = PuzzleUIState.get_solution_sequence_pos()
+            board = _build_board_for_sequence(puzzle, sequence_pos)
         except Exception:
             st.error(f"Invalid FEN: {puzzle.fen}")
             return
@@ -929,7 +983,7 @@ def render_puzzle_page(
         )
         
         # Process move if made
-        if move_made:
+        if move_made and not already_solved:
             from_sq, to_sq = move_made
             
             # Create move (check for pawn promotion)
@@ -955,7 +1009,21 @@ def render_puzzle_page(
                 
                 # If correct and multi-move puzzle, advance sequence
                 if is_correct and puzzle.solution_moves:
-                    PuzzleUIState.set_solution_sequence_pos(solution_index + 1)
+                    next_pos = solution_index + 1
+                    opponent_msg = None
+                    if next_pos < len(puzzle.solution_moves):
+                        board_after = board.copy()
+                        board_after.push(move)
+                        opponent_move = _parse_solution_move(board_after, puzzle.solution_moves[next_pos])
+                        if opponent_move and opponent_move in board_after.legal_moves:
+                            opponent_san = board_after.san(opponent_move)
+                            opponent_msg = f"Opponent has played {opponent_san}."
+                            board_after.push(opponent_move)
+                            next_pos += 1
+                    PuzzleUIState.set_solution_sequence_pos(next_pos)
+                    PuzzleUIState.set_opponent_played_msg(opponent_msg)
+                else:
+                    PuzzleUIState.clear_opponent_played_msg()
                 
                 PuzzleUIState.clear_selected_square()
                 st.rerun()
@@ -965,6 +1033,8 @@ def render_puzzle_page(
         st.divider()
         if last_result == "correct":
             render_puzzle_result(True, "Correct! ✅", puzzle)
+            if opponent_played_msg:
+                st.info(opponent_played_msg)
         else:
             render_puzzle_result(
                 False,
@@ -981,6 +1051,7 @@ def render_puzzle_page(
             PuzzleUIState.clear_last_result()
             PuzzleUIState.clear_selected_square()
             PuzzleUIState.reset_solution_sequence_pos()  # Reset for new puzzle
+            PuzzleUIState.clear_opponent_played_msg()
             st.rerun()
     
     if prev_clicked:
@@ -989,6 +1060,7 @@ def render_puzzle_page(
             PuzzleUIState.clear_last_result()
             PuzzleUIState.clear_selected_square()
             PuzzleUIState.reset_solution_sequence_pos()  # Reset for new puzzle
+            PuzzleUIState.clear_opponent_played_msg()
             st.rerun()
     
     if reset_clicked:
@@ -996,6 +1068,7 @@ def render_puzzle_page(
         PuzzleUIState.clear_last_result()
         PuzzleUIState.clear_selected_square()
         PuzzleUIState.reset_solution_sequence_pos()  # Reset for new puzzle
+        PuzzleUIState.clear_opponent_played_msg()
         st.rerun()
     
     # Stats at bottom
