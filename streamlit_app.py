@@ -2438,6 +2438,7 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
             
             if cached_puzzles:
                 st.session_state["generated_puzzles"] = cached_puzzles
+                puzzles = cached_puzzles
                 st.success(f"✓ Loaded {len(cached_puzzles)} puzzles from cache")
             else:
                 # Generate fresh puzzles with progress tracking
