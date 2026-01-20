@@ -394,10 +394,6 @@ def check_puzzle_answer(
     """
     user_uci = user_move.uci()
     
-    # DEBUG: Print values to understand what's happening
-    print(f"DEBUG check_puzzle_answer: user_uci={user_uci}, correct_move_san={correct_move_san}")
-    print(f"DEBUG: solution_moves={solution_moves}, solution_index={solution_index}")
-    
     # Determine what the expected move is
     expected_uci = None
     expected_display = correct_move_san  # Default display
@@ -406,7 +402,6 @@ def check_puzzle_answer(
     if solution_moves and len(solution_moves) > 0:
         if 0 <= solution_index < len(solution_moves):
             expected_uci = solution_moves[solution_index]
-            print(f"DEBUG: Got expected_uci from solution_moves[{solution_index}] = {expected_uci}")
             # Try to get SAN for display
             try:
                 expected_move_obj = chess.Move.from_uci(expected_uci)
@@ -417,38 +412,29 @@ def check_puzzle_answer(
     
     # If no expected_uci from solution_moves, parse from correct_move_san
     if not expected_uci:
-        print(f"DEBUG: No expected_uci from solution_moves, parsing from correct_move_san")
         try:
             expected_move_obj = board.parse_san(correct_move_san)
             expected_uci = expected_move_obj.uci()
             expected_display = correct_move_san
-            print(f"DEBUG: Parsed correct_move_san to UCI: {expected_uci}")
-        except Exception as e:
+        except Exception:
             # Last resort: just use the SAN as-is for comparison
             expected_uci = None
             expected_display = correct_move_san
-            print(f"DEBUG: Failed to parse correct_move_san: {e}")
     
     # Compare moves
-    print(f"DEBUG: Comparing user_uci={user_uci} vs expected_uci={expected_uci}")
     if expected_uci and user_uci == expected_uci:
-        print(f"DEBUG: MATCH! Returning True")
         return True, "Correct! ✅"
     
-    print(f"DEBUG: No UCI match, trying SAN fallback")
     # Also try direct SAN comparison as fallback
     try:
         user_san = board.san(user_move)
         clean_user = re.sub(r"[+#?!]+$", "", user_san).strip()
         clean_expected = re.sub(r"[+#?!]+$", "", correct_move_san).strip()
-        print(f"DEBUG: SAN fallback: clean_user={clean_user} vs clean_expected={clean_expected}")
         if clean_user == clean_expected:
-            print(f"DEBUG: SAN match! Returning True")
             return True, "Correct! ✅"
     except Exception:
         pass
     
-    print(f"DEBUG: No match found, returning False")
     return False, f"Incorrect. The best move was {expected_display}"
 
 
@@ -1000,13 +986,15 @@ def render_puzzle_page(
                 )
                 user_san = board.san(move)
                 session.record_attempt(user_san, is_correct)
-                PuzzleUIState.set_last_result("correct" if is_correct else "incorrect")
                 
                 # If correct and multi-move puzzle, advance sequence
                 if is_correct and puzzle.solution_moves:
                     next_pos = solution_index + 1
                     opponent_msg = None
+                    puzzle_complete = False
+                    
                     if next_pos < len(puzzle.solution_moves):
+                        # There's an opponent move - play it automatically
                         board_after = board.copy()
                         board_after.push(move)
                         opponent_move = _parse_solution_move(board_after, puzzle.solution_moves[next_pos])
@@ -1015,9 +1003,33 @@ def render_puzzle_page(
                             opponent_msg = f"Opponent has played {opponent_san}."
                             board_after.push(opponent_move)
                             next_pos += 1
+                            
+                            # Check if there are more player moves after opponent's move
+                            if next_pos >= len(puzzle.solution_moves):
+                                # No more moves - puzzle complete!
+                                puzzle_complete = True
+                        else:
+                            # Opponent move couldn't be parsed - puzzle complete
+                            puzzle_complete = True
+                    else:
+                        # No more moves in solution - puzzle complete
+                        puzzle_complete = True
+                    
                     PuzzleUIState.set_solution_sequence_pos(next_pos)
                     PuzzleUIState.set_opponent_played_msg(opponent_msg)
+                    
+                    # Set result based on whether puzzle is complete
+                    if puzzle_complete:
+                        PuzzleUIState.set_last_result("correct")
+                    else:
+                        PuzzleUIState.set_last_result("continue")
+                elif is_correct:
+                    # Single-move puzzle - correct means complete
+                    PuzzleUIState.set_last_result("correct")
+                    PuzzleUIState.clear_opponent_played_msg()
                 else:
+                    # Incorrect move
+                    PuzzleUIState.set_last_result("incorrect")
                     PuzzleUIState.clear_opponent_played_msg()
                 
                 PuzzleUIState.clear_selected_square()
@@ -1027,10 +1039,16 @@ def render_puzzle_page(
     if last_result:
         st.divider()
         if last_result == "correct":
+            # Puzzle fully complete
             render_puzzle_result(True, "Correct! ✅", puzzle)
+        elif last_result == "continue":
+            # Intermediate correct move - puzzle continues
+            st.success("Good move! ✅")
             if opponent_played_msg:
                 st.info(opponent_played_msg)
+            st.caption("Continue solving...")
         else:
+            # Incorrect
             render_puzzle_result(
                 False,
                 f"Incorrect. The best move was **{puzzle.best_move_san}**",
