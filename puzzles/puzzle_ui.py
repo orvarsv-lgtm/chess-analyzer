@@ -377,81 +377,79 @@ def check_puzzle_answer(
     """
     Check if user's move matches the puzzle's correct answer.
     
-    For multi-move puzzles, the first move (best move) is always correct when played.
-    Subsequent moves are validated against the solution sequence.
+    Simple logic:
+    1. Get the expected move (from solution_moves or correct_move_san)
+    2. Compare user's move UCI to expected move UCI
+    3. Return correct/incorrect
     
     Args:
         board: Current board position
         user_move: User's move object
-        correct_move_san: Correct answer in SAN (for backward compatibility)
-        solution_moves: Full solution sequence (UCI moves)
+        correct_move_san: Correct answer in SAN (the best move)
+        solution_moves: Full solution sequence (UCI moves) for multi-move puzzles
         solution_index: Current position in solution sequence (0-indexed)
     
     Returns:
         (is_correct, message)
     """
-    user_san = board.san(user_move)
-
-    def _strip_san_annotations(san: str) -> str:
-        return re.sub(r"[+#?!]+$", "", san or "").strip()
-
-    def _parse_expected_move(move_str: str) -> Optional[chess.Move]:
-        candidate = (move_str or "").strip()
-        if not candidate:
-            return None
-        if re.match(r"^[a-h][1-8][a-h][1-8][qrbn]?$", candidate):
-            try:
-                move = chess.Move.from_uci(candidate)
-                if move in board.legal_moves:
-                    return move
-            except Exception:
-                pass
-        try:
-            return board.parse_san(candidate)
-        except Exception:
-            try:
-                return board.parse_san(_strip_san_annotations(candidate))
-            except Exception:
-                return None
-
-    def _moves_match(expected_str: str) -> bool:
-        expected_move = _parse_expected_move(expected_str)
-        if expected_move:
-            return user_move == expected_move
-        return _strip_san_annotations(user_san) == _strip_san_annotations(str(expected_str))
-
-    def _expected_display(expected_str: str) -> str:
-        expected_move = _parse_expected_move(expected_str)
-        if expected_move:
-            try:
-                return board.san(expected_move)
-            except Exception:
-                return expected_str
-        return expected_str
+    user_uci = user_move.uci()
     
-    # Use solution_moves if available (multi-move puzzle)
+    # DEBUG: Print values to understand what's happening
+    print(f"DEBUG check_puzzle_answer: user_uci={user_uci}, correct_move_san={correct_move_san}")
+    print(f"DEBUG: solution_moves={solution_moves}, solution_index={solution_index}")
+    
+    # Determine what the expected move is
+    expected_uci = None
+    expected_display = correct_move_san  # Default display
+    
+    # For multi-move puzzles, get the expected move at current index
     if solution_moves and len(solution_moves) > 0:
-        # Check if user's move matches the expected move at current solution_index
         if 0 <= solution_index < len(solution_moves):
             expected_uci = solution_moves[solution_index]
-            if _moves_match(expected_uci):
-                return True, "Correct! ✅"
-        
-        # Also always accept if matches correct_move_san (fallback)
-        if _moves_match(correct_move_san):
-            return True, "Correct! ✅"
-        
-        # Wrong move - show what was expected
-        if 0 <= solution_index < len(solution_moves):
-            return False, f"Incorrect. The best move was {_expected_display(solution_moves[solution_index])}"
-        else:
-            return False, f"Incorrect. The best move was {correct_move_san}"
+            print(f"DEBUG: Got expected_uci from solution_moves[{solution_index}] = {expected_uci}")
+            # Try to get SAN for display
+            try:
+                expected_move_obj = chess.Move.from_uci(expected_uci)
+                if expected_move_obj in board.legal_moves:
+                    expected_display = board.san(expected_move_obj)
+            except Exception:
+                expected_display = expected_uci
     
-    # Fallback to original logic (single-move puzzle)
-    if _moves_match(correct_move_san):
+    # If no expected_uci from solution_moves, parse from correct_move_san
+    if not expected_uci:
+        print(f"DEBUG: No expected_uci from solution_moves, parsing from correct_move_san")
+        try:
+            expected_move_obj = board.parse_san(correct_move_san)
+            expected_uci = expected_move_obj.uci()
+            expected_display = correct_move_san
+            print(f"DEBUG: Parsed correct_move_san to UCI: {expected_uci}")
+        except Exception as e:
+            # Last resort: just use the SAN as-is for comparison
+            expected_uci = None
+            expected_display = correct_move_san
+            print(f"DEBUG: Failed to parse correct_move_san: {e}")
+    
+    # Compare moves
+    print(f"DEBUG: Comparing user_uci={user_uci} vs expected_uci={expected_uci}")
+    if expected_uci and user_uci == expected_uci:
+        print(f"DEBUG: MATCH! Returning True")
         return True, "Correct! ✅"
     
-    return False, f"Incorrect. The best move was {correct_move_san}"
+    print(f"DEBUG: No UCI match, trying SAN fallback")
+    # Also try direct SAN comparison as fallback
+    try:
+        user_san = board.san(user_move)
+        clean_user = re.sub(r"[+#?!]+$", "", user_san).strip()
+        clean_expected = re.sub(r"[+#?!]+$", "", correct_move_san).strip()
+        print(f"DEBUG: SAN fallback: clean_user={clean_user} vs clean_expected={clean_expected}")
+        if clean_user == clean_expected:
+            print(f"DEBUG: SAN match! Returning True")
+            return True, "Correct! ✅"
+    except Exception:
+        pass
+    
+    print(f"DEBUG: No match found, returning False")
+    return False, f"Incorrect. The best move was {expected_display}"
 
 
 def _parse_solution_move(board: chess.Board, move_str: str) -> Optional[chess.Move]:
