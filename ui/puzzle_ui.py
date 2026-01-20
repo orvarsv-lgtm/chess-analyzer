@@ -954,9 +954,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             # Check against expected move at current solution index
             expected = solution_moves[progress.solution_move_index] if progress.solution_move_index < len(solution_moves) else None
             
-            # DEBUG: Log move validation
-            debug_info = f"[PUZZLE DEBUG] Move={uci}, Expected={expected}, Index={progress.solution_move_index}, Total moves={len(solution_moves)}"
+            # DEBUG: Log move validation (visible in UI)
+            debug_info = f"[DEBUG] Move={uci}, Expected={expected}, Index={progress.solution_move_index}, Total moves={len(solution_moves)}, solution_moves={solution_moves}"
             print(debug_info)
+            st.warning(debug_info)  # Also show in UI
             
             # Classify the move: correct (green), viable (yellow), or incorrect (red)
             try:
