@@ -374,50 +374,68 @@ def check_puzzle_answer(
     Returns:
         (is_correct, message)
     """
-    user_uci = user_move.uci()
     user_san = board.san(user_move)
+
+    def _strip_san_annotations(san: str) -> str:
+        return re.sub(r"[+#?!]+$", "", san or "").strip()
+
+    def _parse_expected_move(move_str: str) -> Optional[chess.Move]:
+        candidate = (move_str or "").strip()
+        if not candidate:
+            return None
+        if re.match(r"^[a-h][1-8][a-h][1-8][qrbn]?$", candidate):
+            try:
+                move = chess.Move.from_uci(candidate)
+                if move in board.legal_moves:
+                    return move
+            except Exception:
+                pass
+        try:
+            return board.parse_san(candidate)
+        except Exception:
+            try:
+                return board.parse_san(_strip_san_annotations(candidate))
+            except Exception:
+                return None
+
+    def _moves_match(expected_str: str) -> bool:
+        expected_move = _parse_expected_move(expected_str)
+        if expected_move:
+            return user_move == expected_move
+        return _strip_san_annotations(user_san) == _strip_san_annotations(str(expected_str))
+
+    def _expected_display(expected_str: str) -> str:
+        expected_move = _parse_expected_move(expected_str)
+        if expected_move:
+            try:
+                return board.san(expected_move)
+            except Exception:
+                return expected_str
+        return expected_str
     
     # Use solution_moves if available (multi-move puzzle)
     if solution_moves and len(solution_moves) > 0:
         # Always accept the first move of the solution (best move)
         first_move_uci = solution_moves[0]
-        if user_uci == first_move_uci:
+        if _moves_match(first_move_uci):
+            return True, "Correct! ✅"
+        if _moves_match(correct_move_san):
             return True, "Correct! ✅"
         
         # For subsequent moves in the sequence, match at current index
         if 0 <= solution_index < len(solution_moves):
             expected_uci = solution_moves[solution_index]
-            if user_uci == expected_uci:
+            if _moves_match(expected_uci):
                 return True, "Correct! ✅"
             else:
-                # Try to convert first move to SAN for display
-                try:
-                    first_move = chess.Move.from_uci(first_move_uci)
-                    first_san = board.san(first_move)
-                except Exception:
-                    first_san = first_move_uci
-                return False, f"Incorrect. The best move was {first_san}"
+                return False, f"Incorrect. The best move was {_expected_display(first_move_uci)}"
         
         # Fallback: wrong move
-        try:
-            first_move = chess.Move.from_uci(first_move_uci)
-            first_san = board.san(first_move)
-        except Exception:
-            first_san = first_move_uci
-        return False, f"Incorrect. The best move was {first_san}"
+        return False, f"Incorrect. The best move was {_expected_display(first_move_uci)}"
     
     # Fallback to original logic (single-move puzzle)
     # Parse correct move
-    try:
-        correct_move = board.parse_san(correct_move_san)
-    except Exception:
-        # If we can't parse correct move, compare strings
-        if user_san == correct_move_san:
-            return True, "Correct! ✅"
-        return False, f"Incorrect. The best move was {correct_move_san}"
-    
-    # Compare moves
-    if user_move == correct_move:
+    if _moves_match(correct_move_san):
         return True, "Correct! ✅"
     
     return False, f"Incorrect. The best move was {correct_move_san}"
