@@ -962,8 +962,10 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
             # Classify the move: correct (green), viable (yellow), or incorrect (red)
             try:
                 classification, cpl, why_not_optimal = _classify_move(board, uci, expected)
-            except Exception:
+                st.info(f"[DEBUG] classification={classification}, cpl={cpl}")
+            except Exception as e:
                 # Fallback: just check if it matches expected
+                st.error(f"[DEBUG] _classify_move exception: {e}")
                 classification = "correct" if uci == expected else "incorrect"
                 cpl = 0
                 why_not_optimal = None
@@ -976,6 +978,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
 
             # FAIL FAST: Show incorrect immediately if move is wrong
             if classification == "incorrect":
+                st.error(f"[DEBUG] FAIL FAST triggered - classification was incorrect")
                 progress.last_result = "incorrect"
                 st.rerun()
             
