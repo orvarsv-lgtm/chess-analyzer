@@ -431,26 +431,23 @@ def check_puzzle_answer(
     
     # Use solution_moves if available (multi-move puzzle)
     if solution_moves and len(solution_moves) > 0:
-        # Always accept the first move of the solution (best move)
-        first_move_uci = solution_moves[0]
-        if _moves_match(first_move_uci):
-            return True, "Correct! ✅"
-        if _moves_match(correct_move_san):
-            return True, "Correct! ✅"
-        
-        # For subsequent moves in the sequence, match at current index
+        # Check if user's move matches the expected move at current solution_index
         if 0 <= solution_index < len(solution_moves):
             expected_uci = solution_moves[solution_index]
             if _moves_match(expected_uci):
                 return True, "Correct! ✅"
-            else:
-                return False, f"Incorrect. The best move was {_expected_display(first_move_uci)}"
         
-        # Fallback: wrong move
-        return False, f"Incorrect. The best move was {_expected_display(first_move_uci)}"
+        # Also always accept if matches correct_move_san (fallback)
+        if _moves_match(correct_move_san):
+            return True, "Correct! ✅"
+        
+        # Wrong move - show what was expected
+        if 0 <= solution_index < len(solution_moves):
+            return False, f"Incorrect. The best move was {_expected_display(solution_moves[solution_index])}"
+        else:
+            return False, f"Incorrect. The best move was {correct_move_san}"
     
     # Fallback to original logic (single-move puzzle)
-    # Parse correct move
     if _moves_match(correct_move_san):
         return True, "Correct! ✅"
     
