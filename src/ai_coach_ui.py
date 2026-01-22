@@ -451,7 +451,7 @@ def _render_single_game_review(games: List[Dict], aggregated: Dict, user_id: str
         
         col1, col2 = st.columns([2, 1])
         with col1:
-            if st.button("🚀 Generate AI Coach Review", type="primary", use_container_width=True):
+            if st.button("🚀 Generate AI Coach Review", type="primary", width='stretch'):
                 _generate_and_display_review(
                     selected_game,
                     player_color,
@@ -547,7 +547,7 @@ def _render_career_analysis(games: List[Dict], player_name: str, user_id: str, a
                 del st.session_state[cache_key]
             st.rerun()
     else:
-        if st.button("🚀 Generate Career Analysis", type="primary", use_container_width=True):
+        if st.button("🚀 Generate Career Analysis", type="primary", width='stretch'):
             with st.spinner("🤖 AI Coach is analyzing your entire chess career... (this may take 30-60 seconds)"):
                 try:
                     import os
@@ -642,7 +642,7 @@ def _render_career_analysis_result(result: Dict[str, Any]) -> None:
                 data=pdf_bytes,
                 file_name=f"chess_coach_report_{player_name}_{datetime.now().strftime('%Y%m%d')}.pdf",
                 mime="application/pdf",
-                use_container_width=True,
+                width='stretch',
             )
         else:
             st.caption("_PDF download failed. Please check your analysis and try again. If the problem persists, contact support._")
@@ -766,7 +766,7 @@ def _render_upgrade_prompt():
     
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        if st.button("🚀 Upgrade Now", type="primary", use_container_width=True):
+        if st.button("🚀 Upgrade Now", type="primary", width='stretch'):
             st.info("🔜 Payment integration coming soon! Contact support for early access.")
     
     # Demo mode toggle

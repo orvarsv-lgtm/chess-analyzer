@@ -1239,7 +1239,7 @@ def render_interactive_chessboard(
                         display_text,
                         key=btn_key,
                         help=chess.square_name(square).upper(),
-                        use_container_width=True,
+                        width='stretch',
                     )
                     if clicked:
                         clicked_square = square
@@ -1249,7 +1249,7 @@ def render_interactive_chessboard(
                         display_text,
                         key=btn_key,
                         help=chess.square_name(square).upper(),
-                        use_container_width=True,
+                        width='stretch',
                         disabled=True,
                     )
     

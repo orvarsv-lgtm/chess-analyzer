@@ -177,7 +177,7 @@ def render_opening_repertoire_ui(username: str):
             'average_cpl': 'Avg CPL',
             'deviation_rate': 'Deviation %'
         })
-        st.dataframe(main_df, hide_index=True, use_container_width=True)
+        st.dataframe(main_df, hide_index=True, width='stretch')
     else:
         st.info("Play more games to establish main openings")
     
@@ -193,7 +193,7 @@ def render_opening_repertoire_ui(username: str):
             'average_cpl': 'Avg CPL',
             'deviation_rate': 'Deviation %'
         })
-        st.dataframe(weak_df, hide_index=True, use_container_width=True)
+        st.dataframe(weak_df, hide_index=True, width='stretch')
     
     # Theory gaps (high deviation rate)
     if repertoire_data['high_deviation_openings']:
@@ -205,7 +205,7 @@ def render_opening_repertoire_ui(username: str):
             'deviation_rate': 'Deviation %',
             'games_played': 'Games'
         })
-        st.dataframe(dev_df, hide_index=True, use_container_width=True)
+        st.dataframe(dev_df, hide_index=True, width='stretch')
     
     # Recommendations
     st.write("### 💡 Study Recommendations")
@@ -238,7 +238,7 @@ def render_opening_repertoire_ui(username: str):
             'last_played_at': 'Last Played'
         })
         
-        st.dataframe(display_df, hide_index=True, use_container_width=True)
+        st.dataframe(display_df, hide_index=True, width='stretch')
 
 
 def generate_lichess_study_link(opening_name: str, color: str) -> str:

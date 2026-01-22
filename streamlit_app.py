@@ -2119,17 +2119,17 @@ def main() -> None:
     st.sidebar.markdown("---")
     
     # Legal buttons
-    if st.sidebar.button("📜 Terms of Service", use_container_width=True):
+    if st.sidebar.button("📜 Terms of Service", width='stretch'):
         st.session_state["main_view"] = "Terms of Service"
         st.rerun()
 
     col_legal_1, col_legal_2 = st.sidebar.columns(2)
     with col_legal_1:
-        if st.button("🔒 Privacy", use_container_width=True):
+        if st.button("🔒 Privacy", width='stretch'):
             st.session_state["main_view"] = "Privacy Policy"
             st.rerun()
     with col_legal_2:
-        if st.button("💸 Refund", use_container_width=True):
+        if st.button("💸 Refund", width='stretch'):
             st.session_state["main_view"] = "Refund Policy"
             st.rerun()
 
@@ -2241,7 +2241,7 @@ def _render_nav_button_logic(option: str, label_map: dict, key_idx: int) -> None
     if st.button(
         f"{emoji} {display_label}",
         key=f"nav_pin_{key_idx}",
-        use_container_width=True,
+        width='stretch',
         type=button_type,
     ):
         st.session_state["main_view"] = option
@@ -2955,7 +2955,7 @@ def _render_opening_repertoire_tab(aggregated: dict[str, Any]) -> None:
     # Sort by games played
     opening_rows = sorted(opening_rows, key=lambda x: x['Games'], reverse=True)
     
-    st.dataframe(opening_rows, use_container_width=True, hide_index=True)
+    st.dataframe(opening_rows, width='stretch', hide_index=True)
     
     # Recommendations
     st.subheader("💡 Recommendations")

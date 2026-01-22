@@ -387,11 +387,11 @@ def _render_puzzle_nav_buttons(progress: PuzzleProgress, total_puzzles: int, puz
     st.caption("Rate this puzzle:")
     r1, r2, r3 = st.columns(3, gap="small")
     with r1:
-        dislike_clicked = st.button("👎", type="secondary", disabled=already_rated, use_container_width=True, key=f"rate_dislike_{puzzle_key}", help="Dislike")
+        dislike_clicked = st.button("👎", type="secondary", disabled=already_rated, width='stretch', key=f"rate_dislike_{puzzle_key}", help="Dislike")
     with r2:
-        meh_clicked = st.button("😐", type="secondary", disabled=already_rated, use_container_width=True, key=f"rate_meh_{puzzle_key}", help="Meh")
+        meh_clicked = st.button("😐", type="secondary", disabled=already_rated, width='stretch', key=f"rate_meh_{puzzle_key}", help="Meh")
     with r3:
-        like_clicked = st.button("👍", type="secondary", disabled=already_rated, use_container_width=True, key=f"rate_like_{puzzle_key}", help="Like")
+        like_clicked = st.button("👍", type="secondary", disabled=already_rated, width='stretch', key=f"rate_like_{puzzle_key}", help="Like")
     
     # Handle rating clicks
     if not already_rated:
@@ -418,15 +418,15 @@ def _render_puzzle_nav_buttons(progress: PuzzleProgress, total_puzzles: int, puz
     st.caption("Navigation:")
     nav1, nav2, nav3 = st.columns(3, gap="small")
     with nav1:
-        if st.button("⬅️ Back", use_container_width=True, disabled=progress.current_index <= 0, key="puzzle_nav_back"):
+        if st.button("⬅️ Back", width='stretch', disabled=progress.current_index <= 0, key="puzzle_nav_back"):
             progress.current_index = max(progress.current_index - 1, 0)
             st.rerun()
     with nav2:
-        if st.button("➡️ Next", use_container_width=True, disabled=progress.current_index >= total_puzzles - 1, type="primary", key="puzzle_nav_next"):
+        if st.button("➡️ Next", width='stretch', disabled=progress.current_index >= total_puzzles - 1, type="primary", key="puzzle_nav_next"):
             progress.current_index = min(progress.current_index + 1, total_puzzles - 1)
             st.rerun()
     with nav3:
-        if st.button("🔄 Reset", use_container_width=True, key="puzzle_nav_reset"):
+        if st.button("🔄 Reset", width='stretch', key="puzzle_nav_reset"):
             _reset_progress()
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
@@ -1064,7 +1064,7 @@ def render_puzzle_trainer(puzzles: List[PuzzleDefinition]) -> None:
         st.write(f"Solved: **{progress.solved}**")
 
         # Reveal answer (for the current move in the sequence)
-        if st.button("🔍 Reveal answer", use_container_width=True):
+        if st.button("🔍 Reveal answer", width='stretch'):
             progress.reveal_answer = True
             progress.reveal_puzzle_index = progress.current_index
             progress.reveal_solution_move_index = progress.solution_move_index

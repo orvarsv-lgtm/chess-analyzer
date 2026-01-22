@@ -582,7 +582,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
             accuracy = (state.score / state.total_attempts * 100) if state.total_attempts > 0 else 0
             st.metric("Accuracy", f"{accuracy:.0f}%")
         
-        if st.button("🔄 New Set", use_container_width=True):
+        if st.button("🔄 New Set", width='stretch'):
             _reset_state()
             st.rerun()
             st.rerun()
@@ -624,7 +624,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
         else:
             st.info("💪 Keep practicing - evaluation intuition improves with time!")
         
-        if st.button("🔄 Start New Training", use_container_width=True):
+        if st.button("🔄 Start New Training", width='stretch'):
             _reset_state()
             st.rerun()
         return
@@ -701,7 +701,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
             # Vertical layout for buttons (stacked) used to prevent text wrapping
             col_left, col_center, col_right = st.columns([1, 2, 1])
             with col_center:
-                if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
+                if st.button(BUTTON_LABELS["losing"], key="btn_losing", width='stretch'):
                     state.last_guess = "losing"
                     state.revealed = True
                     state.explanation_text = ""
@@ -711,7 +711,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                         state.score += 1
                     st.rerun()
             
-                if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
+                if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", width='stretch'):
                     state.last_guess = "slightly_worse"
                     state.revealed = True
                     state.explanation_text = ""
@@ -721,7 +721,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                         state.score += 1
                     st.rerun()
             
-                if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
+                if st.button(BUTTON_LABELS["equal"], key="btn_equal", width='stretch'):
                     state.last_guess = "equal"
                     state.revealed = True
                     state.explanation_text = ""
@@ -731,7 +731,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                         state.score += 1
                     st.rerun()
             
-                if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
+                if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", width='stretch'):
                     state.last_guess = "slightly_better"
                     state.revealed = True
                     state.explanation_text = ""
@@ -741,7 +741,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                         state.score += 1
                     st.rerun()
             
-                if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
+                if st.button(BUTTON_LABELS["winning"], key="btn_winning", width='stretch'):
                     state.last_guess = "winning"
                     state.revealed = True
                     state.explanation_text = ""
@@ -768,7 +768,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     height=120,
                     key=f"eval_expl_{state.current_index}",
                 )
-                if st.button("Submit explanation", use_container_width=True, type="primary"):
+                if st.button("Submit explanation", width='stretch', type="primary"):
                     state.explanation_submitted = True
                     st.rerun()
             else:
@@ -829,7 +829,7 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     st.markdown("---")
 
                 # Next button
-                if st.button("➡️ Next Position", use_container_width=True, type="primary"):
+                if st.button("➡️ Next Position", width='stretch', type="primary"):
                     state.current_index += 1
                     state.revealed = False
                     state.last_guess = None

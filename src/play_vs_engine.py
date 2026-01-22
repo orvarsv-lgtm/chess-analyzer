@@ -740,7 +740,7 @@ def render_play_vs_engine_tab() -> None:
         )
         
         # New game button
-        if st.button("🔄 New Game", use_container_width=True):
+        if st.button("🔄 New Game", width='stretch'):
             _reset_game(player_color=new_color.lower())
             st.rerun()
     
@@ -841,20 +841,20 @@ def render_play_vs_engine_tab() -> None:
                 # Confirm and Cancel buttons
                 col_confirm, col_cancel = st.columns(2)
                 with col_confirm:
-                    if st.button("✅ Confirm", use_container_width=True, type="primary"):
+                    if st.button("✅ Confirm", width='stretch', type="primary"):
                         if _make_player_move(pending_move, explanation):
                             st.session_state["vs_engine_last_processed_move"] = pending_move
                             st.session_state["vs_engine_pending_move"] = None
                             st.rerun()
                 with col_cancel:
-                    if st.button("❌ Cancel", use_container_width=True):
+                    if st.button("❌ Cancel", width='stretch'):
                         st.session_state["vs_engine_pending_move"] = None
                         st.rerun()
             
             # Resign button (always visible during active game)
             if not game.game_over:
                 st.divider()
-                if st.button("🏳️ Resign", use_container_width=True, type="secondary"):
+                if st.button("🏳️ Resign", width='stretch', type="secondary"):
                     game.game_over = True
                     game.result = "0-1" if game.player_color == "white" else "1-0"
                     st.rerun()
@@ -956,13 +956,13 @@ def _render_game_review(review: dict[str, Any]) -> None:
         col_first, col_prev, col_play, col_next, col_last = st.columns(5)
         
         with col_first:
-            if st.button("⏮️", use_container_width=True, disabled=current_idx == 0, key="review_first"):
+            if st.button("⏮️", width='stretch', disabled=current_idx == 0, key="review_first"):
                 st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = 0
                 st.rerun()
         
         with col_prev:
-            if st.button("◀️", use_container_width=True, disabled=current_idx == 0, key="review_prev"):
+            if st.button("◀️", width='stretch', disabled=current_idx == 0, key="review_prev"):
                 st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = current_idx - 1
                 st.rerun()
@@ -970,22 +970,22 @@ def _render_game_review(review: dict[str, Any]) -> None:
         with col_play:
             # Auto-play toggle
             if auto_playing:
-                if st.button("⏸️", use_container_width=True, key="review_pause"):
+                if st.button("⏸️", width='stretch', key="review_pause"):
                     st.session_state["review_auto_play"] = False
                     st.rerun()
             else:
-                if st.button("▶️", use_container_width=True, disabled=current_idx >= max_idx, key="review_play"):
+                if st.button("▶️", width='stretch', disabled=current_idx >= max_idx, key="review_play"):
                     st.session_state["review_auto_play"] = True
                     st.rerun()
         
         with col_next:
-            if st.button("▶️", use_container_width=True, disabled=current_idx >= max_idx, key="review_next"):
+            if st.button("▶️", width='stretch', disabled=current_idx >= max_idx, key="review_next"):
                 st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = current_idx + 1
                 st.rerun()
         
         with col_last:
-            if st.button("⏭️", use_container_width=True, disabled=current_idx >= max_idx, key="review_last"):
+            if st.button("⏭️", width='stretch', disabled=current_idx >= max_idx, key="review_last"):
                 st.session_state["review_auto_play"] = False
                 st.session_state["review_move_index"] = max_idx
                 st.rerun()

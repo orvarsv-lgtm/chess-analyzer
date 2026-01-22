@@ -297,7 +297,7 @@ def render_opponent_strength_analysis(games_data: List[Dict[str, Any]], player_r
     
     if bracket_rows:
         df = pd.DataFrame(bracket_rows)
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        st.dataframe(df, hide_index=True, width='stretch')
         
         # Visualization
         st.bar_chart(df.set_index('Opponent Strength')['Win %'])

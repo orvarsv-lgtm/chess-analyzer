@@ -119,11 +119,11 @@ def render_game_replayer(game_data: Dict[str, Any], move_evals: List[Dict[str, A
         # Navigation buttons
         btn_cols = st.columns([1, 1])
         with btn_cols[0]:
-            if st.button("◀️ Back", use_container_width=True, disabled=(current_ply == 0), key=f"back_{id(game_data)}"):
+            if st.button("◀️ Back", width='stretch', disabled=(current_ply == 0), key=f"back_{id(game_data)}"):
                 st.session_state.replay_ply = max(0, current_ply - 1)
                 st.rerun()
         with btn_cols[1]:
-            if st.button("Next ▶️", use_container_width=True, disabled=(current_ply >= max_ply), key=f"next_{id(game_data)}"):
+            if st.button("Next ▶️", width='stretch', disabled=(current_ply >= max_ply), key=f"next_{id(game_data)}"):
                 st.session_state.replay_ply = min(max_ply, current_ply + 1)
                 st.rerun()
         

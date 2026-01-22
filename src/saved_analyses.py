@@ -241,7 +241,7 @@ def render_load_analysis_ui() -> Optional[Dict[str, Any]]:
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        if st.button(f"📥 {t('load_analysis')}", use_container_width=True, key="load_analysis_btn"):
+        if st.button(f"📥 {t('load_analysis')}", width='stretch', key="load_analysis_btn"):
             analysis_id = options[selected_idx][0]
             loaded = load_analysis(user_id, analysis_id)
             if loaded:

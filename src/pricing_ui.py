@@ -161,7 +161,7 @@ def render_pricing_page() -> None:
         </div>
         """, unsafe_allow_html=True)
         
-        if st.button("Get Started Free", key="btn_free", use_container_width=True):
+        if st.button("Get Started Free", key="btn_free", width='stretch'):
             if current_tier == "free":
                 st.info("You're already on the Free plan!")
             else:
@@ -289,7 +289,7 @@ def render_pricing_page() -> None:
     st.dataframe(
         df,
         hide_index=True,
-        use_container_width=True,
+        width='stretch',
     )
     
     # FAQ section
@@ -344,7 +344,7 @@ def _render_tier_button(tier: str, current_tier: str, user_email: str | None) ->
         st.button(
             "✅ Current Plan",
             key=f"btn_{tier}",
-            use_container_width=True,
+            width='stretch',
             disabled=True,
         )
     elif target_level < current_level:
@@ -352,7 +352,7 @@ def _render_tier_button(tier: str, current_tier: str, user_email: str | None) ->
         st.button(
             "Manage Subscription",
             key=f"btn_{tier}",
-            use_container_width=True,
+            width='stretch',
             disabled=True,
             help="Contact support to downgrade",
         )
@@ -361,7 +361,7 @@ def _render_tier_button(tier: str, current_tier: str, user_email: str | None) ->
         if st.button(
             f"Upgrade to {tier_names.get(tier, tier.title())}",
             key=f"btn_{tier}",
-            use_container_width=True,
+            width='stretch',
             type="primary",
         ):
             st.warning("🔒 Please sign in first to upgrade your plan.")
@@ -370,7 +370,7 @@ def _render_tier_button(tier: str, current_tier: str, user_email: str | None) ->
         if st.button(
             f"Upgrade to {tier_names.get(tier, tier.title())}",
             key=f"btn_{tier}",
-            use_container_width=True,
+            width='stretch',
             type="primary",
         ):
             st.info("⏳ This plan will be available soon!")
