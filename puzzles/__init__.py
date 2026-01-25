@@ -23,17 +23,49 @@ from .explanation_engine import (
     generate_explanation_string,
     get_tactical_pattern_explanation,
 )
-from .tactical_patterns import (
-    PatternAttribution,
-    AtomicConstraint,
-    TacticalOutcome,
-    CompositePattern,
-    AdvancedPattern,
-    ConstraintEvidence,
-    analyze_tactical_patterns,
-    explain_why_move_works,
-    get_all_constraints_for_position,
-)
+
+# Try importing tactical patterns with graceful fallback
+try:
+    from .tactical_patterns import (
+        PatternAttribution,
+        AtomicConstraint,
+        TacticalOutcome,
+        CompositePattern,
+        AdvancedPattern,
+        ConstraintEvidence,
+        analyze_tactical_patterns,
+        explain_why_move_works,
+        get_all_constraints_for_position,
+    )
+except (ImportError, ModuleNotFoundError, KeyError) as e:
+    # Define dummy implementations if tactical_patterns is unavailable
+    class PatternAttribution:
+        pass
+    
+    class AtomicConstraint:
+        pass
+    
+    class TacticalOutcome:
+        pass
+    
+    class CompositePattern:
+        pass
+    
+    class AdvancedPattern:
+        pass
+    
+    class ConstraintEvidence:
+        pass
+    
+    def analyze_tactical_patterns(*args, **kwargs):
+        return None
+    
+    def explain_why_move_works(*args, **kwargs):
+        return ""
+    
+    def get_all_constraints_for_position(*args, **kwargs):
+        return []
+
 from .puzzle_ui import render_puzzle_board, render_puzzle_controls, PuzzleUIState, render_puzzle_page
 
 __all__ = [

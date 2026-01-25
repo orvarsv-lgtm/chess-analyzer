@@ -43,8 +43,12 @@ try:
         explain_why_move_works,
     )
     USE_TACTICAL_PATTERNS = True
-except ImportError:
+except (ImportError, ModuleNotFoundError) as e:
     USE_TACTICAL_PATTERNS = False
+    # Define stub implementations so code doesn't crash if tactical_patterns is unavailable
+    analyze_tactical_patterns = lambda *args, **kwargs: None
+    PatternAttribution = type('PatternAttribution', (), {})  # Dummy class
+    explain_why_move_works = lambda *args, **kwargs: ""
 
 # Opponent mistake analysis removed for performance
 
