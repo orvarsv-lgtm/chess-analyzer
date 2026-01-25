@@ -982,6 +982,118 @@ def _render_results(data: dict) -> None:
     st.success("Analysis completed")
 
 
+def _classify_time_control(time_control_str: str) -> str:
+    """Classify a time control string into a category.
+    
+    Args:
+        time_control_str: Time control string like "600+0", "180+0", "300+3", etc.
+    
+    Returns:
+        One of: "Bullet", "Blitz", "Rapid", "Classical", "Unknown"
+    """
+    if not time_control_str:
+        return "Unknown"
+    
+    time_control_str = str(time_control_str).strip().lower()
+    
+    try:
+        # Parse time control (format: initial+increment or just initial)
+        parts = time_control_str.split("+")
+        initial_seconds = int(parts[0])
+        
+        # Standard classifications
+        if initial_seconds < 180:
+            return "Bullet"
+        elif initial_seconds < 600:
+            return "Blitz"
+        elif initial_seconds < 1800:
+            return "Rapid"
+        else:
+            return "Classical"
+    except (ValueError, IndexError):
+        return "Unknown"
+
+
+def _render_time_control_filter(games: list[dict[str, Any]]) -> str:
+    """Render time control filter selector.
+    
+    Returns the selected time control category.
+    """
+    # Collect available time controls from games
+    available_controls = set()
+    for game in games:
+        tc = game.get("time_control", "")
+        if tc:
+            category = _classify_time_control(tc)
+            available_controls.add(category)
+    
+    # Initialize session state
+    if "selected_time_control" not in st.session_state:
+        st.session_state["selected_time_control"] = "All"
+    
+    # Build options
+    options = ["All"]
+    for category in sorted(available_controls):
+        if category != "Unknown":
+            options.append(category)
+    if "Unknown" in available_controls:
+        options.append("Unknown")
+    
+    # Show selector
+    col1, col2, col3 = st.columns([1, 2, 2])
+    with col1:
+        st.write("**Filter by:**")
+    with col2:
+        selected = st.selectbox(
+            "Time Control",
+            options,
+            index=options.index(st.session_state.get("selected_time_control", "All")),
+            label_visibility="collapsed",
+            key="time_control_selector",
+        )
+        st.session_state["selected_time_control"] = selected
+    
+    return selected
+
+
+def _filter_games_by_time_control(games: list[dict[str, Any]], time_control: str) -> list[dict[str, Any]]:
+    """Filter games by time control category.
+    
+    Args:
+        games: List of game dictionaries
+        time_control: Time control category ("All", "Bullet", "Blitz", "Rapid", "Classical", "Unknown")
+    
+    Returns:
+        Filtered list of games
+    """
+    if time_control == "All":
+        return games
+    
+    return [
+        g for g in games
+        if _classify_time_control(g.get("time_control", "")) == time_control
+    ]
+
+
+def _filter_analysis_by_games(analysis: list[dict[str, Any]], games: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter analysis rows to only include moves from the given games.
+    
+    Args:
+        analysis: List of analysis dictionaries
+        games: List of game dictionaries to filter by
+    
+    Returns:
+        Filtered list of analysis rows
+    """
+    # Get list of game indices
+    game_indices = {g.get("index") for g in games}
+    
+    return [
+        row for row in analysis
+        if row.get("game_index") in game_indices or row.get("game_id") in game_indices
+    ]
+
+
 def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
     games: list[dict[str, Any]] = aggregated.get("games", []) or []
     all_rows: list[dict[str, Any]] = aggregated.get("analysis", []) or []
@@ -1022,8 +1134,12 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
                 st.caption("Cache not available")
 
     st.subheader("Analysis")
-    st.metric("Games analyzed", int(aggregated.get("games_analyzed") or len(games) or 0))
-    st.metric("Total moves analyzed", int(aggregated.get("total_moves") or len(all_rows) or 0))
+    
+    # Time control filter
+    time_control_filter = _render_time_control_filter(games)
+    
+    st.metric("Games analyzed", int(len(games)))
+    st.metric("Total moves analyzed", int(len(all_rows)))
 
     # --- Per-game summary table ---
     if games:
@@ -1038,6 +1154,7 @@ def _render_enhanced_ui(aggregated: dict[str, Any]) -> None:
                     "ECO": g.get("eco"),
                     "Opening": g.get("opening"),
                     "Moves": g.get("moves"),
+                    "Time Control": g.get("time_control", ""),
                 }
                 for g in games
             ]
@@ -2267,6 +2384,30 @@ def _render_nav_button_logic(option: str, label_map: dict, key_idx: int) -> None
         st.rerun()
 
 
+def _apply_time_control_filter(aggregated: dict[str, Any]) -> dict[str, Any]:
+    """Apply time control filter to aggregated data.
+    
+    Returns a copy of aggregated data with games/analysis filtered by selected time control.
+    """
+    selected_tc = st.session_state.get("selected_time_control", "All")
+    if selected_tc == "All":
+        return aggregated
+    
+    filtered = aggregated.copy()
+    games = aggregated.get("games", [])
+    analysis = aggregated.get("analysis", [])
+    
+    filtered_games = _filter_games_by_time_control(games, selected_tc)
+    filtered_analysis = _filter_analysis_by_games(analysis, filtered_games)
+    
+    filtered["games"] = filtered_games
+    filtered["analysis"] = filtered_analysis
+    filtered["games_analyzed"] = len(filtered_games)
+    filtered["total_moves"] = len(filtered_analysis)
+    
+    return filtered
+
+
 def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     """Render analysis results with pinned navigation bar.
 
@@ -2302,12 +2443,15 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
     # Check if we have analysis data
     has_analysis = bool(aggregated and aggregated.get("games"))
     
+    # Apply time control filter to aggregated data for all tabs
+    filtered_aggregated = _apply_time_control_filter(aggregated) if has_analysis else aggregated
+    
     # Render selected view
     if t('tab_puzzles') in view:
         if not has_analysis:
             st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to generate puzzles.")
         else:
-            _render_puzzle_tab(aggregated)
+            _render_puzzle_tab(filtered_aggregated)
     elif t('tab_ai_coach') in view:
         if not has_analysis:
             st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to use the AI Coach.")
@@ -2317,30 +2461,30 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
                 st.warning(f"🔒 **{t('sign_in')}** required to access the AI Coach.")
                 st.info("Use the sidebar to sign in with your email.")
             else:
-                render_ai_coach_tab(aggregated)
+                render_ai_coach_tab(filtered_aggregated)
     elif t('tab_replayer') in view:
         if not has_analysis:
             st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to use the Replayer.")
         else:
-            _render_game_replayer_tab(aggregated)
+            _render_game_replayer_tab(filtered_aggregated)
     elif t('tab_openings') in view:
         if not has_analysis:
             st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to see your Opening Repertoire.")
         else:
-            _render_opening_repertoire_tab(aggregated)
+            _render_opening_repertoire_tab(filtered_aggregated)
     elif "Opponent" in view:
         if not has_analysis:
              st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to see Opponent Analysis.")
         else:
-            _render_opponent_analysis_tab(aggregated)
+            _render_opponent_analysis_tab(filtered_aggregated)
     elif "Streak" in view:
         if not has_analysis:
             st.info(f"ℹ️ Please analyze games in the **{t('tab_analysis')}** tab to see your Streaks.")
         else:
-            _render_streaks_tab(aggregated)
+            _render_streaks_tab(filtered_aggregated)
     elif "Evaluations" in view:
         # Eval trainer can work with or without analyzed games
-        games = aggregated.get("games", []) if has_analysis else []
+        games = filtered_aggregated.get("games", []) if has_analysis else []
         render_eval_trainer(games)
     elif "Play vs Engine" in view:
         render_play_vs_engine_tab()
@@ -2361,7 +2505,7 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
             if st.button("⬅️ New Analysis", type="secondary"):
                 st.session_state["analysis_result"] = {}
                 st.rerun()
-            _render_enhanced_ui(aggregated)
+            _render_enhanced_ui(filtered_aggregated)
 
 
 def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
