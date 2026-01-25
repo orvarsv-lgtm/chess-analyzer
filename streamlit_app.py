@@ -38,6 +38,13 @@ _hydrate_env_from_streamlit_secrets()
 
 from src.lichess_api import fetch_lichess_pgn
 from src.analytics import generate_coaching_report, CoachingSummary
+from src.mobile_detection import (
+    detect_device_type,
+    is_mobile,
+    apply_mobile_layout,
+    get_board_size,
+    get_column_layout,
+)
 
 # Game cache for avoiding re-analysis
 from src.game_cache import (
@@ -2110,6 +2117,18 @@ def main() -> None:
     """, unsafe_allow_html=True)
     
     st.title(t("app_title"))
+    
+    # Detect device type and apply responsive layout
+    device_type = detect_device_type()
+    apply_mobile_layout()
+    
+    # Show device type indicator in debug mode
+    if st.session_state.get("_show_device_debug", False):
+        st.caption(f"📱 Device: {device_type.upper()}")
+    
+    # Mobile-specific layout adjustments
+    if is_mobile():
+        st.info("📱 **Mobile View**: The interface has been optimized for your device. Some features may be simplified.")
 
     # Render language selector and authentication sidebar
     render_language_selector()

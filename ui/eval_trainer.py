@@ -16,6 +16,7 @@ import chess
 import streamlit as st
 
 from ui.chessboard_component import render_chessboard
+from src.mobile_detection import is_mobile, get_board_size, create_mobile_friendly_columns
 
 
 # Evaluation ranges (from perspective of side to move)
@@ -246,6 +247,66 @@ def _extract_user_factors(text: str) -> set[str]:
     return factors
 
 
+def _analyze_position(board: chess.Board, color: chess.Color) -> dict:
+    """Analyze position metrics for given color."""
+    return {
+        "material_diff": _material_score(board, color) - _material_score(board, not color),
+        "king_safety_diff": _king_safety_penalty(board, not color) - _king_safety_penalty(board, color),
+        "activity_diff": _mobility_score(board, color) - _mobility_score(board, not color),
+        "pawn_diff": len(board.pieces(chess.PAWN, color)) - len(board.pieces(chess.PAWN, not color)),
+    }
+
+
+def _build_explanation(
+    board: chess.Board,
+    perspective_color: chess.Color,
+    eval_pawns: float,
+    focus_color: Optional[str],
+    side_to_move: chess.Color,
+) -> list[str]:
+    """Build deterministic explanation of position evaluation."""
+    lines = []
+    metrics = _analyze_position(board, perspective_color)
+    
+    # Material balance
+    material_diff = metrics.get("material_diff", 0)
+    if material_diff > 100:
+        lines.append(f"Material advantage: +{material_diff/100:.1f}p")
+    elif material_diff < -100:
+        lines.append(f"Material disadvantage: {material_diff/100:.1f}p")
+    
+    # Piece activity
+    activity_diff = metrics.get("activity_diff", 0)
+    if activity_diff > 3:
+        lines.append(f"Better piece activity ({activity_diff} more moves)")
+    elif activity_diff < -3:
+        lines.append(f"Worse piece activity ({-activity_diff} fewer moves)")
+    
+    # King safety
+    king_safety_diff = metrics.get("king_safety_diff", 0)
+    if king_safety_diff > 2:
+        lines.append("Better king safety")
+    elif king_safety_diff < -2:
+        lines.append("Worse king safety")
+    
+    # Pawn structure
+    pawn_diff = metrics.get("pawn_diff", 0)
+    if pawn_diff > 1:
+        lines.append(f"Pawn advantage ({pawn_diff} more pawns)")
+    elif pawn_diff < -1:
+        lines.append(f"Pawn disadvantage ({-pawn_diff} fewer pawns)")
+    
+    if not lines:
+        if eval_pawns > 0:
+            lines.append("Positional advantage")
+        elif eval_pawns < 0:
+            lines.append("Positional disadvantage")
+        else:
+            lines.append("Balanced position")
+    
+    return lines
+
+
 def _key_factors_from_metrics(metrics: dict) -> list[str]:
     keys = []
     if abs(metrics.get("material_diff", 0)) >= 100:
@@ -308,6 +369,14 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             ply = move_data.get("ply", 0)
             move_num = (ply + 1) // 2  # Convert ply to move number
             
+            # Validate eval_cp before processing (skip if missing or invalid)
+            if eval_cp is None:
+                continue
+            try:
+                eval_cp = int(eval_cp)
+            except (ValueError, TypeError):
+                continue
+            
             # Fill missing FEN from fens_after_ply if possible
             if not fen and fens_after_ply and isinstance(ply, int) and ply > 0 and ply - 1 < len(fens_after_ply):
                 fen = fens_after_ply[ply - 1]
@@ -317,10 +386,6 @@ def _extract_positions_from_games(games: List[Dict[str, Any]], max_positions: in
             
             # Skip opening positions (move 1-11) - focus on complex middlegame/endgame
             if move_num < 12:
-                continue
-            
-            # Convert cp to pawns (skip if missing)
-            if eval_cp is None:
                 continue
             eval_pawns = eval_cp / 100.0
 
@@ -444,7 +509,7 @@ def _ensure_fens_in_moves_table(moves_table: List[Dict[str, Any]]) -> List[Dict[
                     if move in board.legal_moves:
                         board.push(move)
                         pushed = True
-            except Exception:
+            except (ValueError, AttributeError):
                 pass
 
         if not pushed:
@@ -477,7 +542,7 @@ def _attach_fens_from_game(moves_table: List[Dict[str, Any]], fens_after_ply: Li
             enriched_move["fen"] = fen
         enriched.append(enriched_move)
 
-    return enrichedI
+    return enriched
 
 
 def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
@@ -646,10 +711,11 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
     else:
         perspective_color = side_to_move
     
-    # Layout
-    col_board, col_info = st.columns([2, 1])
-    
-    with col_board:
+    # Layout - responsive for mobile/desktop
+    if is_mobile():
+        # Mobile: Stack vertically
+        st.subheader(f"Position {state.current_index + 1}/{len(state.positions)}")
+        
         # Show board from perspective of side to move
         orientation = "white" if side_to_move == chess.WHITE else "black"
         
@@ -660,45 +726,122 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
             side_to_move="w" if side_to_move == chess.WHITE else "b",
             key=f"eval_board_{state.current_index}",
         )
-    
-    with col_info:
-        st.subheader(f"Position {state.current_index + 1}/{len(state.positions)}")
         
-        # Whose move
+        st.markdown("---")
+        
+        # Mobile info section
         st.markdown(f"### {side_name} to move")
         
         if position.move_number:
             st.caption(f"Move {position.move_number}")
+    else:
+        # Desktop: Side-by-side layout
+        col_board, col_info = st.columns([2, 1])
         
-        st.markdown("---")
-        
-        # Guess buttons (only if not revealed)
-        if not state.revealed:
-            st.markdown("**What's the evaluation?**")
-            st.markdown(
-                """
-                <style>
-                section.main div.stButton > button {
-                    width: 100%;
-                    padding: 0px 4px;
-                    height: 60px;
-                    min-height: 60px;
-                    font-size: 14px;
-                    font-weight: 600;
-                    border-radius: 8px;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
+        with col_board:
+            # Show board from perspective of side to move
+            orientation = "white" if side_to_move == chess.WHITE else "black"
+            
+            render_chessboard(
+                fen=position.fen,
+                legal_moves=[],  # No moves - just viewing
+                orientation=orientation,
+                side_to_move="w" if side_to_move == chess.WHITE else "b",
+                key=f"eval_board_{state.current_index}",
             )
+        
+        with col_info:
+            st.subheader(f"Position {state.current_index + 1}/{len(state.positions)}")
+            
+            # Whose move
+            st.markdown(f"### {side_name} to move")
+            
+            if position.move_number:
+                st.caption(f"Move {position.move_number}")
+    
+    # Continue with shared UI below
+    st.markdown("---")
+    
+    # Guess buttons (only if not revealed)
+    if not state.revealed:
+        st.markdown("**What's the evaluation?**")
+        st.markdown(
+            """
+            <style>
+            section.main div.stButton > button {
+                width: 100%;
+                padding: 0px 4px;
+                height: 60px;
+                min-height: 60px;
+                font-size: 14px;
+                font-weight: 600;
+                border-radius: 8px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            # Vertical layout for buttons (stacked) used to prevent text wrapping
+        # Vertical layout for buttons (stacked) used to prevent text wrapping
+        if is_mobile():
+            # Mobile: full-width buttons without column wrapper
+            if st.button(BUTTON_LABELS["losing"], key="btn_losing", use_container_width=True):
+                state.last_guess = "losing"
+                state.revealed = True
+                state.explanation_text = ""
+                state.explanation_submitted = False
+                state.total_attempts += 1
+                if state.last_guess == correct_category:
+                    state.score += 1
+                st.rerun()
+        
+            if st.button(BUTTON_LABELS["slightly_worse"], key="btn_sw", use_container_width=True):
+                state.last_guess = "slightly_worse"
+                state.revealed = True
+                state.explanation_text = ""
+                state.explanation_submitted = False
+                state.total_attempts += 1
+                if state.last_guess == correct_category:
+                    state.score += 1
+                st.rerun()
+        
+            if st.button(BUTTON_LABELS["equal"], key="btn_equal", use_container_width=True):
+                state.last_guess = "equal"
+                state.revealed = True
+                state.explanation_text = ""
+                state.explanation_submitted = False
+                state.total_attempts += 1
+                if state.last_guess == correct_category:
+                    state.score += 1
+                st.rerun()
+        
+            if st.button(BUTTON_LABELS["slightly_better"], key="btn_sb", use_container_width=True):
+                state.last_guess = "slightly_better"
+                state.revealed = True
+                state.explanation_text = ""
+                state.explanation_submitted = False
+                state.total_attempts += 1
+                if state.last_guess == correct_category:
+                    state.score += 1
+                st.rerun()
+        
+            if st.button(BUTTON_LABELS["winning"], key="btn_winning", use_container_width=True):
+                state.last_guess = "winning"
+                state.revealed = True
+                state.explanation_text = ""
+                state.explanation_submitted = False
+                state.total_attempts += 1
+                if state.last_guess == correct_category:
+                    state.score += 1
+                st.rerun()
+        else:
+            # Desktop: column-wrapped buttons
             col_left, col_center, col_right = st.columns([1, 2, 1])
             with col_center:
                 if st.button(BUTTON_LABELS["losing"], key="btn_losing", width='stretch'):
@@ -750,89 +893,89 @@ def render_eval_trainer(games: List[Dict[str, Any]] = None) -> None:
                     if state.last_guess == correct_category:
                         state.score += 1
                     st.rerun()
-        
+    
+    else:
+        # Show result (correct/incorrect)
+        is_correct = state.last_guess == correct_category
+        if is_correct:
+            st.success("✅ Correct!")
         else:
-            # Show result (correct/incorrect)
-            is_correct = state.last_guess == correct_category
-            if is_correct:
-                st.success("✅ Correct!")
-            else:
-                st.error("❌ Incorrect")
+            st.error("❌ Incorrect")
 
-            if ai_explanations_enabled and not state.explanation_submitted:
-                st.markdown("**Explain why this position is evaluated as it is.**")
-                st.caption("Consider material, king safety, piece activity, pawn structure, and initiative.")
-                state.explanation_text = st.text_area(
-                    "Your explanation",
-                    value=state.explanation_text,
-                    height=120,
-                    key=f"eval_expl_{state.current_index}",
+        if ai_explanations_enabled and not state.explanation_submitted:
+            st.markdown("**Explain why this position is evaluated as it is.**")
+            st.caption("Consider material, king safety, piece activity, pawn structure, and initiative.")
+            state.explanation_text = st.text_area(
+                "Your explanation",
+                value=state.explanation_text,
+                height=120,
+                key=f"eval_expl_{state.current_index}",
+            )
+            if st.button("Submit explanation", width='stretch', type="primary"):
+                state.explanation_submitted = True
+                st.rerun()
+        else:
+            # Reveal evaluation and AI explanation after user explanation
+            st.markdown(f"**Actual eval (White POV):** {_format_eval(eval_white_pov)}")
+            st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
+            if not is_correct:
+                st.caption(f"You guessed: {BUTTON_LABELS[state.last_guess]}")
+
+            # Only show the full deterministic explanation and feedback when AI explanations
+            # are enabled in the sidebar. Otherwise keep the UI minimal.
+            if ai_explanations_enabled:
+                st.markdown("---")
+                st.subheader("Why this evaluation")
+                explanation_lines = _build_explanation(
+                    board,
+                    perspective_color,
+                    eval_white_pov,
+                    focus_color,
+                    side_to_move,
                 )
-                if st.button("Submit explanation", width='stretch', type="primary"):
-                    state.explanation_submitted = True
-                    st.rerun()
-            else:
-                # Reveal evaluation and AI explanation after user explanation
-                st.markdown(f"**Actual eval (White POV):** {_format_eval(eval_white_pov)}")
-                st.markdown(f"**Category:** {BUTTON_LABELS[correct_category]}")
-                if not is_correct:
-                    st.caption(f"You guessed: {BUTTON_LABELS[state.last_guess]}")
+                for line in explanation_lines:
+                    st.markdown(f"- {line}")
 
-                # Only show the full deterministic explanation and feedback when AI explanations
-                # are enabled in the sidebar. Otherwise keep the UI minimal.
-                if ai_explanations_enabled:
-                    st.markdown("---")
-                    st.subheader("Why this evaluation")
-                    explanation_lines = _build_explanation(
-                        board,
-                        perspective_color,
-                        eval_white_pov,
-                        focus_color,
-                        side_to_move,
+                # Optionally show AI-generated explanation (may call OpenAI)
+                try:
+                    from src.ai_coach import generate_position_insight
+
+                    phase = "middlegame" if (position.move_number and position.move_number >= 12) else "opening"
+                    ai_explanation = generate_position_insight(
+                        fen=position.fen,
+                        eval_before=position.eval_cp,
+                        eval_after=position.eval_cp,
+                        best_move_san="",
+                        played_move_san="",
+                        phase=phase,
                     )
-                    for line in explanation_lines:
-                        st.markdown(f"- {line}")
+                    st.markdown("**AI explanation (short):**")
+                    st.info(ai_explanation)
+                except Exception as e:
+                    st.error(f"AI explanation failed: {e}")
 
-                    # Optionally show AI-generated explanation (may call OpenAI)
-                    try:
-                        from src.ai_coach import generate_position_insight
+                st.markdown("---")
+                st.subheader("Your explanation feedback")
+                user_factors = _extract_user_factors(state.explanation_text)
+                key_factors = _key_factors_from_metrics(_analyze_position(board, perspective_color))
+                matched = [f for f in key_factors if f in user_factors]
+                missed = [f for f in key_factors if f not in user_factors]
 
-                        phase = "middlegame" if (position.move_number and position.move_number >= 12) else "opening"
-                        ai_explanation = generate_position_insight(
-                            fen=position.fen,
-                            eval_before=position.eval_cp,
-                            eval_after=position.eval_cp,
-                            best_move_san="",
-                            played_move_san="",
-                            phase=phase,
-                        )
-                        st.markdown("**AI explanation (short):**")
-                        st.info(ai_explanation)
-                    except Exception as e:
-                        st.error(f"AI explanation failed: {e}")
+                if matched:
+                    st.success("You correctly mentioned: " + ", ".join(matched))
+                else:
+                    st.info("No key factors detected in your explanation.")
 
-                    st.markdown("---")
-                    st.subheader("Your explanation feedback")
-                    user_factors = _extract_user_factors(state.explanation_text)
-                    key_factors = _key_factors_from_metrics(_analyze_position(board, perspective_color))
-                    matched = [f for f in key_factors if f in user_factors]
-                    missed = [f for f in key_factors if f not in user_factors]
+                if missed:
+                    st.warning("Important factors to consider: " + ", ".join(missed))
 
-                    if matched:
-                        st.success("You correctly mentioned: " + ", ".join(matched))
-                    else:
-                        st.info("No key factors detected in your explanation.")
+                st.markdown("---")
 
-                    if missed:
-                        st.warning("Important factors to consider: " + ", ".join(missed))
-
-                    st.markdown("---")
-
-                # Next button
-                if st.button("➡️ Next Position", width='stretch', type="primary"):
-                    state.current_index += 1
-                    state.revealed = False
-                    state.last_guess = None
-                    state.explanation_text = ""
-                    state.explanation_submitted = False
-                    st.rerun()
+            # Next button
+            if st.button("➡️ Next Position", width='stretch', type="primary"):
+                state.current_index += 1
+                state.revealed = False
+                state.last_guess = None
+                state.explanation_text = ""
+                state.explanation_submitted = False
+                st.rerun()
