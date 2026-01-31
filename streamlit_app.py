@@ -1185,19 +1185,21 @@ def _render_time_control_filter(games: list[dict[str, Any]]) -> str:
             category = _classify_time_control(tc)
             available_controls.add(category)
     
-    # Initialize session state
-    if "selected_time_control" not in st.session_state:
-        st.session_state["selected_time_control"] = "All"
-    
-    # Build options
+    # Build options - always include "All" first
     options = ["All"]
-    for category in sorted(available_controls):
-        if category != "Unknown":
+    for category in ["Bullet", "Blitz", "Rapid", "Classical"]:
+        if category in available_controls:
             options.append(category)
     if "Unknown" in available_controls:
         options.append("Unknown")
     
-    # Show selector
+    # Get current selection, default to "All" if invalid
+    current = st.session_state.get("selected_time_control", "All")
+    if current not in options:
+        current = "All"
+        st.session_state["selected_time_control"] = "All"
+    
+    # Show selector with on_change callback
     col1, col2, col3 = st.columns([1, 2, 2])
     with col1:
         st.write("**Filter by:**")
@@ -1205,13 +1207,17 @@ def _render_time_control_filter(games: list[dict[str, Any]]) -> str:
         selected = st.selectbox(
             "Time Control",
             options,
-            index=options.index(st.session_state.get("selected_time_control", "All")),
+            index=options.index(current),
             label_visibility="collapsed",
-            key="time_control_selector",
+            key="tc_filter_select",
+            on_change=lambda: st.session_state.update({"selected_time_control": st.session_state.get("tc_filter_select", "All")}),
         )
+    
+    # Update session state
+    if selected != st.session_state.get("selected_time_control"):
         st.session_state["selected_time_control"] = selected
     
-    return selected
+    return st.session_state.get("selected_time_control", "All")
 
 
 def _filter_games_by_time_control(games: list[dict[str, Any]], time_control: str) -> list[dict[str, Any]]:
