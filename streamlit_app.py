@@ -4,6 +4,7 @@ import os
 import math
 import time
 import hashlib
+import shutil
 from dataclasses import dataclass
 from io import StringIO
 from typing import Any, List
@@ -12,6 +13,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import chess.pgn
+import chess.engine
 
 
 def _hydrate_env_from_streamlit_secrets() -> None:
@@ -35,6 +37,99 @@ def _hydrate_env_from_streamlit_secrets() -> None:
 
 
 _hydrate_env_from_streamlit_secrets()
+
+
+def _find_stockfish_path_for_local() -> str | None:
+    """Locate a local Stockfish binary for fallback analysis."""
+    env_path = (os.getenv("STOCKFISH_PATH") or "").strip()
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    for candidate in (
+        "/usr/games/stockfish",  # Linux (Debian/Ubuntu)
+        "/usr/bin/stockfish",    # Linux alternative
+        "/opt/homebrew/bin/stockfish",  # macOS Homebrew (Apple Silicon)
+        "/usr/local/bin/stockfish",     # macOS Homebrew (Intel)
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+
+    which_path = shutil.which("stockfish")
+    return which_path
+
+
+def _local_engine_analyze_pgn(pgn_text: str, *, depth: int = 15) -> dict:
+    """Analyze a single PGN game locally and return engine-like response."""
+    engine_path = _find_stockfish_path_for_local()
+    if not engine_path:
+        raise RuntimeError("Local Stockfish not found. Set STOCKFISH_PATH or install Stockfish.")
+
+    game = chess.pgn.read_game(StringIO(pgn_text or ""))
+    if not game:
+        raise RuntimeError("No PGN game found to analyze.")
+
+    try:
+        depth_val = int(depth)
+    except Exception:
+        depth_val = 15
+    depth_val = max(10, min(20, depth_val))
+
+    board = game.board()
+    analysis: list[dict[str, Any]] = []
+    total_moves = 0
+
+    engine = chess.engine.SimpleEngine.popen_uci(engine_path)
+    try:
+        for move in game.mainline_moves():
+            try:
+                move_san = board.san(move)
+            except Exception:
+                move_san = ""
+            board.push(move)
+            total_moves += 1
+
+            try:
+                info = engine.analyse(board, chess.engine.Limit(depth=depth_val))
+            except Exception:
+                break
+
+            score_cp = 0
+            score = info.get("score") if isinstance(info, dict) else None
+            if score is not None:
+                try:
+                    if score.is_mate():
+                        mate_val = score.pov(chess.WHITE).mate()
+                        if mate_val is None:
+                            score_cp = 0
+                        else:
+                            score_cp = 10000 if mate_val > 0 else -10000
+                    else:
+                        cp = score.pov(chess.WHITE).cp
+                        score_cp = int(cp) if cp is not None else 0
+                except Exception:
+                    score_cp = 0
+
+            analysis.append(
+                {
+                    "move_san": move_san or "",
+                    "score_cp": score_cp,
+                    "fen": board.fen(),
+                }
+            )
+    finally:
+        try:
+            engine.quit()
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "analysis": analysis,
+        "headers": dict(game.headers),
+        "games_analyzed": 1,
+        "total_moves": total_moves,
+        "engine_source": "local",
+    }
 
 from src.lichess_api import fetch_lichess_pgn
 from src.analytics import generate_coaching_report, CoachingSummary
@@ -868,9 +963,18 @@ def _aggregate_postprocessed_results(games: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 15, retries: int = 2) -> dict:
+def _post_to_engine(
+    pgn_text: str,
+    max_games: int,
+    *,
+    depth: int = 15,
+    retries: int = 2,
+    allow_local_fallback: bool = True,
+) -> dict:
     url, api_key = _get_engine_endpoint()
     if not url:
+        if allow_local_fallback:
+            return _local_engine_analyze_pgn(pgn_text, depth=depth)
         raise RuntimeError("Engine endpoint not configured")
 
     # Normalize base URL: strip trailing slash and reject accidental paths.
@@ -880,6 +984,8 @@ def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 15, retries: 
         base = base.split("/analyze_game")[0]
     endpoint = f"{base}{ANALYZE_ROUTE}"
     if endpoint.count("/analyze_game") != 1:
+        if allow_local_fallback:
+            return _local_engine_analyze_pgn(pgn_text, depth=depth)
         raise RuntimeError(f"Invalid engine endpoint: {endpoint}")
 
     # Pass depth as a query parameter (keeps JSON payload contract unchanged).
@@ -909,10 +1015,11 @@ def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 15, retries: 
             if attempt < retries:
                 time.sleep(1.0 * (attempt + 1))
                 continue
-            raise
+            break
 
         if resp.status_code == 403:
-            raise RuntimeError("VPS Authentication Failed")
+            last_exc = RuntimeError("VPS Authentication Failed")
+            break
         if resp.status_code == 422:
             st.error("Engine rejected request (422 Validation Error)")
             st.info(
@@ -926,11 +1033,13 @@ def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 15, retries: 
                 st.json(resp.json())
             except Exception:
                 st.write(resp.text)
-            st.stop()
+            last_exc = RuntimeError("Engine rejected request (422 Validation Error)")
+            break
         if resp.status_code == 404:
-            raise RuntimeError(
+            last_exc = RuntimeError(
                 f"Engine endpoint not found: {endpoint}. Check FastAPI route definition."
             )
+            break
         if not resp.ok:
             # Retry transient server errors.
             if resp.status_code in {500, 502, 503, 504} and attempt < retries:
@@ -939,14 +1048,22 @@ def _post_to_engine(pgn_text: str, max_games: int, *, depth: int = 15, retries: 
             body_preview = (resp.text or "").strip().replace("\n", " ")
             if len(body_preview) > 500:
                 body_preview = body_preview[:500] + "…"
-            raise RuntimeError(
+            last_exc = RuntimeError(
                 f"Engine analysis failed (status {resp.status_code}). "
                 + (f"Response: {body_preview}" if body_preview else "")
             )
+            break
 
         return resp.json()
 
     if last_exc is not None:
+        if allow_local_fallback:
+            try:
+                return _local_engine_analyze_pgn(pgn_text, depth=depth)
+            except Exception as local_exc:
+                raise RuntimeError(
+                    f"{last_exc} (local fallback failed: {local_exc})"
+                ) from local_exc
         raise last_exc
     raise RuntimeError("Engine analysis failed")
 
@@ -2510,10 +2627,6 @@ def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
 
 def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     """Render the puzzle training tab."""
-    st.header("♟️ Chess Puzzles")
-    st.caption("Practice tactical patterns from your analyzed games • No AI - purely engine-derived")
-    st.caption(f"Build: {_get_build_id()}")
-    
     games = aggregated.get("games", [])
     focus_player = (aggregated.get("focus_player") or "").strip()
     # Used by the puzzle trainer UI for rating attribution.
@@ -2527,6 +2640,13 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     if not games:
         st.info("No games analyzed yet. Run an analysis to generate puzzles!")
         return
+
+    board_container = st.container()
+    controls_container = st.container()
+
+    # Default source selection lives in session state so we can render controls after the board
+    st.session_state.setdefault("puzzle_source_mode", "My games")
+    source_mode = st.session_state.get("puzzle_source_mode", "My games")
 
     def _games_signature(gs: list[dict[str, Any]]) -> str:
         """Create a stable-ish signature for the current analyzed game set.
@@ -2562,13 +2682,6 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         st.session_state.pop("generated_puzzles", None)
         st.session_state.pop("puzzle_progress_v2", None)
         st.session_state.pop("puzzle_solution_line_cache_v1", None)
-
-    source_mode = st.radio(
-        "Puzzle source",
-        options=["My games", "Other users"],
-        horizontal=True,
-        key="puzzle_source_mode",
-    )
 
     # Reset puzzle UI state when switching source to avoid leaking progress/ratings/filters
     prev_mode = st.session_state.get("puzzle_source_mode_prev")
@@ -2656,108 +2769,13 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
                 "(or wait for other users to generate puzzles)."
             )
         return
-    
-    # Stats and filters in a collapsed expander to keep puzzle board visible
-    with st.expander("📊 Stats & Filters", expanded=False):
-        # Puzzle stats overview
-        stats = get_puzzle_stats(puzzles)
-        
-        st.subheader("📈 Puzzle Overview")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Puzzles", stats["total"])
-        with col2:
-            by_diff = stats.get("by_difficulty", {})
-            easy = by_diff.get("easy", 0)
-            st.metric("🟢 Easy", easy)
-        with col3:
-            medium = by_diff.get("medium", 0)
-            st.metric("🟡 Medium", medium)
-        with col4:
-            hard = by_diff.get("hard", 0)
-            st.metric("🔴 Hard", hard)
-        
-        # Pattern breakdown - count patterns from tactical_patterns field
-        pattern_counts = {}
-        for p in puzzles:
-            # Safely check for tactical_patterns attribute
-            tactical_patterns = getattr(p, "tactical_patterns", None)
-            if tactical_patterns:
-                composite = tactical_patterns.get("composite_pattern") if isinstance(tactical_patterns, dict) else None
-                outcome = tactical_patterns.get("primary_outcome") if isinstance(tactical_patterns, dict) else None
-                
-                if composite:
-                    pattern_counts[composite] = pattern_counts.get(composite, 0) + 1
-                elif outcome:
-                    pattern_counts[outcome] = pattern_counts.get(outcome, 0) + 1
-                else:
-                    pattern_counts["other"] = pattern_counts.get("other", 0) + 1
-            else:
-                pattern_counts["other"] = pattern_counts.get("other", 0) + 1
-        
-        st.write("**Tactical Patterns:**")
-        # Show top patterns in columns
-        top_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)[:6]
-        if top_patterns:
-            pattern_cols = st.columns(min(len(top_patterns), 3))
-            pattern_icons = {
-                "fork": "⚔️", "pin": "📌", "skewer": "🗡️", 
-                "back_rank_mate": "🏁", "smothered_mate": "😤",
-                "double_check": "✓✓", "discovered_check": "👁️",
-                "checkmate": "♔", "material_win": "💰",
-                "removing_the_guard": "🛡️", "other": "🎯"
-            }
-            for i, (pattern, count) in enumerate(top_patterns):
-                col_idx = i % 3
-                icon = pattern_icons.get(pattern, "🎯")
-                display_name = pattern.replace("_", " ").title()
-                with pattern_cols[col_idx]:
-                    st.write(f"{icon} {display_name}: **{count}**")
-        
-        st.divider()
-        
-        # Filtering options
-        st.subheader("🎯 Filter Puzzles")
-        filter_col1, filter_col2, filter_col3 = st.columns(3)
-        
-        with filter_col1:
-            difficulty_filter = st.selectbox(
-                "Difficulty",
-                options=["All", "Easy", "Medium", "Hard"],
-                key="puzzle_difficulty_filter",
-            )
-        
-        with filter_col2:
-            # Updated pattern-based filter options
-            pattern_options = [
-                "All",
-                "Fork",
-                "Pin",
-                "Skewer",
-                "Discovered Attack",
-                "Double Check",
-                "Back Rank Mate",
-                "Smothered Mate",
-                "Removing the Guard",
-                "Trapped Piece",
-                "Overloaded Piece",
-                "Material Win",
-                "Checkmate",
-                "Other Tactics",
-            ]
-            type_filter = st.selectbox(
-                "Pattern",
-                options=pattern_options,
-                key="puzzle_type_filter",
-            )
-        
-        with filter_col3:
-            phase_filter = st.selectbox(
-                "Phase",
-                options=["All", "Opening", "Middlegame", "Endgame"],
-                key="puzzle_phase_filter",
-            )
+
+    st.session_state.setdefault("puzzle_difficulty_filter", "All")
+    st.session_state.setdefault("puzzle_type_filter", "All")
+    st.session_state.setdefault("puzzle_phase_filter", "All")
+    difficulty_filter = st.session_state.get("puzzle_difficulty_filter", "All")
+    type_filter = st.session_state.get("puzzle_type_filter", "All")
+    phase_filter = st.session_state.get("puzzle_phase_filter", "All")
     
     # Track filter changes and reset puzzle index when filters change
     current_filter_sig = f"{difficulty_filter}|{type_filter}|{phase_filter}"
@@ -2766,7 +2784,7 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         # Filters changed - reset puzzle progress to start from first puzzle
         st.session_state.pop("puzzle_progress_v2", None)
         st.session_state["puzzle_filter_sig"] = current_filter_sig
-    
+
     # Apply filters
     filtered_puzzles = _filter_puzzles(
         puzzles,
@@ -2776,8 +2794,6 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
     )
     
     # Debug: show filter results
-    st.caption(f"🔍 Filter: {difficulty_filter} | {type_filter} | {phase_filter} → {len(filtered_puzzles)} of {len(puzzles)}")
-    
     # Sort filtered puzzles by rating quality (filters first, THEN rating)
     if filtered_puzzles and source_mode == "Other users":
         try:
@@ -2819,10 +2835,6 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
             st.error("No puzzles available. This shouldn't happen - try running a new analysis.")
         return
     
-    st.caption(f"Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
-    
-    st.divider()
-    
     # Premium status (for demo, always False - implement real check)
     IS_PREMIUM = False
     
@@ -2856,7 +2868,118 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
 
     gp_for_ui = game_players if source_mode == "My games" else None
     puzzle_defs = from_legacy_puzzles(filtered_puzzles, game_players=gp_for_ui)
-    render_puzzle_trainer(puzzle_defs)
+
+    with board_container:
+        render_puzzle_trainer(puzzle_defs)
+
+    with controls_container:
+        st.divider()
+        st.header("♟️ Chess Puzzles")
+        st.caption("Practice tactical patterns from your analyzed games • No AI - purely engine-derived")
+        st.caption(f"Build: {_get_build_id()}")
+
+        st.radio(
+            "Puzzle source",
+            options=["My games", "Other users"],
+            horizontal=True,
+            key="puzzle_source_mode",
+        )
+
+        stats = get_puzzle_stats(puzzles)
+        pattern_counts = {}
+        for p in puzzles:
+            tactical_patterns = getattr(p, "tactical_patterns", None)
+            if tactical_patterns:
+                composite = tactical_patterns.get("composite_pattern") if isinstance(tactical_patterns, dict) else None
+                outcome = tactical_patterns.get("primary_outcome") if isinstance(tactical_patterns, dict) else None
+
+                if composite:
+                    pattern_counts[composite] = pattern_counts.get(composite, 0) + 1
+                elif outcome:
+                    pattern_counts[outcome] = pattern_counts.get(outcome, 0) + 1
+                else:
+                    pattern_counts["other"] = pattern_counts.get("other", 0) + 1
+            else:
+                pattern_counts["other"] = pattern_counts.get("other", 0) + 1
+
+        top_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)[:6]
+
+        with st.expander("📊 Stats", expanded=False):
+            st.subheader("📈 Puzzle Overview")
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Total Puzzles", stats["total"])
+            with col2:
+                by_diff = stats.get("by_difficulty", {})
+                easy = by_diff.get("easy", 0)
+                st.metric("🟢 Easy", easy)
+            with col3:
+                medium = by_diff.get("medium", 0)
+                st.metric("🟡 Medium", medium)
+            with col4:
+                hard = by_diff.get("hard", 0)
+                st.metric("🔴 Hard", hard)
+
+        st.write("**Tactical Patterns:**")
+        if top_patterns:
+            pattern_cols = st.columns(min(len(top_patterns), 3))
+            pattern_icons = {
+                "fork": "⚔️", "pin": "📌", "skewer": "🗡️",
+                "back_rank_mate": "🏁", "smothered_mate": "😤",
+                "double_check": "✓✓", "discovered_check": "👁️",
+                "checkmate": "♔", "material_win": "💰",
+                "removing_the_guard": "🛡️", "other": "🎯"
+            }
+            for i, (pattern, count) in enumerate(top_patterns):
+                col_idx = i % 3
+                icon = pattern_icons.get(pattern, "🎯")
+                display_name = pattern.replace("_", " ").title()
+                with pattern_cols[col_idx]:
+                    st.write(f"{icon} {display_name}: **{count}**")
+
+        st.subheader("🎯 Filter Puzzles")
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
+
+        with filter_col1:
+            st.selectbox(
+                "Difficulty",
+                options=["All", "Easy", "Medium", "Hard"],
+                key="puzzle_difficulty_filter",
+            )
+
+        with filter_col2:
+            pattern_options = [
+                "All",
+                "Fork",
+                "Pin",
+                "Skewer",
+                "Discovered Attack",
+                "Double Check",
+                "Back Rank Mate",
+                "Smothered Mate",
+                "Removing the Guard",
+                "Trapped Piece",
+                "Overloaded Piece",
+                "Material Win",
+                "Checkmate",
+                "Other Tactics",
+            ]
+            st.selectbox(
+                "Pattern",
+                options=pattern_options,
+                key="puzzle_type_filter",
+            )
+
+        with filter_col3:
+            st.selectbox(
+                "Phase",
+                options=["All", "Opening", "Middlegame", "Endgame"],
+                key="puzzle_phase_filter",
+            )
+
+        st.caption(f"🔍 Filter: {difficulty_filter} | {type_filter} | {phase_filter} → {len(filtered_puzzles)} of {len(puzzles)}")
+        st.caption(f"Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
 
     # Auto-scroll back to puzzle section to avoid jumping to filters on interactions
     try:
