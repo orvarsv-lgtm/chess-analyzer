@@ -2560,25 +2560,38 @@ def _render_nav_button_logic(option: str, label_map: dict, key_idx: int) -> None
 def _apply_time_control_filter(aggregated: dict[str, Any]) -> dict[str, Any]:
     """Apply time control filter to aggregated data.
     
-    Returns a copy of aggregated data with games/analysis filtered by selected time control.
+    Returns a copy of aggregated data with games/analysis filtered by selected time control,
+    and all derived stats recalculated for the filtered games.
     """
     selected_tc = st.session_state.get("selected_time_control", "All")
     if selected_tc == "All":
         return aggregated
     
-    filtered = aggregated.copy()
     games = aggregated.get("games", [])
-    analysis = aggregated.get("analysis", [])
-    
     filtered_games = _filter_games_by_time_control(games, selected_tc)
-    filtered_analysis = _filter_analysis_by_games(analysis, filtered_games)
     
-    filtered["games"] = filtered_games
-    filtered["analysis"] = filtered_analysis
-    filtered["games_analyzed"] = len(filtered_games)
-    filtered["total_moves"] = len(filtered_analysis)
+    # If no games match the filter, return empty-ish result
+    if not filtered_games:
+        return {
+            **aggregated,
+            "games": [],
+            "analysis": [],
+            "games_analyzed": 0,
+            "total_moves": 0,
+            "phase_stats": {},
+            "opening_rates": [],
+            "cpl_trend": [],
+            "endgame_success": {"endgame_games": 0, "endgame_wins": 0, "endgame_win_rate": 0.0},
+            "coach_summary": {"primary_weakness": "N/A", "strengths": [], "recommended_focus": []},
+        }
     
-    return filtered
+    # Re-aggregate stats for filtered games only
+    re_aggregated = _aggregate_postprocessed_results(filtered_games)
+    
+    # Preserve focus_player from original
+    re_aggregated["focus_player"] = aggregated.get("focus_player")
+    
+    return re_aggregated
 
 
 def _render_tabbed_results(aggregated: dict[str, Any]) -> None:
