@@ -1007,7 +1007,10 @@ def _post_to_engine(
     url, api_key = _get_engine_endpoint()
     if not url:
         if allow_local_fallback:
-            return _local_engine_analyze_pgn(pgn_text, depth=depth)
+            st.warning("⚠️ No VPS endpoint configured, using local Stockfish (slower)...")
+            result = _local_engine_analyze_pgn(pgn_text, depth=depth)
+            result["engine_source"] = "local_fallback"
+            return result
         raise RuntimeError("Engine endpoint not configured")
 
     # Normalize base URL: strip trailing slash and reject accidental paths.
@@ -1094,7 +1097,10 @@ def _post_to_engine(
     if last_exc is not None:
         if allow_local_fallback:
             try:
-                return _local_engine_analyze_pgn(pgn_text, depth=depth)
+                st.warning(f"⚠️ VPS failed ({last_exc}), using local Stockfish (slower)...")
+                result = _local_engine_analyze_pgn(pgn_text, depth=depth)
+                result["engine_source"] = "local_fallback"
+                return result
             except Exception as local_exc:
                 raise RuntimeError(
                     f"{last_exc} (local fallback failed: {local_exc})"
