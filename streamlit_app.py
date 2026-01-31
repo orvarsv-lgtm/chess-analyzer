@@ -368,6 +368,7 @@ def recognize_opening(moves: list[str]) -> tuple[str, str]:
 
 ANALYZE_ROUTE = "/analyze_game"  # Base URL only; do NOT include this path in secrets/env.
 
+
 # CPL / phase stats tuning
 MATE_CP_THRESHOLD = 10_000  # treat evals beyond this magnitude as mate-like / non-CPL
 CPL_CP_LOSS_CAP = 2_000     # cap a single-move cp_loss contribution to avoid outliers
@@ -500,6 +501,38 @@ def _get_engine_endpoint() -> tuple[str, str]:
         url = os.getenv("VPS_ANALYSIS_URL") or ""
         api_key = os.getenv("VPS_API_KEY") or ""
         return url, api_key
+
+
+def _check_vps_health() -> tuple[bool, str, float]:
+    """Quick health check for VPS engine. Returns (is_ok, message, latency_ms)."""
+    url, api_key = _get_engine_endpoint()
+    if not url:
+        return False, "No VPS endpoint configured", 0.0
+    
+    base = url.rstrip("/")
+    if "/analyze_game" in base:
+        base = base.split("/analyze_game")[0]
+    
+    # Quick test with minimal PGN
+    test_endpoint = f"{base}{ANALYZE_ROUTE}?depth=10"
+    headers = {"x-api-key": api_key} if api_key else {}
+    test_payload = {"pgn": "1.e4 e5", "max_games": 1}
+    
+    try:
+        start = time.time()
+        resp = requests.post(test_endpoint, json=test_payload, timeout=10, headers=headers)
+        latency = (time.time() - start) * 1000
+        
+        if resp.ok:
+            data = resp.json()
+            if data.get("success"):
+                return True, f"VPS OK ({latency:.0f}ms)", latency
+            return False, f"VPS error: {data.get('error', 'unknown')}", latency
+        return False, f"VPS returned {resp.status_code}", latency
+    except requests.Timeout:
+        return False, "VPS timeout (>10s)", 0.0
+    except Exception as e:
+        return False, f"VPS unreachable: {type(e).__name__}", 0.0
 
 
 @dataclass(frozen=True)
@@ -1007,9 +1040,11 @@ def _post_to_engine(
         st.stop()
 
     last_exc: Exception | None = None
+    # Timeout: 60s is usually enough for 1 game at depth 15 (~40 moves = ~5-10s on VPS)
+    timeout_seconds = 60
     for attempt in range(retries + 1):
         try:
-            resp = requests.post(endpoint, json=payload, timeout=300, headers=headers)
+            resp = requests.post(endpoint, json=payload, timeout=timeout_seconds, headers=headers)
         except Exception as e:
             last_exc = e
             if attempt < retries:
@@ -1943,6 +1978,11 @@ def _render_analysis_input_form() -> None:
             status = st.empty()
             moves_counter = st.empty()
             cache_info = st.empty()
+            
+            # Quick VPS health check before starting analysis
+            vps_ok, vps_msg, vps_latency = _check_vps_health()
+            if vps_ok:
+                status.info(f"🚀 {vps_msg} — starting analysis...")
 
             aggregated_games: list[dict[str, Any]] = []
             aggregated_rows: list[dict[str, Any]] = []
@@ -2009,9 +2049,11 @@ def _render_analysis_input_form() -> None:
                 
                 # Not in cache - analyze with engine
                 cache_misses += 1
-                status.info(f"Analyzing {i} of {games_to_analyze} games... (new)")
+                num_moves = len(gi.move_sans)
+                status.info(f"🔄 Analyzing game {i}/{games_to_analyze} ({num_moves} moves, depth {analysis_depth})...")
                 try:
                     resp = _post_to_engine(gi.pgn, max_games=1, depth=int(analysis_depth))
+                    engine_src = resp.get("engine_source", "remote")
                     valid = _validate_engine_response(resp)
                 except Exception as e:
                     if "failed_games" not in st.session_state:
@@ -2093,8 +2135,10 @@ def _render_analysis_input_form() -> None:
             # Show final cache stats
             if cache_hits > 0:
                 status.success(f"✅ Done! Used {cache_hits} cached games, analyzed {cache_misses} new games.")
+            elif cache_misses > 0:
+                status.success(f"✅ Done! Analyzed {cache_misses} games successfully.")
             else:
-                status.success("Backend status: 200 OK")
+                status.success("✅ Analysis complete.")
 
             aggregated = _aggregate_postprocessed_results(aggregated_games)
             aggregated["focus_player"] = focus_player  # Pass through for analytics
@@ -2165,6 +2209,11 @@ def _render_analysis_input_form() -> None:
             progress = st.progress(0)
             status = st.empty()
             moves_counter = st.empty()
+            
+            # Quick VPS health check before starting
+            vps_ok, vps_msg, _ = _check_vps_health()
+            if vps_ok:
+                status.info(f"🚀 {vps_msg} — starting analysis...")
 
             aggregated_games: list[dict[str, Any]] = []
             aggregated_rows: list[dict[str, Any]] = []
@@ -2173,7 +2222,8 @@ def _render_analysis_input_form() -> None:
             focus_player = _infer_focus_player_from_games(games_inputs)
 
             for i, gi in enumerate(games_inputs[:games_to_analyze], start=1):
-                status.info(f"Analyzing {i} of {games_to_analyze} games...")
+                num_moves = len(gi.move_sans)
+                status.info(f"🔄 Analyzing game {i}/{games_to_analyze} ({num_moves} moves, depth {analysis_depth})...")
                 try:
                     resp = _post_to_engine(gi.pgn, max_games=1, depth=int(analysis_depth))
                     valid = _validate_engine_response(resp)
