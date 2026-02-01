@@ -3056,8 +3056,10 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
                     st.write(f"{icon} {display_name}: **{count}**")
 
         # Display current active filter theme
-        _display_active_theme = type_filter if type_filter != "All" else "missed_tactic"
-        st.caption(f"**Theme:** {_display_active_theme}")
+        if type_filter and type_filter != "All":
+            st.caption(f"**Theme:** {type_filter}")
+        else:
+            st.caption("**Theme:** All Tactics")
         st.caption(f"🔍 Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
 
 
@@ -3082,58 +3084,70 @@ def _filter_puzzles(
             result = [p for p in result if p.difficulty == target_diff]
     
     # Pattern/Type filter - updated to use tactical_patterns
+    # Use EXCLUSIVE matching: a puzzle's primary pattern determines its category
     if puzzle_type != "All":
         # Map display names to pattern values
+        # Priority: composite_pattern > primary_outcome > primary_constraints
         pattern_map = {
             "Fork": ("composite_pattern", "fork"),
             "Pin": ("composite_pattern", "pin"),
             "Skewer": ("composite_pattern", "skewer"),
-            "Discovered Attack": ("primary_constraints", "discovered_attack"),
+            "Discovered Attack": ("composite_pattern", "discovered_attack"),
             "Double Check": ("composite_pattern", "double_check"),
             "Back Rank Mate": ("composite_pattern", "back_rank_mate"),
             "Smothered Mate": ("composite_pattern", "smothered_mate"),
             "Removing the Guard": ("composite_pattern", "removing_the_guard"),
-            "Trapped Piece": ("primary_constraints", "piece_trapped"),
-            "Overloaded Piece": ("primary_constraints", "defender_overloaded"),
+            "Trapped Piece": ("composite_pattern", "piece_trapped"),
+            "Overloaded Piece": ("composite_pattern", "defender_overloaded"),
             "Material Win": ("primary_outcome", "material_win"),
             "Checkmate": ("primary_outcome", "checkmate"),
         }
+        
+        # Define which patterns take precedence (composite_pattern patterns)
+        composite_patterns = {"fork", "pin", "skewer", "discovered_attack", "double_check", 
+                            "back_rank_mate", "smothered_mate", "removing_the_guard",
+                            "piece_trapped", "defender_overloaded"}
         
         if puzzle_type in pattern_map:
             filter_key, filter_value = pattern_map[puzzle_type]
             filtered = []
             for p in result:
-                # Safely access tactical_patterns - use getattr to handle old puzzles
                 tactical_patterns = getattr(p, "tactical_patterns", None)
-                if tactical_patterns:
-                    patterns = tactical_patterns
-                    if filter_key == "composite_pattern":
-                        if patterns.get("composite_pattern") == filter_value:
-                            filtered.append(p)
-                    elif filter_key == "primary_outcome":
-                        if patterns.get("primary_outcome") == filter_value:
-                            filtered.append(p)
-                    elif filter_key == "primary_constraints":
-                        constraints = patterns.get("primary_constraints", [])
-                        for c in constraints:
-                            if c.get("constraint") == filter_value:
-                                filtered.append(p)
-                                break
-            result = filtered  # Always apply filter - don't fall back to all puzzles
+                if not tactical_patterns:
+                    continue
+                    
+                patterns = tactical_patterns
+                composite = patterns.get("composite_pattern")
+                outcome = patterns.get("primary_outcome")
+                
+                # For composite_pattern filters: match directly
+                if filter_key == "composite_pattern":
+                    if composite == filter_value:
+                        filtered.append(p)
+                # For primary_outcome filters (Material Win, Checkmate):
+                # Only include if there's NO composite_pattern (to avoid duplicates)
+                elif filter_key == "primary_outcome":
+                    # Skip if puzzle has a specific tactical pattern - it belongs there
+                    if composite and composite in composite_patterns:
+                        continue
+                    if outcome == filter_value:
+                        filtered.append(p)
+            result = filtered
         elif puzzle_type == "Other Tactics":
-            # Puzzles that don't match any specific pattern
-            known_patterns = {"fork", "pin", "skewer", "double_check", "back_rank_mate", 
-                           "smothered_mate", "removing_the_guard", "discovered_check"}
+            # Puzzles that don't match any specific pattern - truly "other"
+            known_composite_patterns = {"fork", "pin", "skewer", "double_check", "back_rank_mate", 
+                           "smothered_mate", "removing_the_guard", "discovered_attack",
+                           "piece_trapped", "defender_overloaded"}
             filtered = []
             for p in result:
-                # Safely access tactical_patterns - use getattr to handle old puzzles
                 tactical_patterns = getattr(p, "tactical_patterns", None)
                 if tactical_patterns:
                     composite = tactical_patterns.get("composite_pattern")
-                    if composite is None or composite not in known_patterns:
+                    # Only include if no recognized composite pattern
+                    if composite is None or composite not in known_composite_patterns:
                         filtered.append(p)
                 else:
-                    # No pattern data - include in "Other"
+                    # No pattern data at all - include in "Other"
                     filtered.append(p)
             result = filtered
     
