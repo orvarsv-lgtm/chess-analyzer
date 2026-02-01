@@ -2994,9 +2994,6 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
 
     # When viewing other users' puzzles, avoid mapping missing origin names
     # to the current user's `game_players` (which causes incorrect attribution).
-    # Anchor for stable scrolling to puzzle section on reruns
-    st.markdown("<div id='puzzle_anchor'></div>", unsafe_allow_html=True)
-
     gp_for_ui = game_players if source_mode == "My games" else None
     puzzle_defs = from_legacy_puzzles(filtered_puzzles, game_players=gp_for_ui)
 
@@ -3062,20 +3059,6 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         _display_active_theme = type_filter if type_filter != "All" else "missed_tactic"
         st.caption(f"**Theme:** {_display_active_theme}")
         st.caption(f"🔍 Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
-
-    # Auto-scroll back to puzzle section to avoid jumping to filters on interactions
-    try:
-        st.components.v1.html(
-            """
-            <script>
-            const el = document.getElementById('puzzle_anchor');
-            if (el) { el.scrollIntoView({behavior: 'instant', block: 'start'}); }
-            </script>
-            """,
-            height=0,
-        )
-    except Exception:
-        pass
 
 
 def _filter_puzzles(
