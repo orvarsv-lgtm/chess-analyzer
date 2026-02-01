@@ -2845,12 +2845,68 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
             )
         return
 
+    # Initialize filter defaults
     st.session_state.setdefault("puzzle_difficulty_filter", "All")
     st.session_state.setdefault("puzzle_type_filter", "All")
     st.session_state.setdefault("puzzle_phase_filter", "All")
-    difficulty_filter = st.session_state.get("puzzle_difficulty_filter", "All")
-    type_filter = st.session_state.get("puzzle_type_filter", "All")
-    phase_filter = st.session_state.get("puzzle_phase_filter", "All")
+    
+    # =====================================
+    # RENDER FILTERS FIRST (before filtering)
+    # This ensures selectbox values are captured on this run
+    # =====================================
+    with controls_container:
+        st.divider()
+        st.header("♟️ Chess Puzzles")
+        st.caption("Practice tactical patterns from your analyzed games • No AI - purely engine-derived")
+        st.caption(f"Build: {_get_build_id()}")
+
+        st.radio(
+            "Puzzle source",
+            options=["My games", "Other users"],
+            horizontal=True,
+            key="puzzle_source_mode",
+        )
+
+        st.subheader("🎯 Filter Puzzles")
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
+
+        pattern_options = [
+            "All",
+            "Fork",
+            "Pin",
+            "Skewer",
+            "Discovered Attack",
+            "Double Check",
+            "Back Rank Mate",
+            "Smothered Mate",
+            "Removing the Guard",
+            "Trapped Piece",
+            "Overloaded Piece",
+            "Material Win",
+            "Checkmate",
+            "Other Tactics",
+        ]
+        
+        with filter_col1:
+            difficulty_filter = st.selectbox(
+                "Difficulty",
+                options=["All", "Easy", "Medium", "Hard"],
+                key="puzzle_difficulty_filter",
+            )
+
+        with filter_col2:
+            type_filter = st.selectbox(
+                "Pattern",
+                options=pattern_options,
+                key="puzzle_type_filter",
+            )
+
+        with filter_col3:
+            phase_filter = st.selectbox(
+                "Phase",
+                options=["All", "Opening", "Middlegame", "Endgame"],
+                key="puzzle_phase_filter",
+            )
     
     # Track filter changes and reset puzzle index when filters change
     current_filter_sig = f"{difficulty_filter}|{type_filter}|{phase_filter}"
@@ -2860,7 +2916,7 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         st.session_state.pop("puzzle_progress_v2", None)
         st.session_state["puzzle_filter_sig"] = current_filter_sig
 
-    # Apply filters
+    # Apply filters using current selectbox values
     filtered_puzzles = _filter_puzzles(
         puzzles,
         difficulty_filter,
@@ -2948,18 +3004,7 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
         render_puzzle_trainer(puzzle_defs)
 
     with controls_container:
-        st.divider()
-        st.header("♟️ Chess Puzzles")
-        st.caption("Practice tactical patterns from your analyzed games • No AI - purely engine-derived")
-        st.caption(f"Build: {_get_build_id()}")
-
-        st.radio(
-            "Puzzle source",
-            options=["My games", "Other users"],
-            horizontal=True,
-            key="puzzle_source_mode",
-        )
-
+        # Note: Header, source selector, and filters already rendered above
         stats = get_puzzle_stats(puzzles)
         pattern_counts = {}
         for p in puzzles:
@@ -3013,48 +3058,10 @@ def _render_puzzle_tab(aggregated: dict[str, Any]) -> None:
                 with pattern_cols[col_idx]:
                     st.write(f"{icon} {display_name}: **{count}**")
 
-        st.subheader("🎯 Filter Puzzles")
-        filter_col1, filter_col2, filter_col3 = st.columns(3)
-
-        with filter_col1:
-            st.selectbox(
-                "Difficulty",
-                options=["All", "Easy", "Medium", "Hard"],
-                key="puzzle_difficulty_filter",
-            )
-
-        with filter_col2:
-            pattern_options = [
-                "All",
-                "Fork",
-                "Pin",
-                "Skewer",
-                "Discovered Attack",
-                "Double Check",
-                "Back Rank Mate",
-                "Smothered Mate",
-                "Removing the Guard",
-                "Trapped Piece",
-                "Overloaded Piece",
-                "Material Win",
-                "Checkmate",
-                "Other Tactics",
-            ]
-            st.selectbox(
-                "Pattern",
-                options=pattern_options,
-                key="puzzle_type_filter",
-            )
-
-        with filter_col3:
-            st.selectbox(
-                "Phase",
-                options=["All", "Opening", "Middlegame", "Endgame"],
-                key="puzzle_phase_filter",
-            )
-
-        st.caption(f"🔍 Filter: {difficulty_filter} | {type_filter} | {phase_filter} → {len(filtered_puzzles)} of {len(puzzles)}")
-        st.caption(f"Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
+        # Display current active filter theme
+        _display_active_theme = type_filter if type_filter != "All" else "missed_tactic"
+        st.caption(f"**Theme:** {_display_active_theme}")
+        st.caption(f"🔍 Showing {len(filtered_puzzles)} of {len(puzzles)} puzzles")
 
     # Auto-scroll back to puzzle section to avoid jumping to filters on interactions
     try:
