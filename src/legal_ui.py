@@ -1,8 +1,7 @@
 import streamlit as st
 
-def render_terms_of_service_page():
-    st.title("Terms of Service")
-    st.markdown("""
+# Shared content constants - reused by standalone pages
+TERMS_OF_SERVICE_CONTENT = """
 These Terms of Service govern your use of **ChessAnalyzerV1**, operated by us.  
 By accessing or using the Service, you agree to these Terms.  
 **If you do not agree, do not use the Service.**
@@ -23,7 +22,7 @@ By accessing or using the Service, you agree to these Terms.
 - Payments are processed by our payment provider (e.g. **Paddle**), not directly by us.
 - Prices, limits (games analyzed, depth, reports), and plans are described on our website.
 - Subscriptions renew automatically unless canceled.
-- Refunds are handled according to our payment provider’s refund policy.
+- Refunds are handled according to our payment provider's refund policy.
 - We reserve the right to change pricing or plan limits, with reasonable notice.
 
 ### 4. Usage Limits & Fair Use
@@ -40,12 +39,9 @@ We may restrict usage if abuse is detected.
 - By using the Service, you grant us permission to process this data solely to provide analysis and improve the Service.
 - We do **not** sell your personal chess data.
 - Publicly available games (e.g. from Lichess or Chess.com) may be analyzed at your request.
-""")
+"""
 
-
-def render_privacy_policy_page():
-    st.title("Privacy Policy")
-    st.markdown("""
+PRIVACY_POLICY_CONTENT = """
 **Effective Date:** January 2026
 
 This Privacy Policy explains how **we** collect, use, and protect your information when you use **ChessAnalyzerV1**.
@@ -75,12 +71,9 @@ We implement reasonable security measures to protect your data. However, no meth
 
 ### 6. Contact Us
 If you have questions about this policy, please contact us at: **orvarsv@icloud.com**
-""")
+"""
 
-
-def render_refund_policy_page():
-    st.title("Refund Policy")
-    st.markdown("""
+REFUND_POLICY_CONTENT = """
 **All sales are final.**
 
 ### No Refunds
@@ -91,4 +84,22 @@ You may cancel your subscription at any time to prevent future billing. Your acc
 
 ### Exceptional Circumstances
 In the event of a technical error (e.g., double billing) attributed to our systems, please contact support at **orvarsv@icloud.com** to resolve the issue. We resolve these specific cases at our sole discretion.
-""")
+"""
+
+
+def render_terms_of_service_page():
+    """Render Terms of Service page within the main app."""
+    st.title("Terms of Service")
+    st.markdown(TERMS_OF_SERVICE_CONTENT)
+
+
+def render_privacy_policy_page():
+    """Render Privacy Policy page within the main app."""
+    st.title("Privacy Policy")
+    st.markdown(PRIVACY_POLICY_CONTENT)
+
+
+def render_refund_policy_page():
+    """Render Refund Policy page within the main app."""
+    st.title("Refund Policy")
+    st.markdown(REFUND_POLICY_CONTENT)
