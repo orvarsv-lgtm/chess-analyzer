@@ -16,12 +16,12 @@ import {
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/games", label: "Games", icon: Swords },
-  { href: "/openings", label: "Openings", icon: BookOpen },
-  { href: "/train", label: "Train", icon: Dumbbell },
-  { href: "/insights", label: "Insights", icon: BarChart3 },
-  { href: "/profile", label: "Profile", icon: UserCircle },
+  { href: "/", label: "Home", icon: LayoutDashboard, requireAuth: false },
+  { href: "/games", label: "My Games", icon: Swords, requireAuth: true },
+  { href: "/openings", label: "Openings", icon: BookOpen, requireAuth: true },
+  { href: "/train", label: "Train", icon: Dumbbell, requireAuth: true },
+  { href: "/insights", label: "Insights", icon: BarChart3, requireAuth: true },
+  { href: "/profile", label: "Profile", icon: UserCircle, requireAuth: true },
 ] as const;
 
 export function Sidebar() {
@@ -42,7 +42,9 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 space-y-1">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+        {NAV_ITEMS
+          .filter(({ requireAuth }) => !requireAuth || !!session)
+          .map(({ href, label, icon: Icon }) => {
           const isActive =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
 
@@ -87,7 +89,7 @@ export function Sidebar() {
             className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg text-sm font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors"
           >
             <LogIn className="h-4 w-4" />
-            Sign In
+            Sign Up
           </button>
         )}
       </div>

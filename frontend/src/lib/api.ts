@@ -441,3 +441,113 @@ export const coachAPI = {
     return fetchAPI<CoachQuota>("/coach/quota");
   },
 };
+
+// ─── Anonymous Analysis ─────────────────────────────────
+
+export interface AnonGameAnalysis {
+  game_index: number;
+  white: string;
+  black: string;
+  result: string;
+  opening: string | null;
+  eco: string | null;
+  date: string | null;
+  time_control: string | null;
+  color: string;
+  overall_cpl: number;
+  phase_opening_cpl: number | null;
+  phase_middlegame_cpl: number | null;
+  phase_endgame_cpl: number | null;
+  blunders: number;
+  mistakes: number;
+  inaccuracies: number;
+  best_moves: number;
+  moves: {
+    move_number: number;
+    color: string;
+    san: string;
+    cp_loss: number;
+    phase: string | null;
+    move_quality: string | null;
+    eval_before: number | null;
+    eval_after: number | null;
+  }[];
+}
+
+export interface AnonAnalysisResults {
+  username: string | null;
+  platform: string;
+  total_games: number;
+  games: AnonGameAnalysis[];
+  overall_cpl: number | null;
+  win_rate: number | null;
+  blunder_rate: number | null;
+}
+
+export type AnonProgressEvent =
+  | { type: "start"; total: number }
+  | { type: "progress"; completed: number; total: number; game_cpl: number }
+  | { type: "complete"; results: AnonAnalysisResults }
+  | { type: "error"; message: string };
+
+/**
+ * Start anonymous analysis via SSE stream.
+ * Calls `onProgress` for each event, returns the final results.
+ */
+export async function startAnonymousAnalysis(
+  params: {
+    platform: string;
+    username?: string;
+    pgn_text?: string;
+    max_games?: number;
+  },
+  onProgress: (event: AnonProgressEvent) => void
+): Promise<AnonAnalysisResults> {
+  const url = `${API_BASE}/anonymous/analyze`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Analysis failed");
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No response stream");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResults: AnonAnalysisResults | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // Parse SSE events
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          const event: AnonProgressEvent = JSON.parse(line.slice(6));
+          onProgress(event);
+          if (event.type === "complete") {
+            finalResults = event.results;
+          }
+        } catch {
+          // Skip malformed events
+        }
+      }
+    }
+  }
+
+  if (!finalResults) throw new Error("Analysis did not complete");
+  return finalResults;
+}

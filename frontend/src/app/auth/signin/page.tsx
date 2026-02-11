@@ -52,7 +52,7 @@ function SignInForm() {
             ♔
           </div>
           <h1 className="text-2xl font-bold text-white">Chess Analyzer</h1>
-          <p className="text-sm text-gray-400">Sign in to analyze your games</p>
+          <p className="text-sm text-gray-400">Sign up to see your results</p>
         </div>
 
         {/* Dev Login */}
@@ -81,7 +81,7 @@ function SignInForm() {
             disabled={loading || !email}
             className="w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
           >
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Signing up..." : "Sign Up"}
           </button>
         </form>
 
@@ -112,7 +112,7 @@ function SignInForm() {
         )}
 
         <p className="text-xs text-center text-gray-500">
-          Dev mode — any email will create a session
+          Free account — just enter your email
         </p>
       </div>
     </div>

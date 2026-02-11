@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db.session import engine, async_session
 from app.db.models import Base
-from app.routes import games, analysis, puzzles, insights, users, webhooks, health, coach
+from app.routes import games, analysis, puzzles, insights, users, webhooks, health, coach, anonymous
 
 
 @asynccontextmanager
@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
 
     # ── Routes ──
     app.include_router(health.router, tags=["health"])
+    app.include_router(anonymous.router, prefix="/api/anonymous", tags=["anonymous"])
     app.include_router(games.router, prefix="/api/games", tags=["games"])
     app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
     app.include_router(puzzles.router, prefix="/api/puzzles", tags=["puzzles"])
