@@ -1,5 +1,0 @@
-[ui]
-# Hide the automatically generated page navigation in the sidebar
-# Legal pages are accessible via direct URLs but not shown in navigation
-# This keeps the existing custom sidebar navigation unchanged
-showSidebarNavigation = false

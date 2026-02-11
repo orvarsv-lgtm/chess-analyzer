@@ -15,12 +15,32 @@ venv/
 .env
 .env.local
 *.env
+backend/.env
+frontend/.env.local
 
 # Streamlit secrets (contains API keys!)
+.streamlit/
 .streamlit/secrets.toml
 .streamlit/secrets.toml.save
 .streamlit/*.save
 
+# Node.js
+node_modules/
+frontend/node_modules/
+
+# Next.js
+.next/
+frontend/.next/
+out/
+
 # OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+
+# Temp files
+*.pdf
+*.log
 

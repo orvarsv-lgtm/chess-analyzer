@@ -1,3 +1,0 @@
-color,score,opening,opening_name,moves,date,time_control,moves_pgn,white_elo,black_elo,elo
-black,loss,d4 h5 Qd3 e6,Unknown,45,2016.11.04,-,d4 h5 Qd3 e6 Nc3 c6 Nf3 Nf6 Bg5 Rh6 e3 b5 O-O-O Qa5 e4 Na6 Kb1 Bb7 e5 O-O-O a3 Rg6 Be2 Rxg5 exf6 gxf6 Nxg5 fxg5 Ne4 Nc7 b4 Qa4 Nxg5 Bh6 Ne4 Bf4 g3 Bg5 h4 Bh6 Qc3 d5 Nf6 Bg7 Nxh5 Be5 Qf3 a6 Nf6 Bxd4 Rxd4 Ne8 Rd3 Nxf6 h5 Ne4 h6 Nf6 Rh4 Nh7 Rc3 a5 Qf4 axb4 Qxb4 Qxb4+ axb4 Ba6 Rxc6+ Kd7 Rb6 Rb8 Rxa6 Rg8 Bxb5+ Kc7 Bd3 Rxg3 Ra7+ Kb6 Rd7 Rxd3 cxd3 Nf6 Re7 Kb5 Rxf7 Ne4 dxe4,,1500,1500
-black,win,a4 d6 b3 Nc6,Unknown,26,2016.11.04,-,a4 d6 b3 Nc6 e4 e5 d3 d5 Bg5 Bb4+ Qd2 Bxd2+ Kxd2 f6 h4 Bg4 f3 fxg5 hxg5 Bd7 Nc3 Nb4 Nxd5 c5 Nf6+ Kf7 Nxd7 Qxd7 c3 Qd8 cxb4 Qd4 Re1 cxb4 Kc2 a5 Ne2 Qd8 Rh4 Nh6 Ng3 b6 Nf5 Qc8+ Kd2 Qc3+ Ke3 Nxf5+ Ke2 Qc2#,1500,,

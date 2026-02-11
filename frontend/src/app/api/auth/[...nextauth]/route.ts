@@ -1,24 +1,41 @@
 import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
-import EmailProvider from "next-auth/providers/email";
+import CredentialsProvider from "next-auth/providers/credentials";
+
+const providers: any[] = [];
+
+// ── Dev-mode credentials (always available for local testing) ──
+providers.push(
+  CredentialsProvider({
+    name: "Dev Login",
+    credentials: {
+      email: { label: "Email", type: "email", placeholder: "you@example.com" },
+    },
+    async authorize(credentials, req) {
+      // In dev mode, any email creates a session. No password needed.
+      const email = credentials?.email as string | undefined;
+      if (!email) return null;
+      return {
+        id: email,
+        email: email,
+        name: email.split("@")[0],
+      };
+    },
+  })
+);
+
+// ── Google OAuth (only if configured) ──
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  providers.push(
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    })
+  );
+}
 
 const handler = NextAuth({
-  providers: [
-    // Google OAuth
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-    }),
-    // Magic-link email (uses Supabase SMTP or any SMTP provider)
-    EmailProvider({
-      server: process.env.EMAIL_SERVER ?? "",
-      from: process.env.EMAIL_FROM ?? "Chess Analyzer <noreply@chessanalyzer.com>",
-    }),
-  ],
-
-  // Use database sessions stored in Supabase Postgres
-  // TODO: Wire up @next-auth/prisma-adapter or a custom Supabase adapter
-  // adapter: PrismaAdapter(prisma),
+  providers,
 
   session: {
     strategy: "jwt",
@@ -28,12 +45,14 @@ const handler = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        token.email = user.email;
       }
       return token;
     },
     async session({ session, token }) {
-      if (session.user && token.id) {
+      if (session.user) {
         (session.user as any).id = token.id;
+        session.user.email = token.email as string;
       }
       return session;
     },

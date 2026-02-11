@@ -45,11 +45,32 @@ async def get_current_user(
         return None
 
     user_id: Optional[str] = payload.get("sub")
+    email: Optional[str] = payload.get("email")
     if user_id is None:
         return None
 
+    # Try to find user by ID first
     result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+
+    # If not found, try by email
+    if user is None and email:
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+
+    # Auto-create user in dev mode if they don't exist yet
+    if user is None and settings.env == "development":
+        import uuid
+        user = User(
+            id=str(uuid.uuid4()),
+            email=email or user_id,
+            name=(email or user_id).split("@")[0] if email or user_id else "Dev User",
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+    return user
 
 
 async def require_user(

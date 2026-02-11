@@ -1,8 +1,0 @@
-color,score,opening,moves,date,time_control,moves_pgn,white_elo,black_elo,elo
-black,loss,Nf3 Nc6 d3 Nf6,26,2012.07.21,-,Nf3 Nc6 d3 Nf6 Nc3 e5 Ne4 d5 Ng3 b5 Be3 g5 c3 Bg7 h3 Bb7 Bxg5 h6 Be3 O-O Qb3 Qe8 Bc5 Qe7 Bxe7 Rfe8 Ba3 Rad8 Qxb5 a6 Qxb7 Rb8 Qxc6 Rbd8 Bc5 Nd7 Bb4 Nb8 Qc5 Nd7 Qxc7 Rc8 Qxd7 Re7 Qxc8+ Kh7 Bxe7 Bf6 Bxf6 Kg6 Qf5#,,1200,1200
-black,win,d4 Nc6 Qd3 Nh6,13,2012.07.21,-,d4 Nc6 Qd3 Nh6 Qh3 Nxd4 Qd3 Nc6 Qc3 Ng4 Qg3 Nd4 Qxg4 Nxc2+ Kd1 Nxa1 Qf3 e6 Qc3 Qh4 Qd4 Qxd4+ Ke1 Nc2#,1200,,
-black,win,Nc3 d5 Nf3 Nf6,13,2012.07.21,-,Nc3 d5 Nf3 Nf6 d4 Bf5 Qd3 Bxd3 exd3 Nbd7 Be2 c5 b3 e6 Ng5 cxd4 Nxh7 Rxh7 O-O dxc3 Kh1 Qb8 Rg1 Rxh2#,1200,,
-black,win,e4 Nc6 d4 d5,15,2012.07.21,-,e4 Nc6 d4 d5 Nf3 Nf6 Nc3 Nxe4 Nxe4 dxe4 Ng5 Qd5 Nxe4 Qxe4+ Kd2 Bg4 Bd3 Qxd4 c3 Qxf2+ Be2 Rd8+ Kc2 Rxd1 Kb1 Qf5+ Bd3 Qxd3#,1200,,
-black,win,Nf3 e6 Nc3 d5,8,2012.07.21,-,Nf3 e6 Nc3 d5 Nd4 Bc5 Ne4 dxe4 Nxe6 fxe6 h3 Qd4 f3 Qf2#,1200,,
-black,loss,Nf3 Nc6 e3 e5,42,2012.07.21,-,Nf3 Nc6 e3 e5 Bd3 Nb4 Na3 d6 Nb5 Bd7 Nc3 Be7 b3 Nf6 Ng5 O-O Qf3 c6 Ba3 Nxd3+ cxd3 g6 Nce4 h6 Bxd6 Bxd6 Qxf6 Qxf6 Nxf6+ Kg7 Nxd7 Rfd8 Nxf7 Rxd7 Nxd6 Rxd6 d4 Re8 dxe5 Rxe5 Rc1 Ree6 f4 Rf6 Ke2 b6 d4 a5 Rhd1 h5 a3 b5 g3 Rde6 Rf1 Rd6 h3 Rf7 Kd2 Rdf6 e4 Re6 Kd3 Rfe7 d5 Rf6 e5 Rd7 exf6+ Kxf6 Rxc6+ Ke7 Re6+ Kd8 d6 a4 bxa4 bxa4 Rc1 Rc7 dxc7+ Kd7 c8=Q#,,1200,1200
-black,win,e4 e6 d4 d5,8,2012.07.21,-,e4 e6 d4 d5 f4 Nc6 Bb5 Nf6 Bd2 Nxe4 Nc3 Qh4+ Kf1 Qf2#,1200,,
