@@ -1,0 +1,426 @@
+"""
+Insights routes – Aggregated performance data, coaching, trends.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import case, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth import require_user
+from app.db.models import Game, GameAnalysis, MoveEvaluation, OpeningRepertoire, User
+from app.db.session import get_db
+
+router = APIRouter()
+
+
+@router.get("/overview")
+async def get_overview(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Dashboard overview – key numbers for the home page.
+    Returns: total games, overall CPL, win rate, blunder rate, recent trend.
+    """
+    # Total games
+    total_q = select(func.count()).select_from(Game).where(Game.user_id == user.id)
+    total_games = (await db.execute(total_q)).scalar() or 0
+
+    if total_games == 0:
+        return {
+            "total_games": 0,
+            "overall_cpl": None,
+            "win_rate": None,
+            "blunder_rate": None,
+            "recent_cpl": None,
+            "trend": None,
+        }
+
+    # Win rate
+    wins_q = select(func.count()).select_from(Game).where(Game.user_id == user.id, Game.result == "win")
+    wins = (await db.execute(wins_q)).scalar() or 0
+    win_rate = round(wins / total_games * 100, 1)
+
+    # Overall CPL (average across all analyzed games)
+    cpl_q = (
+        select(func.avg(GameAnalysis.overall_cpl))
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    overall_cpl = (await db.execute(cpl_q)).scalar()
+    overall_cpl = round(overall_cpl, 1) if overall_cpl else None
+
+    # Blunder rate per 100 moves
+    blunder_q = (
+        select(
+            func.sum(GameAnalysis.blunders_count).label("total_blunders"),
+            func.sum(Game.moves_count).label("total_moves"),
+        )
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    row = (await db.execute(blunder_q)).one_or_none()
+    blunder_rate = None
+    if row and row.total_moves and row.total_moves > 0:
+        blunder_rate = round(row.total_blunders / row.total_moves * 100, 2)
+
+    # Recent CPL (last 10 games) for trend
+    recent_q = (
+        select(GameAnalysis.overall_cpl)
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id, GameAnalysis.overall_cpl.isnot(None))
+        .order_by(Game.date.desc())
+        .limit(10)
+    )
+    recent_rows = (await db.execute(recent_q)).scalars().all()
+    recent_cpl = round(sum(recent_rows) / len(recent_rows), 1) if recent_rows else None
+
+    # Determine trend
+    trend = None
+    if overall_cpl and recent_cpl:
+        diff = recent_cpl - overall_cpl
+        if diff < -5:
+            trend = "improving"
+        elif diff > 5:
+            trend = "declining"
+        else:
+            trend = "stable"
+
+    return {
+        "total_games": total_games,
+        "overall_cpl": overall_cpl,
+        "win_rate": win_rate,
+        "blunder_rate": blunder_rate,
+        "recent_cpl": recent_cpl,
+        "trend": trend,
+    }
+
+
+@router.get("/phase-breakdown")
+async def get_phase_breakdown(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CPL breakdown by game phase (opening / middlegame / endgame)."""
+    q = (
+        select(
+            func.avg(GameAnalysis.phase_opening_cpl).label("opening"),
+            func.avg(GameAnalysis.phase_middlegame_cpl).label("middlegame"),
+            func.avg(GameAnalysis.phase_endgame_cpl).label("endgame"),
+        )
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    row = (await db.execute(q)).one_or_none()
+    if not row:
+        return {"opening": None, "middlegame": None, "endgame": None}
+
+    return {
+        "opening": round(row.opening, 1) if row.opening else None,
+        "middlegame": round(row.middlegame, 1) if row.middlegame else None,
+        "endgame": round(row.endgame, 1) if row.endgame else None,
+    }
+
+
+@router.get("/openings")
+async def get_opening_stats(
+    color: Optional[str] = None,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Opening repertoire statistics."""
+    query = select(OpeningRepertoire).where(OpeningRepertoire.user_id == user.id)
+    if color:
+        query = query.where(OpeningRepertoire.color == color)
+    query = query.order_by(OpeningRepertoire.games_played.desc())
+
+    result = await db.execute(query)
+    openings = result.scalars().all()
+
+    return [
+        {
+            "opening_name": o.opening_name,
+            "eco_code": o.eco_code,
+            "color": o.color,
+            "games_played": o.games_played,
+            "win_rate": round(o.games_won / o.games_played * 100, 1) if o.games_played > 0 else 0,
+            "average_cpl": round(o.average_cpl, 1) if o.average_cpl else None,
+            "early_deviations": o.early_deviations,
+        }
+        for o in openings
+    ]
+
+
+@router.get("/weaknesses")
+async def get_weaknesses(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Top 3 actionable weaknesses derived from analysis data.
+    This is the opinionated coaching surface – deterministic, not AI.
+    """
+    # Get phase breakdown
+    phase_q = (
+        select(
+            func.avg(GameAnalysis.phase_opening_cpl).label("opening"),
+            func.avg(GameAnalysis.phase_middlegame_cpl).label("middlegame"),
+            func.avg(GameAnalysis.phase_endgame_cpl).label("endgame"),
+            func.avg(GameAnalysis.overall_cpl).label("overall"),
+        )
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    phase = (await db.execute(phase_q)).one_or_none()
+
+    if not phase or phase.overall is None:
+        return {"weaknesses": [], "message": "Not enough data. Analyze some games first."}
+
+    weaknesses = []
+    baseline = phase.overall or 50
+
+    # Phase weaknesses
+    if phase.opening and phase.opening > baseline * 1.15:
+        weaknesses.append({
+            "area": "Opening",
+            "severity": "high" if phase.opening > baseline * 1.3 else "medium",
+            "message": "Your opening accuracy is below your overall level.",
+            "cpl": round(phase.opening, 1),
+            "action": "Focus on learning your opening lines deeper.",
+        })
+
+    if phase.middlegame and phase.middlegame > baseline * 1.15:
+        weaknesses.append({
+            "area": "Middlegame",
+            "severity": "high" if phase.middlegame > baseline * 1.3 else "medium",
+            "message": "You lose accuracy in complex middlegame positions.",
+            "cpl": round(phase.middlegame, 1),
+            "action": "Practice tactical puzzles to improve calculation.",
+        })
+
+    if phase.endgame and phase.endgame > baseline * 1.15:
+        weaknesses.append({
+            "area": "Endgame",
+            "severity": "high" if phase.endgame > baseline * 1.3 else "medium",
+            "message": "Your endgame technique needs work.",
+            "cpl": round(phase.endgame, 1),
+            "action": "Study basic endgame positions (K+P, R+P).",
+        })
+
+    # Blunder pattern
+    blunder_q = (
+        select(
+            MoveEvaluation.blunder_subtype,
+            func.count().label("cnt"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.move_quality == "Blunder",
+            MoveEvaluation.blunder_subtype.isnot(None),
+        )
+        .group_by(MoveEvaluation.blunder_subtype)
+        .order_by(func.count().desc())
+        .limit(1)
+    )
+    top_blunder = (await db.execute(blunder_q)).one_or_none()
+
+    if top_blunder and top_blunder.cnt >= 3:
+        subtype_messages = {
+            "hanging_piece": "You frequently leave pieces undefended.",
+            "missed_tactic": "You miss tactical opportunities (forks, pins, skewers).",
+            "king_safety": "You make moves that weaken your king's safety.",
+            "endgame_technique": "You make technical errors in simplified positions.",
+        }
+        weaknesses.append({
+            "area": "Blunder Pattern",
+            "severity": "high",
+            "message": subtype_messages.get(top_blunder.blunder_subtype, f"Recurring {top_blunder.blunder_subtype} blunders."),
+            "count": top_blunder.cnt,
+            "action": f"Train positions involving {top_blunder.blunder_subtype.replace('_', ' ')}.",
+        })
+
+    # Sort by severity
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    weaknesses.sort(key=lambda w: severity_order.get(w["severity"], 2))
+
+    return {"weaknesses": weaknesses[:3]}
+
+
+@router.get("/time-analysis")
+async def get_time_analysis(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Time management analysis – blunders under time pressure,
+    average move time, and time-control performance split.
+    """
+    # Blunders under time pressure (< 30 seconds remaining)
+    time_pressure_q = (
+        select(
+            func.count().label("total_time_pressure_moves"),
+            func.sum(
+                case(
+                    (MoveEvaluation.move_quality == "Blunder", 1),
+                    else_=0,
+                )
+            ).label("time_pressure_blunders"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.time_remaining.isnot(None),
+            MoveEvaluation.time_remaining < 30,
+        )
+    )
+    tp_row = (await db.execute(time_pressure_q)).one_or_none()
+
+    # Normal blunders (not under time pressure)
+    normal_q = (
+        select(
+            func.count().label("total_normal_moves"),
+            func.sum(
+                case(
+                    (MoveEvaluation.move_quality == "Blunder", 1),
+                    else_=0,
+                )
+            ).label("normal_blunders"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.time_remaining.isnot(None),
+            MoveEvaluation.time_remaining >= 30,
+        )
+    )
+    n_row = (await db.execute(normal_q)).one_or_none()
+
+    # Average move time from analysis
+    avg_time_q = (
+        select(func.avg(GameAnalysis.average_move_time))
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    avg_move_time = (await db.execute(avg_time_q)).scalar()
+
+    # Time control breakdown
+    tc_q = (
+        select(
+            Game.time_control,
+            func.count().label("games"),
+            func.avg(GameAnalysis.overall_cpl).label("avg_cpl"),
+            func.sum(case((Game.result == "win", 1), else_=0)).label("wins"),
+        )
+        .outerjoin(GameAnalysis, GameAnalysis.game_id == Game.id)
+        .where(Game.user_id == user.id, Game.time_control.isnot(None))
+        .group_by(Game.time_control)
+        .order_by(func.count().desc())
+        .limit(5)
+    )
+    tc_rows = (await db.execute(tc_q)).all()
+
+    time_controls = [
+        {
+            "time_control": r.time_control,
+            "games": r.games,
+            "avg_cpl": round(r.avg_cpl, 1) if r.avg_cpl else None,
+            "win_rate": round(r.wins / r.games * 100, 1) if r.games > 0 else 0,
+        }
+        for r in tc_rows
+    ]
+
+    return {
+        "time_pressure_moves": tp_row.total_time_pressure_moves if tp_row else 0,
+        "time_pressure_blunders": tp_row.time_pressure_blunders if tp_row else 0,
+        "normal_moves": n_row.total_normal_moves if n_row else 0,
+        "normal_blunders": n_row.normal_blunders if n_row else 0,
+        "avg_move_time": round(avg_move_time, 1) if avg_move_time else None,
+        "time_controls": time_controls,
+    }
+
+
+@router.get("/streaks")
+async def get_streaks(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Win/loss streak tracking."""
+    from app.db.models import Streak
+
+    result = await db.execute(
+        select(Streak).where(Streak.user_id == user.id)
+    )
+    streaks = result.scalars().all()
+
+    # Also compute current streak from recent games
+    recent_q = (
+        select(Game.result)
+        .where(Game.user_id == user.id)
+        .order_by(Game.date.desc())
+        .limit(50)
+    )
+    recent = (await db.execute(recent_q)).scalars().all()
+
+    current_streak = 0
+    streak_type = None
+    if recent:
+        streak_type = recent[0]  # "win", "loss", or "draw"
+        for r in recent:
+            if r == streak_type:
+                current_streak += 1
+            else:
+                break
+
+    return {
+        "current_streak": current_streak,
+        "current_streak_type": streak_type,
+        "saved_streaks": [
+            {
+                "type": s.streak_type,
+                "current": s.current_count,
+                "best": s.best_count,
+            }
+            for s in streaks
+        ],
+    }
+
+
+@router.get("/recent-games")
+async def get_recent_games(
+    limit: int = 5,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Last N games for the home-page activity feed."""
+    from sqlalchemy.orm import selectinload
+
+    q = (
+        select(Game)
+        .where(Game.user_id == user.id)
+        .options(selectinload(Game.analysis))
+        .order_by(Game.date.desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    return [
+        {
+            "id": g.id,
+            "date": g.date.isoformat() if g.date else None,
+            "color": g.color,
+            "result": g.result,
+            "opening_name": g.opening_name,
+            "platform": g.platform,
+            "player_elo": g.player_elo,
+            "opponent_elo": g.opponent_elo,
+            "time_control": g.time_control,
+            "has_analysis": g.analysis is not None,
+            "overall_cpl": g.analysis.overall_cpl if g.analysis else None,
+        }
+        for g in rows
+    ]
