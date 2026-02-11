@@ -36,7 +36,6 @@ export default function HomePage() {
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
 
   // ─── Anonymous analysis state ───────────────────────
-  const [step, setStep] = useState<Step>("input");
   const [platform, setPlatform] = useState<"lichess" | "chess.com" | "pgn">("lichess");
   const [username, setUsername] = useState("");
   const [pgnText, setPgnText] = useState("");
@@ -46,29 +45,34 @@ export default function HomePage() {
   const [progressTotal, setProgressTotal] = useState(0);
   const [progressDone, setProgressDone] = useState(0);
 
-  // Results
-  const [results, setResults] = useState<AnonAnalysisResults | null>(null);
-
-  // Restore results from sessionStorage (survives sign-up redirect)
-  useEffect(() => {
-    // Don't act while NextAuth is still loading the session
-    if (authStatus === "loading") return;
-
+  // Results — initialize from sessionStorage if available
+  const [results, setResults] = useState<AnonAnalysisResults | null>(() => {
+    if (typeof window === "undefined") return null;
     try {
       const stored = sessionStorage.getItem("anon_analysis_results");
-      if (stored) {
-        const parsed = JSON.parse(stored) as AnonAnalysisResults;
-        setResults(parsed);
-        // If signed in, show results immediately
-        if (session) {
-          setStep("results");
-          sessionStorage.removeItem("anon_analysis_results");
-        } else {
-          setStep("results-locked");
-        }
-      }
+      if (stored) return JSON.parse(stored) as AnonAnalysisResults;
     } catch {}
-  }, [session, authStatus]);
+    return null;
+  });
+
+  // Determine initial step based on stored results
+  const [step, setStep] = useState<Step>(() => {
+    if (typeof window === "undefined") return "input";
+    try {
+      const stored = sessionStorage.getItem("anon_analysis_results");
+      if (stored) return "results-locked"; // Will switch to "results" once session loads
+    } catch {}
+    return "input";
+  });
+
+  // When session loads and we have stored results, unlock them
+  useEffect(() => {
+    if (authStatus === "loading") return;
+    if (session && results && step === "results-locked") {
+      setStep("results");
+      sessionStorage.removeItem("anon_analysis_results");
+    }
+  }, [session, authStatus, results, step]);
 
   // Load dashboard data for logged-in users
   useEffect(() => {
