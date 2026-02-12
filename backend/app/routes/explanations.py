@@ -13,14 +13,14 @@ from __future__ import annotations
 from typing import Optional
 
 import chess
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
 from app.config import get_settings
-from app.db.models import MoveEvaluation, User
+from app.db.models import User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -100,31 +100,35 @@ async def explain_move(
     prompt = _build_explanation_prompt(body, concepts)
 
     # ── Call OpenAI ─────────────────────────────────────
-    import httpx
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.openai_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": EXPLANATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.2,
-                "max_tokens": 400,
-            },
-        )
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": EXPLANATION_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 400,
+                },
+            )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="AI explanation service unavailable")
 
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail="AI explanation service error")
 
-    data = resp.json()
-    explanation_text = data["choices"][0]["message"]["content"]
+    try:
+        data = resp.json()
+        explanation_text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, ValueError):
+        raise HTTPException(status_code=502, detail="Unexpected AI response format")
 
     # Parse alternative suggestion from the response
     alternative = None

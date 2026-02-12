@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import Integer as SAInteger, case, func, select, and_, desc
+from sqlalchemy import case, func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
@@ -77,10 +77,9 @@ async def get_recurring_patterns(
     """
     # Count total analyzed games
     game_count_q = await db.execute(
-        select(func.count(Game.id)).where(
-            Game.user_id == user.id,
-            Game.analysis != None,
-        ).join(GameAnalysis, GameAnalysis.game_id == Game.id)
+        select(func.count(Game.id))
+        .join(GameAnalysis, GameAnalysis.game_id == Game.id)
+        .where(Game.user_id == user.id)
     )
     total_games = game_count_q.scalar() or 0
 

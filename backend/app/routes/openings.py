@@ -14,11 +14,11 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
-from app.db.models import Game, GameAnalysis, MoveEvaluation, OpeningRepertoire, User
+from app.db.models import Game, OpeningRepertoire, User
 from app.db.session import get_db
 
 router = APIRouter()
