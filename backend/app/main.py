@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy import text
+
 from app.config import get_settings
 from app.db.session import engine, async_session
 from app.db.models import Base
@@ -21,9 +23,17 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     # Create tables if they don't exist (dev only; use Alembic in prod)
-    if not settings.is_production:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    try:
+        if not settings.is_production:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        else:
+            # In production, just verify DB is reachable
+            async with engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"DB startup check failed: {e}")
 
     yield
 
