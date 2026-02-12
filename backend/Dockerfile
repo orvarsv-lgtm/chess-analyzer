@@ -8,12 +8,12 @@ RUN apt-get update && \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for caching
-COPY requirements.txt .
+# Copy requirements first for caching (try both paths for flexibility)
+COPY backend/requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the app
-COPY . .
+# Copy the backend code
+COPY backend/ .
 
 # Expose port (Railway sets PORT env var)
 EXPOSE 8000
