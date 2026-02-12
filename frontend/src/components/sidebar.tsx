@@ -12,11 +12,13 @@ import {
   UserCircle,
   LogIn,
   LogOut,
+  BookOpen,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: LayoutDashboard, requireAuth: false },
   { href: "/games", label: "My Games", icon: Swords, requireAuth: true },
+  { href: "/openings", label: "Openings", icon: BookOpen, requireAuth: true },
   { href: "/train", label: "Train", icon: Dumbbell, requireAuth: true },
   { href: "/insights", label: "Insights", icon: BarChart3, requireAuth: true },
   { href: "/profile", label: "Profile", icon: UserCircle, requireAuth: true },
@@ -25,9 +27,9 @@ const NAV_ITEMS = [
 const MOBILE_NAV = [
   { href: "/", label: "Home", icon: LayoutDashboard, requireAuth: false },
   { href: "/games", label: "Games", icon: Swords, requireAuth: true },
+  { href: "/openings", label: "Openings", icon: BookOpen, requireAuth: true },
   { href: "/train", label: "Train", icon: Dumbbell, requireAuth: true },
   { href: "/insights", label: "Insights", icon: BarChart3, requireAuth: true },
-  { href: "/profile", label: "Me", icon: UserCircle, requireAuth: true },
 ] as const;
 
 export function Sidebar() {

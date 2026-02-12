@@ -17,15 +17,19 @@ import {
   Loader2,
   Dumbbell,
   ChevronDown,
+  Lightbulb,
+  Sparkles,
 } from "lucide-react";
 import {
   gamesAPI,
   analysisAPI,
   coachAPI,
+  explanationsAPI,
   type GameDetail,
   type MoveEval,
   type AnalysisResult,
   type CoachReview,
+  type MoveExplanation,
 } from "@/lib/api";
 import {
   Button,
@@ -55,6 +59,11 @@ export default function GameDetailPage() {
   // ─── AI Coach ────────────────────────────────────────
   const [coachReview, setCoachReview] = useState<CoachReview | null>(null);
   const [coachLoading, setCoachLoading] = useState(false);
+
+  // ─── AI Move Explanation ─────────────────────────────
+  const [explanation, setExplanation] = useState<MoveExplanation | null>(null);
+  const [explanationLoading, setExplanationLoading] = useState(false);
+  const [explanationMoveIdx, setExplanationMoveIdx] = useState<number>(-1);
 
   // ─── Board state ─────────────────────────────────────
   const [moveIndex, setMoveIndex] = useState(0);
@@ -131,15 +140,19 @@ export default function GameDetailPage() {
   // ─── Navigation ──────────────────────────────────────
   function goFirst() {
     setMoveIndex(0);
+    setExplanation(null);
   }
   function goPrev() {
     setMoveIndex((i) => Math.max(0, i - 1));
+    setExplanation(null);
   }
   function goNext() {
     setMoveIndex((i) => Math.min(positions.length - 1, i + 1));
+    setExplanation(null);
   }
   function goLast() {
     setMoveIndex(positions.length - 1);
+    setExplanation(null);
   }
 
   // Keyboard navigation
@@ -285,24 +298,100 @@ export default function GameDetailPage() {
             </Button>
           </div>
 
-          {/* Current move annotation */}
+          {/* Current move annotation + AI Explain */}
           {currentMoveEval && (
-            <div
-              className={`mt-3 px-4 py-2 rounded-lg text-sm ${moveQualityBg(
-                currentMoveEval.move_quality
-              )}`}
-            >
-              <span className={moveQualityColor(currentMoveEval.move_quality)}>
-                {currentMoveEval.move_quality}
-              </span>
-              <span className="text-gray-400 ml-2">
-                {currentMoveEval.san}
-                {currentMoveEval.cp_loss > 0 && (
-                  <span className="text-gray-500 ml-1">
-                    (−{currentMoveEval.cp_loss} cp)
+            <div className="mt-3 space-y-2">
+              <div
+                className={`px-4 py-2 rounded-lg text-sm flex items-center justify-between ${moveQualityBg(
+                  currentMoveEval.move_quality
+                )}`}
+              >
+                <div>
+                  <span className={moveQualityColor(currentMoveEval.move_quality)}>
+                    {currentMoveEval.move_quality}
                   </span>
-                )}
-              </span>
+                  <span className="text-gray-400 ml-2">
+                    {currentMoveEval.san}
+                    {currentMoveEval.cp_loss > 0 && (
+                      <span className="text-gray-500 ml-1">
+                        (−{currentMoveEval.cp_loss} cp)
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (explanationLoading) return;
+                    if (explanationMoveIdx === moveIndex && explanation) {
+                      setExplanation(null);
+                      setExplanationMoveIdx(-1);
+                      return;
+                    }
+                    setExplanationLoading(true);
+                    setExplanation(null);
+                    try {
+                      const fenBefore = moveIndex > 0 ? positions[moveIndex - 1] : positions[0];
+                      const result = await explanationsAPI.explainMove({
+                        fen: fenBefore,
+                        san: currentMoveEval.san,
+                        eval_before: currentMoveEval.eval_before ?? undefined,
+                        eval_after: currentMoveEval.eval_after ?? undefined,
+                        cp_loss: currentMoveEval.cp_loss,
+                        phase: currentMoveEval.phase ?? undefined,
+                        move_quality: currentMoveEval.move_quality ?? undefined,
+                        move_number: currentMoveEval.move_number,
+                        color: currentMoveEval.color,
+                        game_id: gameId,
+                      });
+                      setExplanation(result);
+                      setExplanationMoveIdx(moveIndex);
+                    } catch {
+                      // AI service error
+                    } finally {
+                      setExplanationLoading(false);
+                    }
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-brand-600/20 text-brand-300 hover:bg-brand-600/30 transition-colors"
+                  title="AI Explain"
+                >
+                  {explanationLoading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3 w-3" />
+                  )}
+                  Explain
+                </button>
+              </div>
+
+              {/* AI Explanation panel */}
+              {explanation && explanationMoveIdx === moveIndex && (
+                <div className="px-4 py-3 rounded-lg bg-brand-600/10 border border-brand-600/20 text-sm space-y-2 animate-fade-in">
+                  <div className="flex items-center gap-1.5 text-brand-300 text-xs font-semibold uppercase tracking-wider">
+                    <Lightbulb className="h-3.5 w-3.5" />
+                    AI Explanation
+                  </div>
+                  <p className="text-gray-300 leading-relaxed">
+                    {explanation.explanation}
+                  </p>
+                  {explanation.alternative && (
+                    <p className="text-gray-500 text-xs italic">
+                      {explanation.alternative}
+                    </p>
+                  )}
+                  {explanation.concepts.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {explanation.concepts.map((concept, i) => (
+                        <span
+                          key={i}
+                          className="px-1.5 py-0.5 text-[10px] rounded bg-surface-2 text-gray-500"
+                        >
+                          {concept}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

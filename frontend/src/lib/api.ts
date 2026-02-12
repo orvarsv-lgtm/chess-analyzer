@@ -566,6 +566,186 @@ export const coachAPI = {
   },
 };
 
+// ─── AI Move Explanations ───────────────────────────────
+
+export interface MoveExplanation {
+  explanation: string;
+  concepts: string[];
+  severity: "good" | "neutral" | "warning" | "critical";
+  alternative: string | null;
+  explanations_used: number;
+  explanations_limit: number | null;
+}
+
+export const explanationsAPI = {
+  explainMove(params: {
+    fen: string;
+    san: string;
+    best_move_san?: string;
+    eval_before?: number;
+    eval_after?: number;
+    cp_loss?: number;
+    phase?: string;
+    move_quality?: string;
+    move_number?: number;
+    color?: string;
+    game_id?: number;
+  }): Promise<MoveExplanation> {
+    return fetchAPI<MoveExplanation>("/explanations/explain-move", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  },
+};
+
+// ─── Opening Explorer ───────────────────────────────────
+
+export interface ExplorerMove {
+  san: string;
+  uci: string;
+  white: number;
+  draws: number;
+  black: number;
+  total: number;
+  win_rate: number;
+  average_rating: number | null;
+}
+
+export interface ExplorerResponse {
+  fen: string;
+  source: string;
+  total_games: number;
+  white_wins: number;
+  draws: number;
+  black_wins: number;
+  moves: ExplorerMove[];
+  opening: string | null;
+  eco: string | null;
+  top_games: {
+    id: string;
+    white: string;
+    white_rating: number | null;
+    black: string;
+    black_rating: number | null;
+    winner: string | null;
+    year: number | null;
+  }[];
+}
+
+export interface PersonalOpening {
+  opening_name: string;
+  eco_code: string | null;
+  color: string;
+  games_played: number;
+  games_won: number;
+  games_drawn: number;
+  games_lost: number;
+  win_rate: number;
+  average_cpl: number | null;
+}
+
+export interface PersonalRepertoireResponse {
+  openings: PersonalOpening[];
+  total_openings: number;
+  most_played: string | null;
+  best_opening: string | null;
+  worst_opening: string | null;
+}
+
+export const openingsAPI = {
+  explore(params: {
+    fen?: string;
+    source?: string;
+    ratings?: string;
+    speeds?: string;
+    player?: string;
+    color?: string;
+  }): Promise<ExplorerResponse> {
+    const searchParams = new URLSearchParams();
+    if (params.fen) searchParams.set("fen", params.fen);
+    if (params.source) searchParams.set("source", params.source);
+    if (params.ratings) searchParams.set("ratings", params.ratings);
+    if (params.speeds) searchParams.set("speeds", params.speeds);
+    if (params.player) searchParams.set("player", params.player);
+    if (params.color) searchParams.set("color", params.color);
+    return fetchAPI<ExplorerResponse>(`/openings/explore?${searchParams}`);
+  },
+
+  personal(params?: {
+    color?: string;
+    min_games?: number;
+    sort_by?: string;
+  }): Promise<PersonalRepertoireResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.color) searchParams.set("color", params.color);
+    if (params?.min_games) searchParams.set("min_games", String(params.min_games));
+    if (params?.sort_by) searchParams.set("sort_by", params.sort_by);
+    return fetchAPI<PersonalRepertoireResponse>(`/openings/personal?${searchParams}`);
+  },
+
+  tree(params?: { color?: string; max_depth?: number }): Promise<{
+    tree: unknown[];
+    total_games: number;
+    color: string;
+  }> {
+    const searchParams = new URLSearchParams();
+    if (params?.color) searchParams.set("color", params.color);
+    if (params?.max_depth) searchParams.set("max_depth", String(params.max_depth));
+    return fetchAPI(`/openings/tree?${searchParams}`);
+  },
+};
+
+// ─── Cross-Game Patterns ────────────────────────────────
+
+export interface RecurringPattern {
+  pattern_type: string;
+  description: string;
+  occurrences: number;
+  severity: "high" | "medium" | "low";
+  phase: string | null;
+  avg_cp_loss: number | null;
+  trend: string | null;
+  examples: unknown[];
+  recommendation: string;
+}
+
+export interface PatternsResponse {
+  patterns: RecurringPattern[];
+  total_games_analyzed: number;
+  analysis_period: string;
+}
+
+export interface ProgressPoint {
+  period: string;
+  games: number;
+  avg_cpl: number | null;
+  blunder_rate: number | null;
+  pattern_count: number;
+}
+
+export interface ProgressResponse {
+  overall: ProgressPoint[];
+  by_phase: Record<string, ProgressPoint[]>;
+}
+
+export const patternsAPI = {
+  recurring(params?: {
+    limit?: number;
+    min_games?: number;
+  }): Promise<PatternsResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", String(params.limit));
+    if (params?.min_games) searchParams.set("min_games", String(params.min_games));
+    return fetchAPI<PatternsResponse>(`/patterns/recurring?${searchParams}`);
+  },
+
+  progress(months?: number): Promise<ProgressResponse> {
+    const searchParams = new URLSearchParams();
+    if (months) searchParams.set("months", String(months));
+    return fetchAPI<ProgressResponse>(`/patterns/progress?${searchParams}`);
+  },
+};
+
 // ─── Anonymous Analysis ─────────────────────────────────
 
 export interface AnonGameAnalysis {
@@ -595,6 +775,9 @@ export interface AnonGameAnalysis {
     move_quality: string | null;
     eval_before: number | null;
     eval_after: number | null;
+    fen_before?: string | null;
+    best_move_san?: string | null;
+    best_move_uci?: string | null;
   }[];
 }
 

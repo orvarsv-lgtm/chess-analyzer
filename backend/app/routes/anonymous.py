@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
 from app.config import get_settings
-from app.db.models import Game, GameAnalysis, MoveEvaluation, OpeningRepertoire, User
+from app.db.models import Game, GameAnalysis, MoveEvaluation, OpeningRepertoire, Puzzle, User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -53,6 +53,9 @@ class MoveEvalOut(BaseModel):
     move_quality: Optional[str]
     eval_before: Optional[int]
     eval_after: Optional[int]
+    fen_before: Optional[str] = None
+    best_move_san: Optional[str] = None
+    best_move_uci: Optional[str] = None
 
 
 class GameAnalysisOut(BaseModel):
@@ -95,6 +98,9 @@ class ClaimMoveIn(BaseModel):
     move_quality: Optional[str] = None
     eval_before: Optional[int] = None
     eval_after: Optional[int] = None
+    fen_before: Optional[str] = None
+    best_move_san: Optional[str] = None
+    best_move_uci: Optional[str] = None
 
 
 class ClaimGameIn(BaseModel):
@@ -357,6 +363,55 @@ async def claim_anonymous_results(
             )
             db.add(move_row)
 
+        # ── Generate puzzles from blunders & mistakes ──
+        for m in g.moves:
+            if m.move_quality not in ("Blunder", "Mistake") or not m.fen_before:
+                continue
+
+            puzzle_key = hashlib.md5(
+                f"{m.fen_before}|{m.san}".encode()
+            ).hexdigest()
+
+            # Determine difficulty from centipawn loss
+            if m.cp_loss >= 300:
+                difficulty = "platinum"
+            elif m.cp_loss >= 200:
+                difficulty = "gold"
+            elif m.cp_loss >= 100:
+                difficulty = "silver"
+            else:
+                difficulty = "bronze"
+
+            # Determine side to move from FEN (the player who blundered)
+            fen_parts = m.fen_before.split()
+            side_to_move = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
+
+            puzzle_type = "blunder" if m.move_quality == "Blunder" else "mistake"
+
+            puzzle_row = Puzzle(
+                puzzle_key=puzzle_key,
+                source_game_id=game_row.id,
+                source_user_id=user_id,
+                fen=m.fen_before,
+                side_to_move=side_to_move,
+                best_move_san=m.best_move_san or "?",
+                best_move_uci=m.best_move_uci,
+                played_move_san=m.san,
+                eval_loss_cp=m.cp_loss,
+                phase=m.phase or "middlegame",
+                puzzle_type=puzzle_type,
+                difficulty=difficulty,
+                move_number=m.move_number,
+                themes=[puzzle_type, m.phase or "middlegame"],
+            )
+
+            # Skip duplicates silently
+            existing_puzzle = await db.execute(
+                select(Puzzle).where(Puzzle.puzzle_key == puzzle_key)
+            )
+            if not existing_puzzle.scalar_one_or_none():
+                db.add(puzzle_row)
+
         existing_ids.add(game_hash)
         imported += 1
 
@@ -565,6 +620,21 @@ async def _analyze_game(
         move_num += 1
         mv_color = "white" if board.turn == chess.WHITE else "black"
         san = board.san(move)
+        fen_before = board.fen()  # capture FEN before the move
+
+        # Analyze position BEFORE the move to get engine best move
+        # (only for the player's moves so we can generate puzzles from mistakes)
+        best_move_san = None
+        best_move_uci = None
+        if mv_color == color:
+            pre_info = await engine.analyse(
+                board, chess.engine.Limit(depth=depth), info=chess.engine.INFO_ALL
+            )
+            pv = pre_info.get("pv")
+            if pv and len(pv) > 0:
+                best_move_uci = pv[0].uci()
+                best_move_san = board.san(pv[0])
+
         board.push(move)
 
         info = await engine.analyse(board, chess.engine.Limit(depth=depth))
@@ -626,6 +696,9 @@ async def _analyze_game(
                 move_quality=quality,
                 eval_before=prev_score_cp,
                 eval_after=score_cp,
+                fen_before=fen_before,
+                best_move_san=best_move_san,
+                best_move_uci=best_move_uci,
             ))
 
         prev_score_cp = score_cp

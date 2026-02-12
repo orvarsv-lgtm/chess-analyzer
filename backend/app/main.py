@@ -14,7 +14,7 @@ from sqlalchemy import text
 from app.config import get_settings
 from app.db.session import engine, async_session
 from app.db.models import Base
-from app.routes import games, analysis, puzzles, insights, users, webhooks, health, coach, anonymous
+from app.routes import games, analysis, puzzles, insights, users, webhooks, health, coach, anonymous, explanations, openings, patterns
 
 
 @asynccontextmanager
@@ -70,6 +70,9 @@ def create_app() -> FastAPI:
     app.include_router(users.router, prefix="/api/users", tags=["users"])
     app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
     app.include_router(coach.router, prefix="/api/coach", tags=["coach"])
+    app.include_router(explanations.router, prefix="/api/explanations", tags=["explanations"])
+    app.include_router(openings.router, prefix="/api/openings", tags=["openings"])
+    app.include_router(patterns.router, prefix="/api/patterns", tags=["patterns"])
 
     return app
 

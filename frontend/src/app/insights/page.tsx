@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   insightsAPI,
+  patternsAPI,
   type InsightsOverview,
   type PhaseBreakdown,
   type Weakness,
@@ -35,6 +36,7 @@ import {
   type OpeningStat,
   type AdvancedAnalytics,
   type PiecePerformance,
+  type RecurringPattern,
 } from "@/lib/api";
 import {
   Card,
@@ -60,6 +62,7 @@ export default function InsightsPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedLoading, setAdvancedLoading] = useState(false);
   const [advancedFilter, setAdvancedFilter] = useState<string>("all");
+  const [recurringPatterns, setRecurringPatterns] = useState<RecurringPattern[]>([]);
 
   useEffect(() => {
     if (!session) return;
@@ -67,13 +70,14 @@ export default function InsightsPage() {
     async function load() {
       setLoading(true);
       try {
-        const [ov, ph, wk, tm, st, op] = await Promise.all([
+        const [ov, ph, wk, tm, st, op, pat] = await Promise.all([
           insightsAPI.overview(),
           insightsAPI.phaseBreakdown(),
           insightsAPI.weaknesses(),
           insightsAPI.timeAnalysis().catch(() => null),
           insightsAPI.streaks().catch(() => null),
           insightsAPI.openings().catch(() => []),
+          patternsAPI.recurring().catch(() => ({ patterns: [] })),
         ]);
         setOverview(ov);
         setPhases(ph);
@@ -81,6 +85,7 @@ export default function InsightsPage() {
         setTimeData(tm);
         setStreakData(st);
         setOpenings(op);
+        setRecurringPatterns(pat.patterns ?? []);
       } catch {
         // API may not be connected yet
       } finally {
@@ -243,6 +248,40 @@ export default function InsightsPage() {
               </div>
             )}
           </CollapsibleInsight>
+
+          {/* Recurring Patterns (Cross-Game Detection) */}
+          {recurringPatterns.length > 0 && (
+            <CollapsibleInsight title="Recurring Patterns" icon={<Sparkles className="h-4 w-4 text-purple-400" />} defaultOpen={false}>
+              <div className="space-y-3">
+                {recurringPatterns.slice(0, 5).map((p, i) => (
+                  <div
+                    key={i}
+                    className={`p-4 rounded-lg border ${
+                      p.severity === "high"
+                        ? "bg-red-900/10 border-red-800/30"
+                        : p.severity === "medium"
+                        ? "bg-yellow-900/10 border-yellow-800/30"
+                        : "bg-surface-2 border-surface-3"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant={p.severity === "high" ? "danger" : p.severity === "medium" ? "warning" : "default"}>
+                        {p.pattern_type.replace("_", " ")}
+                      </Badge>
+                      <span className="text-xs text-gray-600">
+                        {p.occurrences} occurrences
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-300">{p.description}</p>
+                    <p className="text-xs text-brand-400 mt-2 flex items-center gap-1">
+                      <GraduationCap className="h-3 w-3" />
+                      {p.recommendation}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </CollapsibleInsight>
+          )}
 
           {/* Phase Accuracy */}
           <CollapsibleInsight title="Phase Accuracy" icon={<BarChart3 className="h-4 w-4 text-brand-400" />}>
