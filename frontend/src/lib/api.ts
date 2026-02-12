@@ -615,6 +615,23 @@ export type AnonProgressEvent =
   | { type: "error"; message: string };
 
 /**
+ * Claim anonymous analysis results into the authenticated user's account.
+ * Persists Game + GameAnalysis + MoveEvaluation rows in the database.
+ */
+export async function claimAnonymousResults(
+  results: AnonAnalysisResults
+): Promise<{ imported: number; total_submitted: number }> {
+  return fetchAPI("/anonymous/claim-results", {
+    method: "POST",
+    body: JSON.stringify({
+      username: results.username,
+      platform: results.platform,
+      games: results.games,
+    }),
+  });
+}
+
+/**
  * Start anonymous analysis via SSE stream.
  * Calls `onProgress` for each event, returns the final results.
  */

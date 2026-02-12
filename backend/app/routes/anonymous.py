@@ -3,11 +3,14 @@ Anonymous analysis routes – Allow unauthenticated users to fetch + analyze gam
 
 Results are returned directly (no user account required).
 The frontend stores them in memory and gates "Get Results" behind sign-in.
+After sign-in, `/claim-results` persists the data into the user's account.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from datetime import datetime
 from io import StringIO
 from typing import Optional
 
@@ -15,11 +18,16 @@ import chess
 import chess.engine
 import chess.pgn
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_user
 from app.config import get_settings
+from app.db.models import Game, GameAnalysis, MoveEvaluation, OpeningRepertoire, User
+from app.db.session import get_db
 
 router = APIRouter()
 
@@ -76,6 +84,44 @@ class AnonAnalysisResponse(BaseModel):
     overall_cpl: Optional[float]
     win_rate: Optional[float]
     blunder_rate: Optional[float]
+
+
+class ClaimMoveIn(BaseModel):
+    move_number: int
+    color: str
+    san: str
+    cp_loss: int
+    phase: Optional[str] = None
+    move_quality: Optional[str] = None
+    eval_before: Optional[int] = None
+    eval_after: Optional[int] = None
+
+
+class ClaimGameIn(BaseModel):
+    game_index: int
+    white: str
+    black: str
+    result: str
+    opening: Optional[str] = None
+    eco: Optional[str] = None
+    date: Optional[str] = None
+    time_control: Optional[str] = None
+    color: str
+    overall_cpl: float
+    phase_opening_cpl: Optional[float] = None
+    phase_middlegame_cpl: Optional[float] = None
+    phase_endgame_cpl: Optional[float] = None
+    blunders: int
+    mistakes: int
+    inaccuracies: int
+    best_moves: int
+    moves: list[ClaimMoveIn]
+
+
+class ClaimResultsRequest(BaseModel):
+    username: Optional[str] = None
+    platform: str
+    games: list[ClaimGameIn]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -176,6 +222,218 @@ async def anonymous_analyze(body: AnonFetchRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# Endpoint — Claim anonymous results into user account
+# ═══════════════════════════════════════════════════════════
+
+
+@router.post("/claim-results")
+async def claim_anonymous_results(
+    body: ClaimResultsRequest,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Persist anonymous analysis results into the authenticated user's account.
+    Creates Game + GameAnalysis + MoveEvaluation rows and updates OpeningRepertoire.
+    Called by the frontend after the user signs up/in with cached results.
+    """
+    user_id = user.id
+    platform = body.platform
+    username = body.username
+
+    # Update linked username on user profile if not set
+    if platform == "lichess" and username and not user.lichess_username:
+        user.lichess_username = username
+    elif platform == "chess.com" and username and not user.chesscom_username:
+        user.chesscom_username = username
+
+    # Collect existing platform_game_ids to skip duplicates
+    existing_ids_result = await db.execute(
+        select(Game.platform_game_id).where(
+            Game.user_id == user_id, Game.platform == platform
+        )
+    )
+    existing_ids: set[str] = {
+        row[0] for row in existing_ids_result.fetchall() if row[0]
+    }
+
+    imported = 0
+    opening_stats: dict[tuple[str, str], dict] = {}  # (opening, color) → stats
+
+    for g in body.games:
+        # Parse date
+        dt = datetime.utcnow()
+        if g.date:
+            try:
+                dt = datetime.fromisoformat(g.date.replace(".", "-"))
+            except (ValueError, AttributeError):
+                pass
+
+        # Generate a stable platform_game_id from game content
+        game_hash = hashlib.md5(
+            f"{g.white}|{g.black}|{g.date}|{g.result}|{g.color}|{g.game_index}".encode()
+        ).hexdigest()[:16]
+
+        if game_hash in existing_ids:
+            continue
+
+        # Determine result from player perspective (already done by anon analyze)
+        result = g.result
+
+        # Extract ELOs (not available in anon analysis)
+        player_elo = None
+        opponent_elo = None
+
+        # Count moves
+        moves_count = len(g.moves) * 2 if g.moves else 0  # approximate: both sides
+
+        # We don't have the PGN text in the claim request, but we can
+        # reconstruct a minimal placeholder
+        moves_pgn = f'[White "{g.white}"]\n[Black "{g.black}"]\n[Result "{_result_pgn(g.result, g.color)}"]\n'
+        if g.opening:
+            moves_pgn += f'[Opening "{g.opening}"]\n'
+        if g.eco:
+            moves_pgn += f'[ECO "{g.eco}"]\n'
+        if g.date:
+            moves_pgn += f'[Date "{g.date}"]\n'
+        if g.time_control:
+            moves_pgn += f'[TimeControl "{g.time_control}"]\n'
+
+        game_row = Game(
+            user_id=user_id,
+            platform=platform,
+            platform_game_id=game_hash,
+            date=dt,
+            color=g.color,
+            result=result,
+            white_player=g.white or None,
+            black_player=g.black or None,
+            opening_name=g.opening,
+            eco_code=g.eco,
+            time_control=g.time_control,
+            player_elo=player_elo,
+            opponent_elo=opponent_elo,
+            moves_count=moves_count,
+            moves_pgn=moves_pgn,
+        )
+
+        try:
+            db.add(game_row)
+            await db.flush()  # get game_row.id
+        except Exception:
+            await db.rollback()
+            continue
+
+        # Create GameAnalysis row
+        analysis_row = GameAnalysis(
+            game_id=game_row.id,
+            overall_cpl=g.overall_cpl,
+            phase_opening_cpl=g.phase_opening_cpl,
+            phase_middlegame_cpl=g.phase_middlegame_cpl,
+            phase_endgame_cpl=g.phase_endgame_cpl,
+            blunders_count=g.blunders,
+            mistakes_count=g.mistakes,
+            inaccuracies_count=g.inaccuracies,
+            best_moves_count=g.best_moves,
+            analysis_depth=12,
+        )
+        db.add(analysis_row)
+
+        # Create MoveEvaluation rows
+        for m in g.moves:
+            move_row = MoveEvaluation(
+                game_id=game_row.id,
+                move_number=m.move_number,
+                color=m.color,
+                san=m.san,
+                cp_loss=m.cp_loss,
+                phase=m.phase,
+                move_quality=m.move_quality,
+                eval_before=m.eval_before,
+                eval_after=m.eval_after,
+            )
+            db.add(move_row)
+
+        existing_ids.add(game_hash)
+        imported += 1
+
+        # Accumulate opening stats
+        if g.opening:
+            key = (g.opening, g.color)
+            if key not in opening_stats:
+                opening_stats[key] = {
+                    "eco": g.eco,
+                    "games": 0,
+                    "wins": 0,
+                    "draws": 0,
+                    "losses": 0,
+                    "cpl_sum": 0.0,
+                    "cpl_count": 0,
+                }
+            stats = opening_stats[key]
+            stats["games"] += 1
+            if result == "win":
+                stats["wins"] += 1
+            elif result == "draw":
+                stats["draws"] += 1
+            else:
+                stats["losses"] += 1
+            stats["cpl_sum"] += g.overall_cpl
+            stats["cpl_count"] += 1
+
+    # Update OpeningRepertoire
+    for (opening_name, color), stats in opening_stats.items():
+        existing_q = await db.execute(
+            select(OpeningRepertoire).where(
+                OpeningRepertoire.user_id == user_id,
+                OpeningRepertoire.opening_name == opening_name,
+                OpeningRepertoire.color == color,
+            )
+        )
+        existing_row = existing_q.scalar_one_or_none()
+
+        if existing_row:
+            existing_row.games_played += stats["games"]
+            existing_row.games_won += stats["wins"]
+            existing_row.games_drawn += stats["draws"]
+            existing_row.games_lost += stats["losses"]
+            total_cpl_games = (existing_row.games_played - stats["games"])
+            if existing_row.average_cpl and total_cpl_games > 0:
+                old_total = existing_row.average_cpl * total_cpl_games
+                existing_row.average_cpl = round(
+                    (old_total + stats["cpl_sum"]) / existing_row.games_played, 2
+                )
+            else:
+                existing_row.average_cpl = round(stats["cpl_sum"] / stats["cpl_count"], 2) if stats["cpl_count"] else None
+        else:
+            new_row = OpeningRepertoire(
+                user_id=user_id,
+                opening_name=opening_name,
+                eco_code=stats["eco"],
+                color=color,
+                games_played=stats["games"],
+                games_won=stats["wins"],
+                games_drawn=stats["draws"],
+                games_lost=stats["losses"],
+                average_cpl=round(stats["cpl_sum"] / stats["cpl_count"], 2) if stats["cpl_count"] else None,
+            )
+            db.add(new_row)
+
+    await db.commit()
+
+    return {"imported": imported, "total_submitted": len(body.games)}
+
+
+def _result_pgn(result: str, color: str) -> str:
+    """Convert player-perspective result back to PGN result string."""
+    if result == "win":
+        return "1-0" if color == "white" else "0-1"
+    elif result == "loss":
+        return "0-1" if color == "white" else "1-0"
+    return "1/2-1/2"
 
 
 # ═══════════════════════════════════════════════════════════

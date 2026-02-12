@@ -19,6 +19,7 @@ import {
 import {
   insightsAPI,
   startAnonymousAnalysis,
+  claimAnonymousResults,
   type InsightsOverview,
   type RecentGame,
   type Weakness,
@@ -66,13 +67,17 @@ export default function HomePage() {
     } catch {}
   }, []);
 
-  // Once auth resolves AND we're in results-locked with data, unlock results.
+  // Once auth resolves AND we're in results-locked with data, unlock results
+  // and persist them to the user's account.
   useEffect(() => {
     if (authStatus === "authenticated" && session && step === "results-locked" && results) {
       setStep("results");
-      // Safe to remove now — state is committed and this won't re-run
-      // because step will be "results" (not "results-locked") on next render.
       sessionStorage.removeItem("anon_analysis_results");
+
+      // Persist results to user's account in the background
+      claimAnonymousResults(results).catch((err) => {
+        console.warn("Failed to claim anonymous results:", err);
+      });
     }
   }, [authStatus, session, step, results]);
 
@@ -129,10 +134,14 @@ export default function HomePage() {
       try {
         sessionStorage.setItem("anon_analysis_results", JSON.stringify(finalResults));
       } catch {}
-      // If user is already signed in, go straight to results
+      // If user is already signed in, go straight to results and persist
       if (session) {
         setStep("results");
         sessionStorage.removeItem("anon_analysis_results");
+        // Persist results to user's account in the background
+        claimAnonymousResults(finalResults).catch((err) => {
+          console.warn("Failed to claim anonymous results:", err);
+        });
       } else {
         setStep("results-locked");
       }
