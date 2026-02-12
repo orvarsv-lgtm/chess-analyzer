@@ -613,6 +613,7 @@ async def _analyze_game(
     mistakes = 0
     inaccuracies = 0
     best_moves_count = 0
+    player_move_count = 0
     move_num = 0
     prev_score_cp = 0
 
@@ -658,20 +659,16 @@ async def _analyze_game(
         # Quality
         if cp_loss == 0:
             quality = "Best"
-            best_moves_count += 1
         elif cp_loss <= 10:
             quality = "Excellent"
         elif cp_loss <= 25:
             quality = "Good"
         elif cp_loss <= 100:
             quality = "Inaccuracy"
-            inaccuracies += 1
         elif cp_loss <= 300:
             quality = "Mistake"
-            mistakes += 1
         else:
             quality = "Blunder"
-            blunders += 1
 
         # Phase
         total_material = _count_material(board)
@@ -682,11 +679,21 @@ async def _analyze_game(
         else:
             phase = "middlegame"
 
-        phase_losses[phase].append(cp_loss)
-        total_cp_loss += cp_loss
-
-        # Only add evals for the player's moves
+        # Only count/evaluate metrics for the player's own moves
         if mv_color == color:
+            player_move_count += 1
+            phase_losses[phase].append(cp_loss)
+            total_cp_loss += cp_loss
+
+            if quality == "Best":
+                best_moves_count += 1
+            elif quality == "Inaccuracy":
+                inaccuracies += 1
+            elif quality == "Mistake":
+                mistakes += 1
+            elif quality == "Blunder":
+                blunders += 1
+
             move_evals.append(MoveEvalOut(
                 move_number=move_num,
                 color=mv_color,
@@ -703,7 +710,7 @@ async def _analyze_game(
 
         prev_score_cp = score_cp
 
-    overall_cpl = round(total_cp_loss / move_num, 1) if move_num > 0 else 0
+    overall_cpl = round(total_cp_loss / player_move_count, 1) if player_move_count > 0 else 0
 
     return GameAnalysisOut(
         game_index=game_index,
