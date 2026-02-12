@@ -6,7 +6,7 @@
  * and attached to every request.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/backend";
 
 // ─── Token cache ────────────────────────────────────────
 
