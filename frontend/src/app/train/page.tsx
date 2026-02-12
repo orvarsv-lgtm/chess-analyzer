@@ -12,8 +12,11 @@ import {
   Flame,
   RotateCcw,
   Zap,
+  Target,
+  ArrowRight,
+  AlertTriangle,
 } from "lucide-react";
-import { puzzlesAPI, type PuzzleItem } from "@/lib/api";
+import { puzzlesAPI, insightsAPI, type PuzzleItem, type Weakness } from "@/lib/api";
 import {
   Button,
   Badge,
@@ -23,15 +26,23 @@ import {
   Spinner,
 } from "@/components/ui";
 
+type TrainView = "hub" | "session";
 type PuzzleState = "solving" | "correct" | "incorrect";
 
 export default function TrainPage() {
   const { data: session } = useSession();
 
+  // ─── View state ──────────────────────────────────────
+  const [view, setView] = useState<TrainView>("hub");
+
+  // ─── Hub data ────────────────────────────────────────
+  const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
+  const [hubLoading, setHubLoading] = useState(true);
+
   // ─── Puzzle queue state ──────────────────────────────
   const [queue, setQueue] = useState<PuzzleItem[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // ─── Solving state ───────────────────────────────────
   const [puzzleState, setPuzzleState] = useState<PuzzleState>("solving");
@@ -64,19 +75,28 @@ export default function TrainPage() {
     }
   }, [currentPuzzle]);
 
-  // Determine board orientation from FEN (side to move)
+  // Determine board orientation from FEN
   const boardOrientation = useMemo(() => {
     if (!currentPuzzle?.fen) return "white" as const;
-    // The puzzle FEN has the side that needs to find the best move
     const parts = currentPuzzle.fen.split(" ");
     return parts[1] === "w" ? ("white" as const) : ("black" as const);
   }, [currentPuzzle?.fen]);
+
+  // ─── Load hub data ───────────────────────────────────
+  useEffect(() => {
+    if (!session) return;
+    setHubLoading(true);
+    insightsAPI
+      .weaknesses()
+      .then((w) => setWeaknesses(w.weaknesses ?? []))
+      .catch(() => {})
+      .finally(() => setHubLoading(false));
+  }, [session]);
 
   // ─── Load puzzles ────────────────────────────────────
   const loadPuzzles = useCallback(async () => {
     setLoading(true);
     try {
-      // Try review queue first (spaced repetition), fallback to general
       let puzzles = await puzzlesAPI.reviewQueue(10);
       if (!puzzles || puzzles.length === 0) {
         puzzles = await puzzlesAPI.list({ limit: 10 });
@@ -90,26 +110,28 @@ export default function TrainPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (session) loadPuzzles();
-  }, [session, loadPuzzles]);
+  function startSession() {
+    loadPuzzles();
+    setView("session");
+    setSolvedToday(0);
+    setCorrectToday(0);
+    setStreak(0);
+  }
 
   // ─── Handle move ─────────────────────────────────────
   function onDrop(sourceSquare: Square, targetSquare: Square): boolean {
     if (!chess || !currentPuzzle || puzzleState !== "solving") return false;
 
-    // Attempt the move
     const move = chess.move({
       from: sourceSquare,
       to: targetSquare,
-      promotion: "q", // Auto-promote to queen
+      promotion: "q",
     });
 
     if (!move) return false;
 
     setBoardFen(chess.fen());
 
-    // Check if this is the best move
     const bestMoveSan = currentPuzzle.best_move_san;
     const isCorrect = move.san === bestMoveSan;
 
@@ -136,7 +158,7 @@ export default function TrainPage() {
       const res = await puzzlesAPI.attempt(currentPuzzle.id, correct, elapsed);
       if (res.streak > streak) setStreak(res.streak);
     } catch {
-      // Attempt reporting is best-effort
+      // best-effort
     }
   }
 
@@ -144,7 +166,6 @@ export default function TrainPage() {
     if (currentIdx < queue.length - 1) {
       setCurrentIdx((i) => i + 1);
     } else {
-      // Reload queue
       loadPuzzles();
     }
   }
@@ -156,12 +177,10 @@ export default function TrainPage() {
       setBoardFen(c.fen());
       setPuzzleState("solving");
       setStartTime(Date.now());
-    } catch {
-      // noop
-    }
+    } catch {}
   }
 
-  // ─── Render ──────────────────────────────────────────
+  // ─── Auth guard ──────────────────────────────────────
   if (!session) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -170,18 +189,114 @@ export default function TrainPage() {
     );
   }
 
-  const accuracy =
-    solvedToday > 0
-      ? Math.round((correctToday / solvedToday) * 100)
-      : null;
+  const accuracy = solvedToday > 0 ? Math.round((correctToday / solvedToday) * 100) : null;
 
+  // ─── Hub view ────────────────────────────────────────
+  if (view === "hub") {
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+        <div>
+          <h1 className="text-2xl font-bold">Train</h1>
+          <p className="text-gray-500 mt-1">
+            Solve puzzles generated from your own mistakes.
+          </p>
+        </div>
+
+        {hubLoading ? (
+          <div className="flex justify-center py-12">
+            <Spinner className="h-8 w-8 text-brand-500" />
+          </div>
+        ) : (
+          <>
+            {/* Today's Training Focus */}
+            {weaknesses.length > 0 && (
+              <Card className="p-6 border-brand-600/30">
+                <div className="flex items-start gap-4">
+                  <div className="h-12 w-12 rounded-xl bg-brand-600/20 flex items-center justify-center flex-shrink-0">
+                    <Target className="h-6 w-6 text-brand-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-semibold mb-1">Today's Focus</h2>
+                    <p className="text-sm text-gray-400 mb-1">{weaknesses[0].area}</p>
+                    <p className="text-sm text-gray-500">{weaknesses[0].message}</p>
+                  </div>
+                </div>
+                <Button onClick={startSession} className="w-full mt-5" size="lg">
+                  <Dumbbell className="h-5 w-5" />
+                  Start Training Session
+                </Button>
+              </Card>
+            )}
+
+            {weaknesses.length === 0 && (
+              <Card className="p-6 text-center">
+                <Dumbbell className="h-10 w-10 text-gray-600 mx-auto mb-3" />
+                <h2 className="text-lg font-semibold mb-2">Ready to train?</h2>
+                <p className="text-sm text-gray-500 mb-5">
+                  Analyze some games first, and we'll generate puzzles from your mistakes.
+                </p>
+                <Button onClick={startSession} size="lg">
+                  <Dumbbell className="h-5 w-5" />
+                  Start Session
+                </Button>
+              </Card>
+            )}
+
+            {/* From Your Mistakes — top 3 weakness cards */}
+            {weaknesses.length > 1 && (
+              <div>
+                <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+                  From Your Mistakes
+                </h2>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {weaknesses.slice(0, 3).map((w, i) => (
+                    <Card
+                      key={i}
+                      className="p-4 cursor-pointer hover:border-brand-600/50 transition-colors"
+                      onClick={startSession}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <AlertTriangle
+                          className={`h-4 w-4 ${
+                            w.severity === "high"
+                              ? "text-red-400"
+                              : w.severity === "medium"
+                              ? "text-yellow-400"
+                              : "text-gray-400"
+                          }`}
+                        />
+                        <span className="font-semibold text-sm">{w.area}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        {w.message}
+                      </p>
+                      <p className="text-xs text-brand-400 mt-2 flex items-center gap-1">
+                        Practice <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Session view — puzzle board ─────────────────────
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold">Train</h1>
-        <p className="text-gray-500 mt-1">
-          Solve puzzles generated from your own mistakes.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Training Session</h1>
+          <p className="text-gray-500 mt-1">
+            Find the best move.
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => setView("hub")}>
+          End Session
+        </Button>
       </div>
 
       {loading ? (

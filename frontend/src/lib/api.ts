@@ -96,6 +96,8 @@ export interface GameSummary {
   date: string;
   color: "white" | "black";
   result: "win" | "loss" | "draw";
+  white_player: string | null;
+  black_player: string | null;
   opening_name: string | null;
   eco_code: string | null;
   time_control: string | null;
@@ -113,6 +115,8 @@ export interface GamesListResponse {
 }
 
 export interface GameDetail extends GameSummary {
+  white_player: string | null;
+  black_player: string | null;
   moves_pgn: string;
   analysis?: {
     overall_cpl: number;
@@ -199,6 +203,24 @@ export interface StreakData {
   saved_streaks: { type: string; current: number; best: number }[];
 }
 
+// ─── Analysis progress events (SSE) ────────────────────
+
+export type AnalysisProgressEvent =
+  | { type: "start"; total: number }
+  | {
+      type: "progress";
+      completed: number;
+      total: number;
+      game_id: number;
+      game_label: string;
+      overall_cpl: number;
+      blunders: number;
+      mistakes: number;
+    }
+  | { type: "game_error"; game_id: number; message: string }
+  | { type: "complete"; analyzed: number }
+  | { type: "error"; message: string };
+
 export interface RecentGame {
   id: number;
   date: string | null;
@@ -221,6 +243,52 @@ export interface OpeningStat {
   win_rate: number;
   average_cpl: number | null;
   early_deviations?: number;
+}
+
+export interface StyleTrait {
+  trait: string;
+  icon: string;
+  description: string;
+}
+
+export interface AdvancedAnalytics {
+  has_data: boolean;
+  message?: string;
+  analyzed_games?: number;
+  total_games?: number;
+  primary_style?: StyleTrait;
+  secondary_styles?: StyleTrait[];
+  comeback_wins?: number;
+  collapses?: number;
+  strengths?: { area: string; detail: string }[];
+  weaknesses?: { area: string; detail: string }[];
+  recommendations?: { priority: string; category: string; message: string }[];
+  best_openings?: { name: string; games: number; avg_cpl: number | null; win_rate: number }[];
+  worst_openings?: { name: string; games: number; avg_cpl: number | null; win_rate: number }[];
+  best_pieces?: PiecePerformance[];
+  worst_pieces?: PiecePerformance[];
+  all_pieces?: PiecePerformance[];
+  stats?: {
+    avg_cpl: number;
+    blunder_rate: number;
+    mistake_rate: number;
+    best_move_rate: number;
+    win_rate: number;
+    draw_rate: number;
+    upsets: number;
+    best_phase: string;
+    worst_phase: string;
+  };
+}
+
+export interface PiecePerformance {
+  piece: string;
+  name: string;
+  icon: string;
+  avg_cpl: number;
+  total_moves: number;
+  best_rate: number;
+  blunder_rate: number;
 }
 
 export interface PuzzleItem {
@@ -307,6 +375,57 @@ export const analysisAPI = {
     });
   },
 
+  /** Run analysis synchronously via SSE — returns progress events. */
+  async runAnalysis(
+    params: { game_ids?: number[]; depth?: number },
+    onProgress: (event: AnalysisProgressEvent) => void
+  ): Promise<void> {
+    const url = `${API_BASE}/analysis/run`;
+    const token = await getToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(params),
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail ?? "Analysis failed");
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response stream");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const event: AnalysisProgressEvent = JSON.parse(line.slice(6));
+            onProgress(event);
+          } catch {
+            // skip malformed
+          }
+        }
+      }
+    }
+  },
+
   jobStatus(jobId: number): Promise<JobStatus> {
     return fetchAPI<JobStatus>(`/analysis/job/${jobId}`);
   },
@@ -390,6 +509,11 @@ export const insightsAPI = {
 
   recentGames(limit = 5): Promise<RecentGame[]> {
     return fetchAPI<RecentGame[]>(`/insights/recent-games?limit=${limit}`);
+  },
+
+  advancedAnalytics(timeControl?: string): Promise<AdvancedAnalytics> {
+    const q = timeControl && timeControl !== "all" ? `?time_control=${timeControl}` : "";
+    return fetchAPI<AdvancedAnalytics>(`/insights/advanced-analytics${q}`);
   },
 };
 

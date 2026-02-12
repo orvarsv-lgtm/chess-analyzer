@@ -131,6 +131,8 @@ class Game(Base):
     time_control = Column(String, nullable=True)
     player_elo = Column(Integer, nullable=True)
     opponent_elo = Column(Integer, nullable=True)
+    white_player = Column(String, nullable=True)
+    black_player = Column(String, nullable=True)
     moves_count = Column(Integer, nullable=True)
     moves_pgn = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

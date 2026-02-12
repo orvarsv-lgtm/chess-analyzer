@@ -1,20 +1,41 @@
 /**
- * Token API route — exposes the raw JWT for use in API requests to the backend.
+ * Token API route — creates a plain HS256-signed JWT from the NextAuth session
+ * that the FastAPI backend can verify with the shared NEXTAUTH_SECRET.
  *
- * The NextAuth "jwt" strategy stores a signed JWT in an httpOnly cookie.
- * This endpoint decodes it and returns the raw token so the frontend API
- * client can send it as a Bearer token to the FastAPI backend.
+ * NextAuth stores tokens as encrypted JWE cookies which the Python backend
+ * cannot decode. This endpoint decrypts the cookie, extracts the claims,
+ * and re-signs them as a standard HS256 JWT.
  */
 
 import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
+import { SignJWT } from "jose";
 
 export async function GET(req: NextRequest) {
-  const token = await getToken({ req, raw: true });
+  // Decode (decrypt) the NextAuth cookie — raw: false gives us the payload
+  const payload = await getToken({ req });
 
-  if (!token) {
+  if (!payload) {
     return NextResponse.json({ token: null }, { status: 401 });
   }
+
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
+  }
+
+  // Sign a plain HS256 JWT with the claims the backend expects
+  const encodedSecret = new TextEncoder().encode(secret);
+  const sub = (payload.sub ?? payload.id ?? payload.email) as string | undefined;
+  const token = await new SignJWT({
+    sub,
+    email: payload.email as string,
+    name: payload.name as string,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("1h")
+    .sign(encodedSecret);
 
   return NextResponse.json({ token });
 }

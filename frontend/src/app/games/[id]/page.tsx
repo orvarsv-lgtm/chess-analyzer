@@ -15,6 +15,8 @@ import {
   Play,
   MessageSquare,
   Loader2,
+  Dumbbell,
+  ChevronDown,
 } from "lucide-react";
 import {
   gamesAPI,
@@ -35,6 +37,8 @@ import {
   moveQualityBg,
   resultBadgeVariant,
 } from "@/components/ui";
+import { cplToAccuracy, accuracyColor, formatAccuracy } from "@/lib/utils";
+import Link from "next/link";
 
 export default function GameDetailPage() {
   const { data: session } = useSession();
@@ -180,6 +184,11 @@ export default function GameDetailPage() {
   const boardOrientation = game.color === "black" ? "black" : "white";
   const currentMoveEval = moveIndex > 0 ? moveEvalMap.get(moveIndex - 1) : null;
 
+  // Build "User vs Opponent" label
+  const wp = game.white_player || "White";
+  const bp = game.black_player || "Black";
+  const gameTitle = `${wp} vs ${bp}`;
+
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 animate-fade-in">
       {/* Header */}
@@ -189,12 +198,7 @@ export default function GameDetailPage() {
         </Button>
         <div className="flex-1">
           <h1 className="text-xl font-bold">
-            {game.opening_name || "Unknown Opening"}
-            {game.eco_code && (
-              <span className="text-gray-500 font-normal ml-2 text-sm">
-                {game.eco_code}
-              </span>
-            )}
+            {gameTitle}
           </h1>
           <div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5">
             <span>
@@ -209,6 +213,12 @@ export default function GameDetailPage() {
             <Badge variant={resultBadgeVariant(game.result)}>
               {game.result.toUpperCase()}
             </Badge>
+            {game.opening_name && (
+              <span className="text-gray-600">
+                {game.opening_name}
+                {game.eco_code && ` (${game.eco_code})`}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -299,72 +309,88 @@ export default function GameDetailPage() {
 
         {/* Right: Analysis panel */}
         <div className="flex-1 min-w-0 space-y-4">
-          {/* Analysis summary */}
+          {/* Slim top bar — 3 key metrics */}
+          {game.analysis && (
+            <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-surface-1 border border-surface-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 uppercase">Accuracy</span>
+                <span className={`text-lg font-bold ${accuracyColor(cplToAccuracy(game.analysis.overall_cpl))}`}>
+                  {formatAccuracy(game.analysis.overall_cpl)}
+                </span>
+              </div>
+              <div className="w-px h-6 bg-surface-3" />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 uppercase">Blunders</span>
+                <span className="text-lg font-bold text-red-400">{game.analysis.blunders}</span>
+              </div>
+              <div className="w-px h-6 bg-surface-3" />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 uppercase">Mistakes</span>
+                <span className="text-lg font-bold text-orange-400">{game.analysis.mistakes}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Analysis sections — all collapsible, collapsed by default */}
           {game.analysis ? (
-            <Card>
-              <CardContent>
-                <h3 className="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-3">
-                  Analysis Summary
-                </h3>
+            <>
+              <CollapsibleSection title="Key Moments" defaultOpen={false}>
+                <div className="space-y-2">
+                  {analysis?.moves
+                    ?.filter((m) => m.move_quality === "Blunder" || m.move_quality === "Mistake")
+                    .slice(0, 3)
+                    .map((m, i) => (
+                      <div
+                        key={i}
+                        className={`px-3 py-2 rounded-lg text-sm cursor-pointer hover:bg-surface-2 transition-colors ${moveQualityBg(m.move_quality)}`}
+                        onClick={() => {
+                          // Find move index and navigate
+                          const idx = analysis?.moves?.findIndex((mv) => mv === m) ?? -1;
+                          if (idx >= 0) setMoveIndex(idx + 1);
+                        }}
+                      >
+                        <span className={moveQualityColor(m.move_quality)}>
+                          {m.move_quality}
+                        </span>
+                        <span className="text-gray-400 ml-2">
+                          Move {m.move_number} • {m.san}
+                          {m.cp_loss > 0 && (
+                            <span className="text-gray-500 ml-1">(−{m.cp_loss} cp)</span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  {(!analysis?.moves?.some((m) => m.move_quality === "Blunder" || m.move_quality === "Mistake")) && (
+                    <p className="text-sm text-gray-500">No blunders or mistakes — clean game!</p>
+                  )}
+                </div>
+              </CollapsibleSection>
+
+              <CollapsibleSection title="Phase Accuracy" defaultOpen={false}>
+                <div className="flex gap-4 text-sm">
+                  <PhaseChip label="Opening" cpl={game.analysis.phase_opening_cpl} />
+                  <PhaseChip label="Middle" cpl={game.analysis.phase_middlegame_cpl} />
+                  <PhaseChip label="Endgame" cpl={game.analysis.phase_endgame_cpl} />
+                </div>
+              </CollapsibleSection>
+
+              <CollapsibleSection title="Full Details" defaultOpen={false}>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <span className="text-gray-500">Overall CPL</span>
-                    <p className="text-lg font-bold">
-                      {game.analysis.overall_cpl}
-                    </p>
+                    <span className="text-gray-500">Inaccuracies</span>
+                    <p className="text-lg font-bold text-yellow-400">{game.analysis.inaccuracies}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Best moves</span>
+                    <p className="text-lg font-bold text-cyan-400">{game.analysis.best_moves}</p>
                   </div>
                   <div>
                     <span className="text-gray-500">Depth</span>
                     <p className="text-lg font-bold">{game.analysis.depth}</p>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Blunders</span>
-                    <p className="text-lg font-bold text-red-400">
-                      {game.analysis.blunders}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Mistakes</span>
-                    <p className="text-lg font-bold text-orange-400">
-                      {game.analysis.mistakes}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Inaccuracies</span>
-                    <p className="text-lg font-bold text-yellow-400">
-                      {game.analysis.inaccuracies}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Best moves</span>
-                    <p className="text-lg font-bold text-cyan-400">
-                      {game.analysis.best_moves}
-                    </p>
-                  </div>
                 </div>
-
-                {/* Phase CPL */}
-                <div className="mt-4 pt-4 border-t border-surface-3">
-                  <h4 className="text-xs text-gray-500 uppercase mb-2">
-                    CPL by Phase
-                  </h4>
-                  <div className="flex gap-4 text-sm">
-                    <PhaseChip
-                      label="Opening"
-                      value={game.analysis.phase_opening_cpl}
-                    />
-                    <PhaseChip
-                      label="Middle"
-                      value={game.analysis.phase_middlegame_cpl}
-                    />
-                    <PhaseChip
-                      label="Endgame"
-                      value={game.analysis.phase_endgame_cpl}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+              </CollapsibleSection>
+            </>
           ) : (
             <Card>
               <CardContent className="text-center py-8">
@@ -380,93 +406,88 @@ export default function GameDetailPage() {
           )}
 
           {/* Move list */}
-          <Card>
-            <CardContent>
-              <h3 className="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-3">
-                Moves
-              </h3>
-              <div className="max-h-[400px] overflow-y-auto space-y-0.5 pr-2 custom-scrollbar">
-                {parsedMoves.length === 0 ? (
-                  <p className="text-gray-500 text-sm">No moves available</p>
-                ) : (
-                  <MoveList
-                    moves={parsedMoves}
-                    evals={moveEvalMap}
-                    currentIndex={moveIndex}
-                    onSelect={(i) => setMoveIndex(i + 1)}
-                  />
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          <CollapsibleSection title="Moves" defaultOpen={true}>
+            <div className="max-h-[400px] overflow-y-auto space-y-0.5 pr-2 custom-scrollbar">
+              {parsedMoves.length === 0 ? (
+                <p className="text-gray-500 text-sm">No moves available</p>
+              ) : (
+                <MoveList
+                  moves={parsedMoves}
+                  evals={moveEvalMap}
+                  currentIndex={moveIndex}
+                  onSelect={(i) => setMoveIndex(i + 1)}
+                />
+              )}
+            </div>
+          </CollapsibleSection>
 
           {/* AI Coach Review */}
           {game.analysis && (
-            <Card>
-              <CardContent>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-sm text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4 text-brand-400" />
-                    AI Coach
-                  </h3>
-                  {!coachReview && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      loading={coachLoading}
-                      disabled={coachLoading}
-                      onClick={async () => {
-                        setCoachLoading(true);
-                        try {
-                          const review = await coachAPI.review(gameId);
-                          setCoachReview(review);
-                        } catch {
-                          // quota error, etc.
-                        } finally {
-                          setCoachLoading(false);
-                        }
-                      }}
-                    >
-                      Get Review
-                    </Button>
+            <CollapsibleSection title="AI Coach" defaultOpen={false} icon={<MessageSquare className="h-4 w-4 text-brand-400" />}>
+              {!coachReview && !coachLoading && (
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-500">
+                    Get a personalized coaching review.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={coachLoading}
+                    disabled={coachLoading}
+                    onClick={async () => {
+                      setCoachLoading(true);
+                      try {
+                        const review = await coachAPI.review(gameId);
+                        setCoachReview(review);
+                      } catch {
+                        // quota error, etc.
+                      } finally {
+                        setCoachLoading(false);
+                      }
+                    }}
+                  >
+                    Get Review
+                  </Button>
+                </div>
+              )}
+
+              {coachLoading && !coachReview && (
+                <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Coach is analyzing your game...
+                </div>
+              )}
+
+              {coachReview && (
+                <div className="space-y-4">
+                  {coachReview.sections.map((section, i) => (
+                    <div key={i}>
+                      <h4 className="text-sm font-semibold text-brand-300 mb-1">
+                        {section.title}
+                      </h4>
+                      <p className="text-sm text-gray-400 whitespace-pre-line leading-relaxed line-clamp-6">
+                        {section.content}
+                      </p>
+                    </div>
+                  ))}
+                  {coachReview.reviews_limit && (
+                    <p className="text-xs text-gray-600 pt-2 border-t border-surface-3">
+                      {coachReview.reviews_used}/{coachReview.reviews_limit} free reviews used
+                    </p>
                   )}
                 </div>
+              )}
+            </CollapsibleSection>
+          )}
 
-                {coachLoading && !coachReview && (
-                  <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Coach is analyzing your game...
-                  </div>
-                )}
-
-                {coachReview && (
-                  <div className="space-y-4">
-                    {coachReview.sections.map((section, i) => (
-                      <div key={i}>
-                        <h4 className="text-sm font-semibold text-brand-300 mb-1">
-                          {section.title}
-                        </h4>
-                        <p className="text-sm text-gray-400 whitespace-pre-line leading-relaxed">
-                          {section.content}
-                        </p>
-                      </div>
-                    ))}
-                    {coachReview.reviews_limit && (
-                      <p className="text-xs text-gray-600 pt-2 border-t border-surface-3">
-                        {coachReview.reviews_used}/{coachReview.reviews_limit}{" "}
-                        free reviews used
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {!coachReview && !coachLoading && (
-                  <p className="text-sm text-gray-500">
-                    Get a personalized coaching review powered by AI.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+          {/* Train From This Game CTA */}
+          {game.analysis && (
+            <Link href="/train">
+              <Button variant="secondary" className="w-full">
+                <Dumbbell className="h-4 w-4" />
+                Train From This Game
+              </Button>
+            </Link>
           )}
         </div>
       </div>
@@ -625,28 +646,62 @@ function MoveCell({
   );
 }
 
+// ─── Collapsible Section ────────────────────────────────
+
+function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  icon,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <Card>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-5 py-3.5 text-left"
+      >
+        <span className="font-semibold text-sm text-gray-400 uppercase tracking-wider flex items-center gap-2">
+          {icon}
+          {title}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 text-gray-500 transition-transform ${isOpen ? "rotate-180" : ""}`}
+        />
+      </button>
+      {isOpen && (
+        <div className="px-5 pb-4">
+          {children}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ─── Phase Chip ─────────────────────────────────────────
 
 function PhaseChip({
   label,
-  value,
+  cpl,
 }: {
   label: string;
-  value: number | null;
+  cpl: number | null;
 }) {
-  if (value === null) return null;
+  if (cpl === null) return null;
 
-  const color =
-    value < 30
-      ? "text-green-400"
-      : value < 60
-      ? "text-yellow-400"
-      : "text-red-400";
+  const acc = cplToAccuracy(cpl);
+  const color = accuracyColor(acc);
 
   return (
     <div className="flex items-center gap-1.5">
       <span className="text-gray-500">{label}:</span>
-      <span className={`font-semibold ${color}`}>{Math.round(value)}</span>
+      <span className={`font-semibold ${color}`}>{acc !== null ? `${acc}%` : "—"}</span>
     </div>
   );
 }

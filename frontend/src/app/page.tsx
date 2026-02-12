@@ -6,25 +6,27 @@ import Link from "next/link";
 import {
   Swords,
   Dumbbell,
-  BarChart3,
-  BookOpen,
   ArrowRight,
-  Upload,
   LogIn,
   AlertTriangle,
   CheckCircle,
   Target,
   Zap,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from "lucide-react";
 import {
   insightsAPI,
   startAnonymousAnalysis,
   type InsightsOverview,
   type RecentGame,
+  type Weakness,
   type AnonAnalysisResults,
   type AnonProgressEvent,
 } from "@/lib/api";
 import { Card, CardContent, StatCard, Badge, Button, Spinner } from "@/components/ui";
+import { cplToAccuracy, accuracyColor, formatAccuracy } from "@/lib/utils";
 
 type Step = "input" | "analyzing" | "results-locked" | "results";
 
@@ -34,6 +36,7 @@ export default function HomePage() {
   // ─── Logged-in dashboard state ──────────────────────
   const [overview, setOverview] = useState<InsightsOverview | null>(null);
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
+  const [topWeakness, setTopWeakness] = useState<Weakness | null>(null);
 
   // ─── Anonymous analysis state ───────────────────────
   const [platform, setPlatform] = useState<"lichess" | "chess.com" | "pgn">("lichess");
@@ -45,40 +48,42 @@ export default function HomePage() {
   const [progressTotal, setProgressTotal] = useState(0);
   const [progressDone, setProgressDone] = useState(0);
 
-  // Results — initialize from sessionStorage if available
-  const [results, setResults] = useState<AnonAnalysisResults | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const stored = sessionStorage.getItem("anon_analysis_results");
-      if (stored) return JSON.parse(stored) as AnonAnalysisResults;
-    } catch {}
-    return null;
-  });
+  // Results & step — start with defaults, hydrate from sessionStorage in useEffect
+  const [results, setResults] = useState<AnonAnalysisResults | null>(null);
+  const [step, setStep] = useState<Step>("input");
+  const [hasMounted, setHasMounted] = useState(false);
 
-  // Determine initial step based on stored results
-  const [step, setStep] = useState<Step>(() => {
-    if (typeof window === "undefined") return "input";
-    try {
-      const stored = sessionStorage.getItem("anon_analysis_results");
-      if (stored) return "results-locked"; // Will switch to "results" once session loads
-    } catch {}
-    return "input";
-  });
-
-  // When session loads and we have stored results, unlock them
+  // Restore from sessionStorage on mount. This effect intentionally does NOT
+  // depend on authStatus/session — it only reads what's stored and marks mounted.
   useEffect(() => {
-    if (authStatus === "loading") return;
-    if (session && results && step === "results-locked") {
+    setHasMounted(true);
+    try {
+      const raw = sessionStorage.getItem("anon_analysis_results");
+      if (raw) {
+        setResults(JSON.parse(raw) as AnonAnalysisResults);
+        setStep("results-locked");
+      }
+    } catch {}
+  }, []);
+
+  // Once auth resolves AND we're in results-locked with data, unlock results.
+  useEffect(() => {
+    if (authStatus === "authenticated" && session && step === "results-locked" && results) {
       setStep("results");
+      // Safe to remove now — state is committed and this won't re-run
+      // because step will be "results" (not "results-locked") on next render.
       sessionStorage.removeItem("anon_analysis_results");
     }
-  }, [session, authStatus, results, step]);
+  }, [authStatus, session, step, results]);
 
   // Load dashboard data for logged-in users
   useEffect(() => {
     if (session && step === "input") {
       insightsAPI.overview().then(setOverview).catch(() => {});
-      insightsAPI.recentGames(5).then(setRecentGames).catch(() => {});
+      insightsAPI.recentGames(3).then(setRecentGames).catch(() => {});
+      insightsAPI.weaknesses().then((w) => {
+        if (w.weaknesses?.length) setTopWeakness(w.weaknesses[0]);
+      }).catch(() => {});
     }
   }, [session, step]);
 
@@ -137,9 +142,18 @@ export default function HomePage() {
     }
   }, [platform, username, pgnText, session]);
 
+  // Wait until client has mounted AND auth has resolved before deciding view
+  if (!hasMounted || authStatus === "loading") {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Spinner className="h-8 w-8 text-brand-500" />
+      </div>
+    );
+  }
+
   // ─── If signed in and no analysis in progress, show dashboard ──
   if (session && step === "input" && !results) {
-    return <LoggedInDashboard overview={overview} recentGames={recentGames} />;
+    return <LoggedInDashboard overview={overview} recentGames={recentGames} topWeakness={topWeakness} />;
   }
 
   // ─── Render based on step ───────────────────────────
@@ -371,9 +385,9 @@ function ResultsLocked({ results }: { results: AnonAnalysisResults }) {
         <div className="filter blur-sm pointer-events-none select-none">
           <div className="grid grid-cols-3 gap-4">
             <Card className="p-4 text-center">
-              <p className="text-xs text-gray-500 uppercase">Overall CPL</p>
+              <p className="text-xs text-gray-500 uppercase">Accuracy</p>
               <p className="text-2xl font-bold mt-1">
-                {results.overall_cpl ?? "—"}
+                {formatAccuracy(results.overall_cpl)}
               </p>
             </Card>
             <Card className="p-4 text-center">
@@ -391,13 +405,10 @@ function ResultsLocked({ results }: { results: AnonAnalysisResults }) {
           </div>
         </div>
 
-        {/* Overlay CTA */}
+        {/* Overlay lock icon */}
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="bg-surface-0/80 backdrop-blur-sm px-6 py-4 rounded-xl border border-surface-3 text-center space-y-3">
-            <LogIn className="h-6 w-6 text-brand-400 mx-auto" />
-            <p className="text-sm text-gray-300 font-medium">
-              Sign in to see your results
-            </p>
+          <div className="bg-surface-0/80 backdrop-blur-sm p-4 rounded-xl border border-surface-3">
+            <LogIn className="h-8 w-8 text-brand-400" />
           </div>
         </div>
       </div>
@@ -447,8 +458,8 @@ function ResultsView({
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-4">
         <StatCard
-          label="Overall CPL"
-          value={results.overall_cpl ?? "—"}
+          label="Accuracy"
+          value={formatAccuracy(results.overall_cpl)}
           icon={<Target className="h-5 w-5" />}
         />
         <StatCard
@@ -503,15 +514,9 @@ function ResultsView({
                   {g.result.toUpperCase()}
                 </Badge>
                 <span
-                  className={`text-xs font-semibold min-w-[50px] text-right ${
-                    g.overall_cpl < 30
-                      ? "text-green-400"
-                      : g.overall_cpl < 60
-                      ? "text-yellow-400"
-                      : "text-red-400"
-                  }`}
+                  className={`text-xs font-semibold min-w-[50px] text-right ${accuracyColor(cplToAccuracy(g.overall_cpl))}`}
                 >
-                  {Math.round(g.overall_cpl)} CPL
+                  {formatAccuracy(g.overall_cpl)}
                 </span>
               </div>
             ))}
@@ -522,7 +527,7 @@ function ResultsView({
       {/* Phase Breakdown */}
       <Card>
         <CardContent>
-          <h3 className="font-semibold mb-4">Phase Breakdown (Average)</h3>
+          <h3 className="font-semibold mb-4">Phase Accuracy (Average)</h3>
           <div className="grid grid-cols-3 gap-4">
             {(["opening", "middlegame", "endgame"] as const).map((phase) => {
               const cpls = results.games
@@ -534,20 +539,12 @@ function ResultsView({
                     : g.phase_endgame_cpl
                 )
                 .filter((v): v is number => v !== null);
-              const avg =
+              const avgCpl =
                 cpls.length > 0
-                  ? Math.round(
-                      cpls.reduce((a, b) => a + b, 0) / cpls.length
-                    )
+                  ? cpls.reduce((a, b) => a + b, 0) / cpls.length
                   : null;
-              const color =
-                avg === null
-                  ? "text-gray-600"
-                  : avg < 25
-                  ? "text-green-400"
-                  : avg < 50
-                  ? "text-yellow-400"
-                  : "text-red-400";
+              const acc = cplToAccuracy(avgCpl);
+              const color = accuracyColor(acc);
 
               return (
                 <div
@@ -558,9 +555,9 @@ function ResultsView({
                     {phase}
                   </p>
                   <p className={`text-2xl font-bold ${color}`}>
-                    {avg ?? "—"}
+                    {acc !== null ? `${acc}%` : "—"}
                   </p>
-                  <p className="text-xs text-gray-500">avg CPL</p>
+                  <p className="text-xs text-gray-500">accuracy</p>
                 </div>
               );
             })}
@@ -597,93 +594,127 @@ function ResultsView({
 function LoggedInDashboard({
   overview,
   recentGames,
+  topWeakness,
 }: {
   overview: InsightsOverview | null;
   recentGames: RecentGame[];
+  topWeakness: Weakness | null;
 }) {
+  const accuracy = cplToAccuracy(overview?.overall_cpl);
+  const recentAccuracy = cplToAccuracy(overview?.recent_cpl);
+
+  const trendIcon =
+    overview?.trend === "improving" ? (
+      <TrendingUp className="h-4 w-4" />
+    ) : overview?.trend === "declining" ? (
+      <TrendingDown className="h-4 w-4" />
+    ) : (
+      <Minus className="h-4 w-4" />
+    );
+
+  const trendText =
+    overview?.trend === "improving"
+      ? "Your accuracy is improving"
+      : overview?.trend === "declining"
+      ? "Accuracy dipping — review recent games"
+      : overview?.trend === "stable"
+      ? "Accuracy is steady"
+      : null;
+
   return (
-    <div className="max-w-5xl mx-auto px-6 py-12 animate-fade-in">
-      <div className="text-center space-y-4 mb-12">
-        <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-          Welcome back.
-          <br />
-          <span className="text-brand-400">Keep improving.</span>
+    <div className="max-w-3xl mx-auto px-6 py-12 animate-fade-in">
+      {/* Greeting + accuracy hero */}
+      <div className="text-center space-y-3 mb-10">
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
+          Welcome back
         </h1>
+        {accuracy !== null && (
+          <div className="flex flex-col items-center gap-1">
+            <p className={`text-5xl font-bold ${accuracyColor(accuracy)}`}>
+              {accuracy}%
+            </p>
+            <p className="text-sm text-gray-500">overall accuracy</p>
+          </div>
+        )}
+        {trendText && overview?.trend && (
+          <div
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
+              overview.trend === "improving"
+                ? "bg-green-900/20 text-green-400"
+                : overview.trend === "declining"
+                ? "bg-red-900/20 text-red-400"
+                : "bg-surface-2 text-gray-400"
+            }`}
+          >
+            {trendIcon}
+            {trendText}
+            {recentAccuracy !== null && (
+              <span className="ml-1 opacity-80">(recent: {recentAccuracy}%)</span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Stats */}
-      {overview && overview.total_games > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <StatCard
-            label="Games"
-            value={overview.total_games}
-            icon={<Swords className="h-5 w-5" />}
-          />
-          <StatCard
-            label="Overall CPL"
-            value={overview.overall_cpl ?? "—"}
-            subtitle={
-              overview.trend === "improving"
-                ? "↗ Improving"
-                : overview.trend === "declining"
-                ? "↘ Declining"
-                : undefined
-            }
-            trend={
-              overview.trend === "improving"
-                ? "up"
-                : overview.trend === "declining"
-                ? "down"
-                : "neutral"
-            }
-          />
-          <StatCard
-            label="Win Rate"
-            value={overview.win_rate ? `${overview.win_rate}%` : "—"}
-          />
-          <StatCard
-            label="Blunders/100"
-            value={overview.blunder_rate ?? "—"}
-          />
+      {/* Single primary CTA */}
+      <div className="mb-10">
+        <Link href="/games">
+          <Button className="w-full" size="lg">
+            <Swords className="h-5 w-5" />
+            Analyze New Games
+          </Button>
+        </Link>
+      </div>
+
+      {/* Today's Focus — weakness card */}
+      {topWeakness && (
+        <div className="mb-8">
+          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+            Today's Focus
+          </h2>
+          <Link href="/train">
+            <Card className="p-5 hover:border-brand-600/50 transition-colors cursor-pointer group">
+              <div className="flex items-start gap-4">
+                <div className="h-10 w-10 rounded-lg bg-brand-600/20 flex items-center justify-center flex-shrink-0">
+                  <Dumbbell className="h-5 w-5 text-brand-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold">{topWeakness.area}</span>
+                    <Badge
+                      variant={
+                        topWeakness.severity === "high"
+                          ? "danger"
+                          : topWeakness.severity === "medium"
+                          ? "warning"
+                          : "default"
+                      }
+                    >
+                      {topWeakness.severity}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-gray-400 line-clamp-2">
+                    {topWeakness.message}
+                  </p>
+                  <p className="text-sm text-brand-400 mt-2 flex items-center gap-1 group-hover:gap-2 transition-all">
+                    Train this weakness <ArrowRight className="h-3 w-3" />
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </Link>
         </div>
       )}
 
-      {/* Quick actions */}
-      <div className="grid md:grid-cols-4 gap-4 mb-8">
-        <QuickAction
-          href="/games"
-          icon={Swords}
-          title="My Games"
-          desc="Import and review your analyzed games"
-        />
-        <QuickAction
-          href="/openings"
-          icon={BookOpen}
-          title="Openings"
-          desc="Your opening repertoire stats"
-        />
-        <QuickAction
-          href="/train"
-          icon={Dumbbell}
-          title="Train"
-          desc="Solve puzzles from your own mistakes"
-        />
-        <QuickAction
-          href="/insights"
-          icon={BarChart3}
-          title="Insights"
-          desc="See your strengths and weaknesses"
-        />
-      </div>
-
       {/* Recent games */}
       {recentGames.length > 0 && (
-        <div className="mb-16">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Recent Games</h2>
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider">
+              Recent Games
+            </h2>
             <Link
               href="/games"
-              className="text-sm text-brand-400 hover:text-brand-300 flex items-center gap-1"
+              className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1"
             >
               View all <ArrowRight className="h-3 w-3" />
             </Link>
@@ -696,6 +727,7 @@ function LoggedInDashboard({
                     day: "numeric",
                   })
                 : "";
+              const acc = cplToAccuracy(g.overall_cpl);
               return (
                 <Link key={g.id} href={`/games/${g.id}`}>
                   <Card className="flex items-center gap-4 px-5 py-3 hover:bg-surface-2/50 transition-colors cursor-pointer">
@@ -709,13 +741,12 @@ function LoggedInDashboard({
                       {g.color === "white" ? "♔" : "♚"}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium truncate">
+                      <span className="text-sm font-medium truncate block">
                         {g.opening_name || "Unknown Opening"}
                       </span>
                       <div className="flex items-center gap-2 text-xs text-gray-500">
                         <span>{date}</span>
                         {g.time_control && <span>{g.time_control}</span>}
-                        <span className="capitalize">{g.platform}</span>
                       </div>
                     </div>
                     <Badge
@@ -729,17 +760,9 @@ function LoggedInDashboard({
                     >
                       {g.result.toUpperCase()}
                     </Badge>
-                    {g.overall_cpl !== null && (
-                      <span
-                        className={`text-xs font-medium ${
-                          g.overall_cpl < 30
-                            ? "text-green-400"
-                            : g.overall_cpl < 60
-                            ? "text-yellow-400"
-                            : "text-red-400"
-                        }`}
-                      >
-                        {Math.round(g.overall_cpl)} CPL
+                    {acc !== null && (
+                      <span className={`text-xs font-semibold ${accuracyColor(acc)}`}>
+                        {acc}%
                       </span>
                     )}
                   </Card>
@@ -749,33 +772,33 @@ function LoggedInDashboard({
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-function QuickAction({
-  href,
-  icon: Icon,
-  title,
-  desc,
-}: {
-  href: string;
-  icon: any;
-  title: string;
-  desc: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group flex flex-col gap-3 p-5 rounded-xl bg-surface-1 border border-surface-3 hover:border-brand-600/50 transition-colors"
-    >
-      <div className="h-10 w-10 rounded-lg bg-surface-2 flex items-center justify-center group-hover:bg-brand-600/20 transition-colors">
-        <Icon className="h-5 w-5 text-gray-400 group-hover:text-brand-400 transition-colors" />
-      </div>
-      <div>
-        <h3 className="font-semibold text-white">{title}</h3>
-        <p className="text-sm text-gray-500 mt-1">{desc}</p>
-      </div>
-    </Link>
+      {/* Weekly snapshot — compact stats */}
+      {overview && overview.total_games > 0 && (
+        <div>
+          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+            Overview
+          </h2>
+          <div className="grid grid-cols-3 gap-3">
+            <Card className="p-4 text-center">
+              <p className="text-xs text-gray-500">Games</p>
+              <p className="text-xl font-bold mt-1">{overview.total_games}</p>
+            </Card>
+            <Card className="p-4 text-center">
+              <p className="text-xs text-gray-500">Win Rate</p>
+              <p className="text-xl font-bold mt-1">
+                {overview.win_rate ? `${overview.win_rate}%` : "—"}
+              </p>
+            </Card>
+            <Card className="p-4 text-center">
+              <p className="text-xs text-gray-500">Blunders/100</p>
+              <p className="text-xl font-bold mt-1">
+                {overview.blunder_rate ?? "—"}
+              </p>
+            </Card>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

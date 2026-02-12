@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth import require_user
 from app.db.models import Game, User
@@ -48,6 +49,8 @@ class GameOut(BaseModel):
     date: str
     color: str
     result: str
+    white_player: Optional[str] = None
+    black_player: Optional[str] = None
     opening_name: Optional[str]
     eco_code: Optional[str]
     time_control: Optional[str]
@@ -96,12 +99,30 @@ async def list_games(
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
-    # Paginate
-    query = query.order_by(Game.date.desc()).offset((page - 1) * per_page).limit(per_page)
+    # Paginate — eagerly load analysis relationship to avoid lazy-load in async
+    query = (
+        query.options(selectinload(Game.analysis))
+        .order_by(Game.date.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
     rows = (await db.execute(query)).scalars().all()
 
     games_out = []
     for g in rows:
+        # Extract player names from PGN if not stored in DB
+        wp = g.white_player
+        bp = g.black_player
+        if (not wp or not bp) and g.moves_pgn:
+            try:
+                import chess.pgn as cpgn
+                from io import StringIO as SIO
+                _pg = cpgn.read_game(SIO(g.moves_pgn))
+                if _pg:
+                    wp = wp or _pg.headers.get("White")
+                    bp = bp or _pg.headers.get("Black")
+            except Exception:
+                pass
         games_out.append(
             GameOut(
                 id=g.id,
@@ -110,6 +131,8 @@ async def list_games(
                 date=g.date.isoformat() if g.date else "",
                 color=g.color,
                 result=g.result,
+                white_player=wp,
+                black_player=bp,
                 opening_name=g.opening_name,
                 eco_code=g.eco_code,
                 time_control=g.time_control,
@@ -154,6 +177,8 @@ async def fetch_lichess_games(
     imported = await _import_pgn_games(db, user, pgn_text, "lichess")
 
     # Save the lichess username on the user profile
+    # Re-fetch user to avoid expired attribute issues after commit in _import_pgn_games
+    await db.refresh(user)
     if not user.lichess_username:
         user.lichess_username = body.username
         db.add(user)
@@ -229,6 +254,8 @@ async def fetch_chesscom_games(
     imported = await _import_pgn_games(db, user, combined_pgn, "chess.com")
 
     # Save the chess.com username on the user profile
+    # Re-fetch user to avoid expired attribute issues after commit in _import_pgn_games
+    await db.refresh(user)
     if not user.chesscom_username:
         user.chesscom_username = body.username
         db.add(user)
@@ -278,10 +305,28 @@ async def get_game(
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single game with its PGN and analysis (if available)."""
-    result = await db.execute(select(Game).where(Game.id == game_id, Game.user_id == user.id))
+    result = await db.execute(
+        select(Game)
+        .options(selectinload(Game.analysis))
+        .where(Game.id == game_id, Game.user_id == user.id)
+    )
     game = result.scalar_one_or_none()
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
+
+    # Extract player names from PGN if not stored in DB
+    wp = game.white_player
+    bp = game.black_player
+    if (not wp or not bp) and game.moves_pgn:
+        try:
+            import chess.pgn as cpgn
+            from io import StringIO as SIO
+            _pg = cpgn.read_game(SIO(game.moves_pgn))
+            if _pg:
+                wp = wp or _pg.headers.get("White")
+                bp = bp or _pg.headers.get("Black")
+        except Exception:
+            pass
 
     resp = {
         "id": game.id,
@@ -289,6 +334,8 @@ async def get_game(
         "date": game.date.isoformat() if game.date else None,
         "color": game.color,
         "result": game.result,
+        "white_player": wp,
+        "black_player": bp,
         "opening_name": game.opening_name,
         "eco_code": game.eco_code,
         "time_control": game.time_control,
@@ -323,8 +370,28 @@ async def _import_pgn_games(
     db: AsyncSession, user: User, pgn_text: str, platform: str
 ) -> int:
     """Parse multi-game PGN text and insert games. Returns count imported."""
+    from datetime import datetime
+    import hashlib
+
     pgn_io = StringIO(pgn_text)
     imported = 0
+
+    # Eagerly read user attributes to avoid lazy-loading issues after rollback.
+    # In async SQLAlchemy, accessing expired attributes triggers a sync IO call
+    # which raises MissingGreenlet.
+    user_id = user.id
+    chesscom_name = user.chesscom_username
+    lichess_name = user.lichess_username
+
+    # Collect existing platform_game_ids for this user+platform to skip dupes
+    existing_ids_result = await db.execute(
+        select(Game.platform_game_id).where(
+            Game.user_id == user_id, Game.platform == platform
+        )
+    )
+    existing_ids: set[str] = {
+        row[0] for row in existing_ids_result.fetchall() if row[0]
+    }
 
     while True:
         game = chess.pgn.read_game(pgn_io)
@@ -343,9 +410,9 @@ async def _import_pgn_games(
         # For Lichess we have the username; for Chess.com PGN imports we
         # default to white unless we can match usernames later.
         color = "white"
-        if user.chesscom_username and user.chesscom_username.lower() == black.lower():
+        if chesscom_name and chesscom_name.lower() == black.lower():
             color = "black"
-        elif user.lichess_username and user.lichess_username.lower() == black.lower():
+        elif lichess_name and lichess_name.lower() == black.lower():
             color = "black"
 
         if result_raw == "1-0":
@@ -358,7 +425,6 @@ async def _import_pgn_games(
         # Extract metadata
         date_str = headers.get("UTCDate", headers.get("Date", ""))
         time_str = headers.get("UTCTime", "00:00:00")
-        from datetime import datetime
 
         try:
             dt = datetime.fromisoformat(f"{date_str.replace('.', '-')}T{time_str}")
@@ -374,8 +440,11 @@ async def _import_pgn_games(
             platform_game_id = site.split("/")[-1]
         else:
             # Use a hash of the PGN
-            import hashlib
             platform_game_id = hashlib.md5(moves_pgn.encode()).hexdigest()[:16]
+
+        # Skip duplicates without touching the DB
+        if platform_game_id and platform_game_id in existing_ids:
+            continue
 
         # Count moves
         moves_list = list(game.mainline_moves())
@@ -399,12 +468,14 @@ async def _import_pgn_games(
         time_control = headers.get("TimeControl", None)
 
         game_row = Game(
-            user_id=user.id,
+            user_id=user_id,
             platform=platform,
             platform_game_id=platform_game_id,
             date=dt,
             color=color,
             result=result,
+            white_player=white or None,
+            black_player=black or None,
             opening_name=opening,
             eco_code=eco,
             time_control=time_control,
@@ -414,11 +485,13 @@ async def _import_pgn_games(
             moves_pgn=moves_pgn,
         )
 
-        # Use merge to handle duplicates gracefully
         try:
             db.add(game_row)
             await db.flush()
             imported += 1
+            # Track so we don't try to insert the same ID again in this batch
+            if platform_game_id:
+                existing_ids.add(platform_game_id)
         except Exception:
             await db.rollback()
             continue
