@@ -48,6 +48,23 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
+    def database_url_async(self) -> str:
+        """Normalize DATABASE_URL for SQLAlchemy async engine.
+
+        Accepts Railway-style URLs like:
+        - postgres://...
+        - postgresql://...
+        and converts them to:
+        - postgresql+asyncpg://...
+        """
+        url = self.database_url or ""
+        if url.startswith("postgres://"):
+            return "postgresql+asyncpg://" + url[len("postgres://"):]
+        if url.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + url[len("postgresql://"):]
+        return url
+
+    @property
     def is_production(self) -> bool:
         return self.env == "production"
 
