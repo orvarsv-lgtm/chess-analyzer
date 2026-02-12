@@ -7,6 +7,7 @@ The coach produces deterministic-style structured feedback (not vague chat).
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -56,6 +57,11 @@ async def get_coach_review(
         )
 
     # ── Quota check ─────────────────────────────────────
+    did_reset = _reset_coach_quota_if_new_month(user)
+    if did_reset:
+        db.add(user)
+        await db.flush()
+
     is_pro = user.subscription_tier == "pro"
     if not is_pro and user.ai_coach_reviews_used >= FREE_MONTHLY_LIMIT:
         raise HTTPException(
@@ -143,8 +149,15 @@ async def get_coach_review(
 
 
 @router.get("/quota")
-async def get_quota(user: User = Depends(require_user)):
+async def get_quota(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Check how many AI Coach reviews the user has left."""
+    if _reset_coach_quota_if_new_month(user):
+        db.add(user)
+        await db.commit()
+
     is_pro = user.subscription_tier == "pro"
     return {
         "reviews_used": user.ai_coach_reviews_used,
@@ -152,6 +165,27 @@ async def get_quota(user: User = Depends(require_user)):
         "reviews_remaining": None if is_pro else max(0, FREE_MONTHLY_LIMIT - user.ai_coach_reviews_used),
         "is_pro": is_pro,
     }
+
+
+def _month_context(dt: Optional[datetime] = None) -> str:
+    now = dt or datetime.utcnow()
+    return now.strftime("%Y-%m")
+
+
+def _reset_coach_quota_if_new_month(user: User) -> bool:
+    """Reset coach usage if stored reset month differs from current month."""
+    now = datetime.utcnow()
+    if not user.ai_coach_reviews_reset_at:
+        user.ai_coach_reviews_reset_at = now
+        user.ai_coach_reviews_used = 0
+        return True
+
+    if _month_context(user.ai_coach_reviews_reset_at) != _month_context(now):
+        user.ai_coach_reviews_used = 0
+        user.ai_coach_reviews_reset_at = now
+        return True
+
+    return False
 
 
 # ═══════════════════════════════════════════════════════════

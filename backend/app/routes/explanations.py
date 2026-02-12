@@ -10,22 +10,25 @@ Free users get 10 explanations/month. Pro users get unlimited.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 import chess
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
 from app.config import get_settings
-from app.db.models import User
+from app.db.models import Streak, User
 from app.db.session import get_db
 
 router = APIRouter()
 
 FREE_MONTHLY_LIMIT = 10  # free users get 10 move explanations / month
+EXPLANATIONS_STREAK_TYPE = "ai_explanations"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -88,9 +91,12 @@ async def explain_move(
 
     # ── Quota check ─────────────────────────────────────
     is_pro = user.subscription_tier == "pro"
-    # Reuse ai_coach_reviews_used for now (or add a separate counter later)
-    # For v1, explanations share the same quota pool as coach reviews
-    # We'll track separately in a future migration
+    usage_row, used_count = await _get_monthly_explanations_usage(db, user.id)
+    if not is_pro and used_count >= FREE_MONTHLY_LIMIT:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Free plan limit reached ({FREE_MONTHLY_LIMIT} explanations/month). Upgrade to Pro for unlimited explanations.",
+        )
 
     # ── Concept extraction (deterministic) ──────────────
     concepts = _extract_concepts(body)
@@ -135,26 +141,69 @@ async def explain_move(
     if body.best_move_san and body.best_move_san != body.san and body.best_move_san != "?":
         alternative = _extract_alternative(explanation_text, body.best_move_san)
 
+    # ── Persist per-user monthly usage ──────────────────
+    if usage_row:
+        usage_row.current_count += 1
+    else:
+        usage_row = Streak(
+            user_id=user.id,
+            streak_type=EXPLANATIONS_STREAK_TYPE,
+            context=_month_context(),
+            current_count=1,
+            best_count=1,
+            started_at=datetime.utcnow(),
+        )
+        db.add(usage_row)
+
+    await db.commit()
+    new_used_count = usage_row.current_count
+
     return ExplainMoveResponse(
         explanation=explanation_text,
         concepts=concepts,
         severity=severity,
         alternative=alternative,
-        explanations_used=0,  # TODO: track per user
+        explanations_used=new_used_count,
         explanations_limit=None if is_pro else FREE_MONTHLY_LIMIT,
     )
 
 
 @router.get("/quota")
-async def get_explanation_quota(user: User = Depends(require_user)):
+async def get_explanation_quota(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Check AI explanation quota."""
     is_pro = user.subscription_tier == "pro"
+    _, used_count = await _get_monthly_explanations_usage(db, user.id)
     return ExplanationQuota(
-        used=0,  # TODO: track per user
+        used=used_count,
         limit=None if is_pro else FREE_MONTHLY_LIMIT,
-        remaining=None if is_pro else FREE_MONTHLY_LIMIT,
+        remaining=None if is_pro else max(0, FREE_MONTHLY_LIMIT - used_count),
         is_pro=is_pro,
     )
+
+
+def _month_context(dt: Optional[datetime] = None) -> str:
+    now = dt or datetime.utcnow()
+    return now.strftime("%Y-%m")
+
+
+async def _get_monthly_explanations_usage(
+    db: AsyncSession, user_id: str
+) -> tuple[Optional[Streak], int]:
+    """Fetch explanation usage row for current month and return (row, used_count)."""
+    month = _month_context()
+    usage_q = await db.execute(
+        select(Streak).where(
+            Streak.user_id == user_id,
+            Streak.streak_type == EXPLANATIONS_STREAK_TYPE,
+            Streak.context == month,
+        )
+    )
+    usage_row = usage_q.scalar_one_or_none()
+    used_count = usage_row.current_count if usage_row else 0
+    return usage_row, used_count
 
 
 # ═══════════════════════════════════════════════════════════
