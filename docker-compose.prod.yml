@@ -1,0 +1,107 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL Database ───────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: chess
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: chess_analyzer
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chess -d chess_analyzer"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - internal
+
+  # ─── FastAPI Backend ───────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://chess:${DB_PASSWORD}@db:5432/chess_analyzer"
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      STOCKFISH_PATH: /usr/games/stockfish
+      DEFAULT_ANALYSIS_DEPTH: 12
+      CORS_ORIGINS: "https://chessanalyses.com,https://www.chessanalyses.com,http://localhost:3000"
+      ENV: production
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PADDLE_API_KEY: ${PADDLE_API_KEY:-}
+      PADDLE_WEBHOOK_SECRET: ${PADDLE_WEBHOOK_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    networks:
+      - internal
+    expose:
+      - "8000"
+
+  # ─── Next.js Frontend ─────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ""
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      NEXTAUTH_URL: "https://chessanalyses.com"
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXT_PUBLIC_API_URL: ""
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    networks:
+      - internal
+    expose:
+      - "3000"
+
+  # ─── Nginx Reverse Proxy ──────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: always
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-etc:/etc/letsencrypt:ro
+      - certbot-var:/var/lib/letsencrypt
+      - certbot-webroot:/var/www/certbot:ro
+    networks:
+      - internal
+
+  # ─── Certbot (SSL) ────────────────────────────────────
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew --webroot -w /var/www/certbot --quiet; done'"
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  certbot-etc:
+  certbot-var:
+  certbot-webroot:
+
+networks:
+  internal:
+    driver: bridge
