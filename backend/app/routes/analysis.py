@@ -26,6 +26,8 @@ from app.analysis_core import (
     queens_on_board,
     generate_puzzle_data,
     avg,
+    parse_clock_comment,
+    classify_blunder_subtype,
 )
 
 router = APIRouter()
@@ -245,12 +247,29 @@ async def run_analysis_sync(
 
                     player_color = gd["color"]  # "white" or "black"
 
-                    for move in pgn_game.mainline_moves():
+                    prev_clock = None  # track clock for move time deltas
+                    move_times = []  # player move times in seconds
+                    time_trouble_blunders_count = 0
+
+                    for node in pgn_game.mainline():
+                        move = node.move
                         move_num += 1
                         mv_color = "white" if board.turn == chess.WHITE else "black"
                         san = board.san(move)
                         is_player_move = (mv_color == player_color)
                         fen_before = board.fen()
+
+                        # ── Clock parsing ──
+                        clock_remaining = parse_clock_comment(node.comment)
+                        move_time_sec = None
+                        if clock_remaining is not None and prev_clock is not None:
+                            # Move time = previous clock - current clock (same color alternates)
+                            # We track per-color, so delta is prev_clock_this_color - current
+                            # Since prev_clock is set per-color below, this works
+                            pass  # computed below after color check
+
+                        # Track per-color clocks
+                        time_remaining_val = clock_remaining
 
                         # Track piece moved BEFORE push
                         from_sq = move.from_square
@@ -370,6 +389,7 @@ async def run_analysis_sync(
                                 quality = "Blunder"
 
                         # Only count player's move quality stats
+                        blunder_sub = None
                         if is_player_move:
                             player_accuracies.append(mv_accuracy)
                             player_cp_losses.append(cp_loss)
@@ -390,6 +410,25 @@ async def run_analysis_sync(
                                 blunders += 1
 
                             phase_losses[phase].append(cp_loss)
+
+                            # ── Blunder subtype classification ──
+                            blunder_sub = None
+                            if quality == "Blunder":
+                                board.pop()  # undo for classification context
+                                blunder_sub = classify_blunder_subtype(board, move, best_move_obj, phase)
+                                board.push(move)  # re-push
+                                # Track time-trouble blunders
+                                if time_remaining_val is not None and time_remaining_val < 30:
+                                    time_trouble_blunders_count += 1
+
+                            # ── Track move time for player moves ──
+                            if clock_remaining is not None and prev_clock is not None:
+                                mt = prev_clock - clock_remaining
+                                if mt > 0:
+                                    move_times.append(mt)
+
+                            if is_player_move and clock_remaining is not None:
+                                prev_clock = clock_remaining
 
                             # Collect puzzle candidates
                             puzzle_data = generate_puzzle_data(
@@ -426,6 +465,8 @@ async def run_analysis_sync(
                             "accuracy": round(mv_accuracy, 1),
                             "is_mate_before": prev_is_mate,
                             "is_mate_after": is_mate,
+                            "time_remaining": time_remaining_val,
+                            "blunder_subtype": blunder_sub if is_player_move else None,
                         })
 
                         prev_score_cp = score_cp
@@ -453,6 +494,8 @@ async def run_analysis_sync(
                             missed_wins_count=missed_wins_count,
                             accuracy=game_acc,
                             analysis_depth=depth,
+                            average_move_time=round(sum(move_times) / len(move_times), 1) if move_times else None,
+                            time_trouble_blunders=time_trouble_blunders_count,
                         )
                         save_db.add(analysis_row)
                         for me in move_evals:

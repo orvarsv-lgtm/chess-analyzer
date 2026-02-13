@@ -524,3 +524,112 @@ def avg(lst: list) -> float | None:
     if not lst:
         return None
     return round(sum(lst) / len(lst), 2)
+
+
+# ═══════════════════════════════════════════════════════════
+# Clock / Move Time Parsing
+# ═══════════════════════════════════════════════════════════
+
+_CLK_RE = re.compile(r'\[%clk\s+(\d+):(\d+):(\d+(?:\.\d+)?)\]')
+
+
+def parse_clock_comment(comment: str | None) -> float | None:
+    """
+    Parse [%clk H:MM:SS] or [%clk H:MM:SS.s] from a PGN node comment.
+    Returns remaining time in seconds, or None if not found.
+    """
+    if not comment:
+        return None
+    m = _CLK_RE.search(comment)
+    if not m:
+        return None
+    hours, minutes, seconds = int(m.group(1)), int(m.group(2)), float(m.group(3))
+    return hours * 3600 + minutes * 60 + seconds
+
+
+# ═══════════════════════════════════════════════════════════
+# Blunder Subtype Classification
+# ═══════════════════════════════════════════════════════════
+
+PIECE_VALUES_MAP = {
+    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
+}
+
+
+def classify_blunder_subtype(
+    board_before: chess.Board,
+    move: chess.Move,
+    best_move: chess.Move | None,
+    phase: str,
+) -> str | None:
+    """
+    Classify a blunder into a subtype:
+    - hanging_piece: player left a piece en prise or moved to an attacked square
+    - missed_tactic: best move was a fork, pin, skewer, or winning capture
+    - king_safety: move weakened own king (pawn shield, moved near open file)
+    - endgame_technique: blunder in an endgame position
+
+    Returns subtype string or None if unclassifiable.
+    """
+    if phase == "endgame":
+        return "endgame_technique"
+
+    # Check if the played move left a piece hanging
+    board_after = board_before.copy()
+    board_after.push(move)
+
+    # Hanging piece: after the move, check if any of the player's pieces
+    # are attacked by the opponent but not adequately defended
+    player_color = board_before.turn
+    opponent_color = not player_color
+
+    # Check the piece that just moved — is it now hanging?
+    moving_piece = board_before.piece_at(move.from_square)
+    if moving_piece:
+        attackers = len(board_after.attackers(opponent_color, move.to_square))
+        defenders = len(board_after.attackers(player_color, move.to_square))
+        piece_val = PIECE_VALUES_MAP.get(moving_piece.piece_type, 0)
+        if attackers > defenders and piece_val >= 3:
+            return "hanging_piece"
+
+    # Check if any other piece is now hanging due to vacating the from_square
+    for sq in chess.SQUARES:
+        p = board_after.piece_at(sq)
+        if p and p.color == player_color and sq != move.to_square:
+            atk = len(board_after.attackers(opponent_color, sq))
+            dfs = len(board_after.attackers(player_color, sq))
+            val = PIECE_VALUES_MAP.get(p.piece_type, 0)
+            if atk > dfs and val >= 3:
+                return "hanging_piece"
+
+    # Missed tactic: check if the best move was a capture, check, or fork
+    if best_move:
+        # Best move is a capture of a high-value piece
+        captured = board_before.piece_at(best_move.to_square)
+        if captured and PIECE_VALUES_MAP.get(captured.piece_type, 0) >= 3:
+            return "missed_tactic"
+
+        # Best move gives check
+        board_test = board_before.copy()
+        board_test.push(best_move)
+        if board_test.is_check():
+            return "missed_tactic"
+
+    # King safety: move involves king's pawn shield or king moved to open file
+    if moving_piece and moving_piece.piece_type == chess.KING:
+        # King moved (not castling) — potentially unsafe
+        if not board_before.is_castling(move):
+            return "king_safety"
+
+    # Pawn move that weakens king's shield
+    if moving_piece and moving_piece.piece_type == chess.PAWN:
+        king_sq = board_before.king(player_color)
+        if king_sq is not None:
+            king_file = chess.square_file(king_sq)
+            pawn_file = chess.square_file(move.from_square)
+            if abs(king_file - pawn_file) <= 1:
+                return "king_safety"
+
+    # Default: missed tactic (most common blunder cause)
+    return "missed_tactic"

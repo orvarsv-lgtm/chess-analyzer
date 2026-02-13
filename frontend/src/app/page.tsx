@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import {
   Swords,
   Dumbbell,
@@ -17,9 +18,12 @@ import {
   Minus,
   BookOpen,
   Sparkles,
+  Calendar,
+  Sunrise,
 } from "lucide-react";
 import {
   insightsAPI,
+  puzzlesAPI,
   startAnonymousAnalysis,
   claimAnonymousResults,
   type InsightsOverview,
@@ -28,9 +32,19 @@ import {
   type AdvancedAnalytics,
   type AnonAnalysisResults,
   type AnonProgressEvent,
+  type SkillProfile,
+  type StudyPlanResponse,
+  type DailyWarmupResponse,
 } from "@/lib/api";
 import { Card, CardContent, StatCard, Badge, Button, Spinner } from "@/components/ui";
 import { cplToAccuracy, accuracyColor, formatAccuracy } from "@/lib/utils";
+import {
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  ResponsiveContainer,
+} from "recharts";
 
 type Step = "input" | "analyzing" | "results-locked" | "claiming" | "results";
 
@@ -42,6 +56,9 @@ export default function HomePage() {
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
   const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
   const [studyRecs, setStudyRecs] = useState<{ priority: string; category: string; message: string }[]>([]);
+  const [skillProfile, setSkillProfile] = useState<SkillProfile | null>(null);
+  const [studyPlan, setStudyPlan] = useState<StudyPlanResponse | null>(null);
+  const [warmup, setWarmup] = useState<DailyWarmupResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
 
   // ─── Anonymous analysis state ───────────────────────
@@ -113,6 +130,9 @@ export default function HomePage() {
         insightsAPI.advancedAnalytics().then((a) => {
           setStudyRecs(a.recommendations ?? []);
         }).catch(() => {}),
+        insightsAPI.skillProfile().then(setSkillProfile).catch(() => {}),
+        insightsAPI.studyPlan().then(setStudyPlan).catch(() => {}),
+        puzzlesAPI.dailyWarmup().then(setWarmup).catch(() => {}),
       ]).finally(() => setDashboardLoading(false));
     }
   }, [session, step]);
@@ -182,7 +202,7 @@ export default function HomePage() {
 
   // ─── If signed in and no analysis in progress, show dashboard ──
   if (session && step === "input" && !results) {
-    return <LoggedInDashboard overview={overview} recentGames={recentGames} weaknesses={weaknesses} studyRecs={studyRecs} loading={dashboardLoading} />;
+    return <LoggedInDashboard overview={overview} recentGames={recentGames} weaknesses={weaknesses} studyRecs={studyRecs} skillProfile={skillProfile} studyPlan={studyPlan} warmup={warmup} loading={dashboardLoading} />;
   }
 
   // ─── Render based on step ───────────────────────────
@@ -648,12 +668,18 @@ function LoggedInDashboard({
   recentGames,
   weaknesses,
   studyRecs,
+  skillProfile,
+  studyPlan,
+  warmup,
   loading,
 }: {
   overview: InsightsOverview | null;
   recentGames: RecentGame[];
   weaknesses: Weakness[];
   studyRecs: StudyRec[];
+  skillProfile: SkillProfile | null;
+  studyPlan: StudyPlanResponse | null;
+  warmup: DailyWarmupResponse | null;
   loading?: boolean;
 }) {
   const topWeakness = weaknesses[0] ?? null;
@@ -702,8 +728,17 @@ function LoggedInDashboard({
       )}
 
       {/* Top row: ELO + Accuracy + Trend */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={{
+          hidden: {},
+          visible: { transition: { staggerChildren: 0.08 } },
+        }}
+        className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+      >
         {/* ELO Card */}
+        <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}>
         <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
           <div className="flex items-center gap-2 mb-2">
             <div className="h-8 w-8 rounded-lg bg-brand-600/20 flex items-center justify-center">
@@ -723,8 +758,10 @@ function LoggedInDashboard({
             </div>
           )}
         </Card>
+        </motion.div>
 
         {/* Accuracy Card */}
+        <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}>
         <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
           <div className="flex items-center gap-2 mb-2">
             <div className="h-8 w-8 rounded-lg bg-brand-600/20 flex items-center justify-center">
@@ -739,8 +776,10 @@ function LoggedInDashboard({
             <p className="text-xs text-gray-500 mt-1">Recent: {recentAccuracy}%</p>
           )}
         </Card>
+        </motion.div>
 
         {/* Win Rate Card */}
+        <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}>
         <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
           <div className="flex items-center gap-2 mb-2">
             <div className="h-8 w-8 rounded-lg bg-green-600/20 flex items-center justify-center">
@@ -753,8 +792,10 @@ function LoggedInDashboard({
           </p>
           <p className="text-xs text-gray-500 mt-1">{overview?.total_games ?? 0} games</p>
         </Card>
+        </motion.div>
 
         {/* Trend Card */}
+        <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}>
         <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
           <div className="flex items-center gap-2 mb-2">
             <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
@@ -773,7 +814,8 @@ function LoggedInDashboard({
             {overview?.blunder_rate != null ? `${overview.blunder_rate} blunders/100` : ""}
           </p>
         </Card>
-      </div>
+        </motion.div>
+      </motion.div>
 
       {/* Phase Accuracy Breakdown */}
       {(openingAcc != null || middlegameAcc != null || endgameAcc != null) && (
@@ -808,6 +850,124 @@ function LoggedInDashboard({
               ))}
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* ─── Skill Radar (compact) ─── */}
+      {skillProfile?.has_data && skillProfile.axes && (
+        <div className="mb-8">
+          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <Target className="h-4 w-4" />
+            Skill Profile
+          </h2>
+          <Card className="p-6">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="h-56 w-56 flex-shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart data={skillProfile.axes} cx="50%" cy="50%" outerRadius="75%">
+                    <PolarGrid stroke="#333" />
+                    <PolarAngleAxis
+                      dataKey="axis"
+                      tick={{ fill: "#9ca3af", fontSize: 10, fontWeight: 500 }}
+                    />
+                    <Radar
+                      name="Skill"
+                      dataKey="score"
+                      stroke="#16a34a"
+                      fill="#16a34a"
+                      fillOpacity={0.2}
+                      strokeWidth={2}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 space-y-2">
+                {skillProfile.axes.map((a) => (
+                  <div key={a.axis} className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400 w-24">{a.axis}</span>
+                    <div className="flex-1 h-2 bg-surface-2 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-brand-500 rounded-full transition-all"
+                        style={{ width: `${a.score}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-bold text-gray-300 w-8 text-right">{a.score}</span>
+                  </div>
+                ))}
+                <div className="pt-2 mt-2 border-t border-surface-3">
+                  <Link href="/insights" className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
+                    See full insights <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Daily Warmup Status ── */}
+      {warmup && (
+        <div className="mb-8">
+          {warmup.completed_today ? (
+            <Card className="p-4 border-green-800/30 bg-green-900/10">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-green-600/20 flex items-center justify-center">
+                  <CheckCircle className="h-5 w-5 text-green-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-green-300">Daily Warmup Complete ✓</p>
+                  <p className="text-xs text-gray-500">Great work keeping your streak alive!</p>
+                </div>
+              </div>
+            </Card>
+          ) : warmup.total_puzzles > 0 ? (
+            <Link href="/train">
+              <Card className="p-4 border-amber-500/30 bg-gradient-to-r from-amber-900/10 to-orange-900/10 hover:border-amber-400/50 transition-all cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                      <Sunrise className="h-5 w-5 text-amber-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-amber-300">Daily Warmup Ready</p>
+                      <p className="text-xs text-gray-500">{warmup.total_puzzles} puzzles waiting for you</p>
+                    </div>
+                  </div>
+                  <ArrowRight className="h-5 w-5 text-amber-400" />
+                </div>
+              </Card>
+            </Link>
+          ) : null}
+        </div>
+      )}
+
+      {/* ── Weekly Study Plan Strip ── */}
+      {studyPlan && studyPlan.days.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-3">
+            <Calendar className="h-4 w-4 text-brand-400" />
+            <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">This Week&apos;s Plan</h2>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {studyPlan.days.map((day) => (
+              <div
+                key={day.date}
+                className={`flex-shrink-0 w-[130px] rounded-xl p-3 border transition-all ${
+                  day.is_today
+                    ? "border-brand-500 bg-brand-600/10 ring-1 ring-brand-500/30"
+                    : day.is_past
+                    ? "border-surface-3 bg-surface-1 opacity-50"
+                    : "border-surface-3 bg-surface-1 hover:border-surface-4"
+                }`}
+              >
+                <p className={`text-xs font-medium mb-1 ${day.is_today ? "text-brand-400" : "text-gray-500"}`}>
+                  {day.is_today ? "Today" : day.day.slice(0, 3)}
+                </p>
+                <p className="text-sm font-semibold truncate">{day.focus}</p>
+                <p className="text-xs text-gray-500 mt-1">{day.total_duration_min}m</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

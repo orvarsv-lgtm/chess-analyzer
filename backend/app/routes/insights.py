@@ -192,6 +192,144 @@ async def get_overview(
     }
 
 
+@router.get("/skill-profile")
+async def get_skill_profile(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Skill radar data – 6 axes normalized to 0-100 for a radar chart.
+    Axes: Opening, Middlegame, Endgame, Tactics, Composure, Consistency.
+    Higher = better for all axes.
+    """
+    # Check minimum data
+    analyzed_q = (
+        select(func.count())
+        .select_from(GameAnalysis)
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    analyzed_count = (await db.execute(analyzed_q)).scalar() or 0
+    if analyzed_count < 3:
+        return {"has_data": False, "message": "Analyze at least 3 games for skill profile."}
+
+    # ── Aggregate stats ──
+    agg_q = (
+        select(
+            func.avg(GameAnalysis.overall_cpl).label("avg_cpl"),
+            func.avg(GameAnalysis.phase_opening_cpl).label("opening_cpl"),
+            func.avg(GameAnalysis.phase_middlegame_cpl).label("middlegame_cpl"),
+            func.avg(GameAnalysis.phase_endgame_cpl).label("endgame_cpl"),
+            func.sum(GameAnalysis.blunders_count).label("total_blunders"),
+            func.sum(GameAnalysis.best_moves_count).label("total_best"),
+            func.sum(Game.moves_count).label("total_moves"),
+        )
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    agg = (await db.execute(agg_q)).one()
+
+    avg_cpl = agg.avg_cpl or 50
+    opening_cpl = agg.opening_cpl or avg_cpl
+    middlegame_cpl = agg.middlegame_cpl or avg_cpl
+    endgame_cpl = agg.endgame_cpl or avg_cpl
+    total_blunders = agg.total_blunders or 0
+    total_best = agg.total_best or 0
+    total_moves = agg.total_moves or 1
+    player_moves = total_moves / 2  # both sides counted
+
+    # ── CPL standard deviation for consistency ──
+    cpl_stddev_q = (
+        select(func.stddev(GameAnalysis.overall_cpl))
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id, GameAnalysis.overall_cpl.isnot(None))
+    )
+    cpl_stddev = (await db.execute(cpl_stddev_q)).scalar() or 20
+
+    # ── Normalize to 0-100 (higher = better) ──
+    def cpl_to_score(cpl_val: float) -> int:
+        """Map CPL to 0-100 where 0 CPL → 100, 100+ CPL → ~10."""
+        score = max(0, min(100, round(103.17 * 2.718 ** (-0.01 * cpl_val) - 3.17)))
+        return score
+
+    opening_score = cpl_to_score(opening_cpl)
+    middlegame_score = cpl_to_score(middlegame_cpl)
+    endgame_score = cpl_to_score(endgame_cpl)
+
+    # Tactics: best-move ratio (% of moves that are engine-best)
+    best_rate = (total_best / player_moves * 100) if player_moves > 0 else 0
+    tactics_score = max(0, min(100, round(best_rate * 2)))  # 50% best → 100
+
+    # Composure: inverse blunder rate (fewer blunders = higher score)
+    blunder_rate = (total_blunders / player_moves * 100) if player_moves > 0 else 5
+    composure_score = max(0, min(100, round(100 - blunder_rate * 15)))
+
+    # Consistency: inverse of CPL standard deviation
+    consistency_score = max(0, min(100, round(100 - cpl_stddev * 2)))
+
+    return {
+        "has_data": True,
+        "analyzed_games": analyzed_count,
+        "axes": [
+            {"axis": "Opening", "score": opening_score},
+            {"axis": "Middlegame", "score": middlegame_score},
+            {"axis": "Endgame", "score": endgame_score},
+            {"axis": "Tactics", "score": tactics_score},
+            {"axis": "Composure", "score": composure_score},
+            {"axis": "Consistency", "score": consistency_score},
+        ],
+        "overall_score": round(
+            (opening_score + middlegame_score + endgame_score + tactics_score + composure_score + consistency_score) / 6
+        ),
+    }
+
+
+@router.get("/progress")
+async def get_progress(
+    months: int = 6,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Monthly progress data – CPL, accuracy, and blunder rate over time.
+    Used for progress line/area charts.
+    """
+    from datetime import datetime, timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=months * 30)
+
+    # Monthly aggregates
+    monthly_q = (
+        select(
+            func.date_trunc("month", Game.date).label("month"),
+            func.count().label("games"),
+            func.avg(GameAnalysis.overall_cpl).label("avg_cpl"),
+            func.avg(GameAnalysis.accuracy).label("avg_accuracy"),
+            func.sum(GameAnalysis.blunders_count).label("total_blunders"),
+            func.sum(Game.moves_count).label("total_moves"),
+        )
+        .join(GameAnalysis, GameAnalysis.game_id == Game.id)
+        .where(Game.user_id == user.id, Game.date >= cutoff)
+        .group_by(func.date_trunc("month", Game.date))
+        .order_by(func.date_trunc("month", Game.date).asc())
+    )
+    rows = (await db.execute(monthly_q)).all()
+
+    data_points = []
+    for r in rows:
+        player_moves = (r.total_moves or 0) / 2
+        blunder_rate = round(r.total_blunders / player_moves * 100, 2) if player_moves > 0 and r.total_blunders else 0
+        data_points.append({
+            "period": r.month.strftime("%Y-%m") if r.month else None,
+            "games": r.games,
+            "avg_cpl": round(r.avg_cpl, 1) if r.avg_cpl else None,
+            "accuracy": round(r.avg_accuracy, 1) if r.avg_accuracy else None,
+            "blunder_rate": blunder_rate,
+        })
+
+    return {"months": months, "data": data_points}
+
+
 @router.get("/phase-breakdown")
 async def get_phase_breakdown(
     user: User = Depends(require_user),
@@ -1012,5 +1150,155 @@ async def get_advanced_analytics(
             "upsets": upsets,
             "best_phase": best_phase,
             "worst_phase": worst_phase,
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+# Weekly Study Plan
+# ═══════════════════════════════════════════════════════════
+
+
+@router.get("/study-plan")
+async def get_study_plan(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate a 7-day study plan based on the player's weaknesses and recent performance.
+    Each day has a focus area with specific activities. Deterministic — no LLMs.
+    """
+    from datetime import date, timedelta
+
+    # Gather player stats
+    total_q = select(func.count()).select_from(Game).where(Game.user_id == user.id)
+    total_games = (await db.execute(total_q)).scalar() or 0
+
+    if total_games == 0:
+        return {
+            "week_start": date.today().isoformat(),
+            "days": [],
+            "message": "Analyze some games first to generate your study plan.",
+        }
+
+    # Phase CPL averages
+    phase_q = select(
+        func.avg(GameAnalysis.phase_opening_cpl).label("opening"),
+        func.avg(GameAnalysis.phase_middlegame_cpl).label("middlegame"),
+        func.avg(GameAnalysis.phase_endgame_cpl).label("endgame"),
+    ).join(Game, Game.id == GameAnalysis.game_id).where(Game.user_id == user.id)
+    phase_row = (await db.execute(phase_q)).one_or_none()
+
+    opening_cpl = round(phase_row.opening or 0, 1) if phase_row else 0
+    middlegame_cpl = round(phase_row.middlegame or 0, 1) if phase_row else 0
+    endgame_cpl = round(phase_row.endgame or 0, 1) if phase_row else 0
+
+    # Blunder rate
+    blunder_q = select(
+        func.sum(GameAnalysis.blunders_count).label("blunders"),
+        func.count().label("games"),
+    ).join(Game, Game.id == GameAnalysis.game_id).where(Game.user_id == user.id)
+    brow = (await db.execute(blunder_q)).one_or_none()
+    blunder_rate = round((brow.blunders or 0) / max(brow.games, 1), 1) if brow else 0
+
+    # Count unsolved puzzles
+    from sqlalchemy import distinct
+    from app.db.models import PuzzleAttempt
+
+    total_puzzles_q = select(func.count()).select_from(Puzzle).where(Puzzle.source_user_id == user.id)
+    total_puzzles = (await db.execute(total_puzzles_q)).scalar() or 0
+
+    # Build priority list of areas
+    areas = [
+        {"area": "opening", "cpl": opening_cpl, "label": "Opening Prep"},
+        {"area": "middlegame", "cpl": middlegame_cpl, "label": "Middlegame Tactics"},
+        {"area": "endgame", "cpl": endgame_cpl, "label": "Endgame Technique"},
+    ]
+    areas.sort(key=lambda a: a["cpl"], reverse=True)  # worst first
+
+    # Activity templates
+    ACTIVITIES = {
+        "opening": [
+            {"type": "review", "title": "Review your worst opening", "description": "Check your opening repertoire stats and study the line with the highest CPL.", "duration": 15},
+            {"type": "puzzles", "title": "Opening puzzles", "description": "Solve puzzles from your opening mistakes.", "duration": 10},
+        ],
+        "middlegame": [
+            {"type": "puzzles", "title": "Tactical training", "description": "Solve middlegame puzzles to sharpen calculation.", "duration": 15},
+            {"type": "review", "title": "Analyze a loss", "description": "Review a recent loss focusing on the middlegame turning point.", "duration": 10},
+        ],
+        "endgame": [
+            {"type": "puzzles", "title": "Endgame drills", "description": "Practice converting advantages in endgame positions.", "duration": 15},
+            {"type": "review", "title": "Endgame review", "description": "Study a game where you lost the endgame despite a good position.", "duration": 10},
+        ],
+        "blunders": [
+            {"type": "puzzles", "title": "Blunder prevention", "description": "Practice recognizing blunder-prone positions.", "duration": 10},
+            {"type": "warmup", "title": "Daily warmup", "description": "Complete your 5-puzzle daily warmup.", "duration": 5},
+        ],
+        "intuition": [
+            {"type": "intuition", "title": "Intuition training", "description": "Spot the blunder among 4 moves to sharpen pattern recognition.", "duration": 10},
+        ],
+        "advantage": [
+            {"type": "advantage", "title": "Capitalize advantages", "description": "Practice converting winning positions that you've failed to win in the past.", "duration": 15},
+        ],
+    }
+
+    # Build 7-day plan
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+    days = []
+
+    day_themes = [
+        # Mon: worst area, Tue: 2nd worst, Wed: blunders, Thu: worst again,
+        # Fri: intuition + advantage, Sat: 3rd area, Sun: review + warmup
+        areas[0]["area"],
+        areas[1]["area"] if len(areas) > 1 else areas[0]["area"],
+        "blunders",
+        areas[0]["area"],
+        "mixed",
+        areas[2]["area"] if len(areas) > 2 else areas[0]["area"],
+        "review",
+    ]
+
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    for i, theme in enumerate(day_themes):
+        day_date = week_start + timedelta(days=i)
+        is_past = day_date < today
+        is_today = day_date == today
+
+        if theme == "mixed":
+            activities = ACTIVITIES["intuition"] + ACTIVITIES["advantage"]
+            label = "Pattern Recognition"
+        elif theme == "review":
+            activities = ACTIVITIES["blunders"] + [
+                {"type": "review", "title": "Weekly review", "description": "Look at your progress charts and identify trends.", "duration": 10},
+            ]
+            label = "Review & Reflect"
+        else:
+            activities = ACTIVITIES.get(theme, ACTIVITIES["middlegame"])
+            label = next((a["label"] for a in areas if a["area"] == theme), theme.title())
+
+        total_duration = sum(a["duration"] for a in activities)
+
+        days.append({
+            "day": day_names[i],
+            "date": day_date.isoformat(),
+            "focus": label,
+            "theme": theme,
+            "is_past": is_past,
+            "is_today": is_today,
+            "total_duration_min": total_duration,
+            "activities": activities,
+        })
+
+    return {
+        "week_start": week_start.isoformat(),
+        "days": days,
+        "stats": {
+            "opening_cpl": opening_cpl,
+            "middlegame_cpl": middlegame_cpl,
+            "endgame_cpl": endgame_cpl,
+            "blunder_rate": blunder_rate,
+            "total_puzzles": total_puzzles,
         },
     }

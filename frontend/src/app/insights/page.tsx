@@ -24,7 +24,22 @@ import {
   GraduationCap,
   ThumbsUp,
   ThumbsDown,
+  Activity,
 } from "lucide-react";
+import {
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts";
 import {
   insightsAPI,
   patternsAPI,
@@ -37,6 +52,8 @@ import {
   type AdvancedAnalytics,
   type PiecePerformance,
   type RecurringPattern,
+  type SkillProfile,
+  type ProgressDataPoint,
 } from "@/lib/api";
 import {
   Card,
@@ -63,6 +80,8 @@ export default function InsightsPage() {
   const [advancedLoading, setAdvancedLoading] = useState(false);
   const [advancedFilter, setAdvancedFilter] = useState<string>("all");
   const [recurringPatterns, setRecurringPatterns] = useState<RecurringPattern[]>([]);
+  const [skillProfile, setSkillProfile] = useState<SkillProfile | null>(null);
+  const [progressData, setProgressData] = useState<ProgressDataPoint[]>([]);
 
   useEffect(() => {
     if (!session) return;
@@ -70,7 +89,7 @@ export default function InsightsPage() {
     async function load() {
       setLoading(true);
       try {
-        const [ov, ph, wk, tm, st, op, pat] = await Promise.all([
+        const [ov, ph, wk, tm, st, op, pat, sp, prog] = await Promise.all([
           insightsAPI.overview(),
           insightsAPI.phaseBreakdown(),
           insightsAPI.weaknesses(),
@@ -78,6 +97,8 @@ export default function InsightsPage() {
           insightsAPI.streaks().catch(() => null),
           insightsAPI.openings().catch(() => []),
           patternsAPI.recurring().catch(() => ({ patterns: [] })),
+          insightsAPI.skillProfile().catch(() => null),
+          insightsAPI.progress(6).catch(() => null),
         ]);
         setOverview(ov);
         setPhases(ph);
@@ -86,6 +107,8 @@ export default function InsightsPage() {
         setStreakData(st);
         setOpenings(op);
         setRecurringPatterns(pat.patterns ?? []);
+        if (sp) setSkillProfile(sp);
+        if (prog) setProgressData(prog.data ?? []);
       } catch {
         // API may not be connected yet
       } finally {
@@ -208,6 +231,160 @@ export default function InsightsPage() {
               />
             )}
           </div>
+
+          {/* ─── Skill Radar Chart ─── */}
+          {skillProfile?.has_data && skillProfile.axes && (
+            <Card>
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Target className="h-5 w-5 text-brand-400" />
+                    <h3 className="font-semibold">Skill Profile</h3>
+                  </div>
+                  <span className="text-sm text-gray-500">
+                    Overall: <span className="text-brand-400 font-bold">{skillProfile.overall_score}</span>/100
+                  </span>
+                </div>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart data={skillProfile.axes} cx="50%" cy="50%" outerRadius="75%">
+                      <PolarGrid stroke="#333" />
+                      <PolarAngleAxis
+                        dataKey="axis"
+                        tick={{ fill: "#9ca3af", fontSize: 12, fontWeight: 500 }}
+                      />
+                      <PolarRadiusAxis
+                        angle={30}
+                        domain={[0, 100]}
+                        tick={{ fill: "#666", fontSize: 10 }}
+                        axisLine={false}
+                      />
+                      <Radar
+                        name="Skill"
+                        dataKey="score"
+                        stroke="#16a34a"
+                        fill="#16a34a"
+                        fillOpacity={0.2}
+                        strokeWidth={2}
+                        dot={{ r: 4, fill: "#16a34a" }}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* ─── Progress Charts ─── */}
+          {progressData.length >= 2 && (
+            <Card>
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-6">
+                  <Activity className="h-5 w-5 text-brand-400" />
+                  <h3 className="font-semibold">Progress Over Time</h3>
+                </div>
+
+                {/* Accuracy trend */}
+                <div className="mb-6">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Accuracy</p>
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={progressData}>
+                        <defs>
+                          <linearGradient id="accGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#16a34a" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                        <XAxis
+                          dataKey="period"
+                          tick={{ fill: "#9ca3af", fontSize: 11 }}
+                          axisLine={{ stroke: "#444" }}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          domain={[0, 100]}
+                          tick={{ fill: "#9ca3af", fontSize: 11 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={35}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#1a1a1a",
+                            border: "1px solid #444",
+                            borderRadius: "8px",
+                            fontSize: 12,
+                          }}
+                          labelStyle={{ color: "#9ca3af" }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="accuracy"
+                          stroke="#16a34a"
+                          fill="url(#accGrad)"
+                          strokeWidth={2}
+                          dot={{ r: 3, fill: "#16a34a" }}
+                          name="Accuracy %"
+                          connectNulls
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Blunder rate trend */}
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Blunder Rate (per 100 moves)</p>
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={progressData}>
+                        <defs>
+                          <linearGradient id="blunderGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                        <XAxis
+                          dataKey="period"
+                          tick={{ fill: "#9ca3af", fontSize: 11 }}
+                          axisLine={{ stroke: "#444" }}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tick={{ fill: "#9ca3af", fontSize: 11 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={35}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#1a1a1a",
+                            border: "1px solid #444",
+                            borderRadius: "8px",
+                            fontSize: 12,
+                          }}
+                          labelStyle={{ color: "#9ca3af" }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="blunder_rate"
+                          stroke="#ef4444"
+                          fill="url(#blunderGrad)"
+                          strokeWidth={2}
+                          dot={{ r: 3, fill: "#ef4444" }}
+                          name="Blunders/100"
+                          connectNulls
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* ─── Collapsible sections below the fold ─── */}
 

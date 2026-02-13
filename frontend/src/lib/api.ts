@@ -199,6 +199,152 @@ export interface Weakness {
   action: string;
 }
 
+export interface SkillAxis {
+  axis: string;
+  score: number;
+}
+
+export interface SkillProfile {
+  has_data: boolean;
+  message?: string;
+  analyzed_games?: number;
+  axes?: SkillAxis[];
+  overall_score?: number;
+}
+
+export interface ProgressDataPoint {
+  period: string;
+  games: number;
+  avg_cpl: number | null;
+  accuracy: number | null;
+  blunder_rate: number | null;
+}
+
+export interface ProgressResponse {
+  months: number;
+  data: ProgressDataPoint[];
+}
+
+export interface PuzzleHistoryAttempt {
+  id: number;
+  puzzle_id: number;
+  correct: boolean;
+  time_taken: number | null;
+  attempted_at: string | null;
+  puzzle: {
+    fen: string;
+    difficulty: string;
+    phase: string;
+    puzzle_type: string;
+  } | null;
+}
+
+export interface PuzzleHistoryResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  stats: {
+    total_attempts: number;
+    correct_count: number;
+    accuracy: number;
+    avg_time: number | null;
+    best_streak: number;
+  };
+  attempts: PuzzleHistoryAttempt[];
+}
+
+export interface DailyWarmupPuzzle {
+  id: number;
+  fen: string;
+  side_to_move: string;
+  best_move_san: string;
+  best_move_uci: string | null;
+  eval_loss_cp: number;
+  phase: string;
+  puzzle_type: string;
+  difficulty: string;
+  themes: string[];
+  source: "review" | "weakness" | "random";
+}
+
+export interface DailyWarmupResponse {
+  completed_today: boolean;
+  total_puzzles: number;
+  puzzles: DailyWarmupPuzzle[];
+}
+
+export interface AdvantagePosition {
+  id: number;
+  game_id: number;
+  fen: string;
+  side_to_move: string;
+  best_move_san: string;
+  best_move_uci: string | null;
+  played_move_san: string;
+  cp_loss: number;
+  eval_before: number;
+  phase: string;
+  move_number: number;
+  advantage_cp: number;
+}
+
+export interface AdvantagePositionsResponse {
+  positions: AdvantagePosition[];
+  total: number;
+}
+
+export interface IntuitionOption {
+  move_number: number;
+  san: string;
+  fen_before: string;
+  is_blunder: boolean;
+  cp_loss: number;
+  phase: string;
+}
+
+export interface IntuitionChallenge {
+  game_id: number;
+  blunder_move_number: number;
+  color: string;
+  options: IntuitionOption[];
+}
+
+export interface IntuitionChallengeResponse {
+  challenges: IntuitionChallenge[];
+  total: number;
+}
+
+export interface StudyPlanActivity {
+  type: string;
+  title: string;
+  description: string;
+  duration: number;
+}
+
+export interface StudyPlanDay {
+  day: string;
+  date: string;
+  focus: string;
+  theme: string;
+  is_past: boolean;
+  is_today: boolean;
+  total_duration_min: number;
+  activities: StudyPlanActivity[];
+}
+
+export interface StudyPlanResponse {
+  week_start: string;
+  days: StudyPlanDay[];
+  message?: string;
+  stats?: {
+    opening_cpl: number;
+    middlegame_cpl: number;
+    endgame_cpl: number;
+    blunder_rate: number;
+    total_puzzles: number;
+  };
+}
+
 export interface TimeAnalysis {
   time_pressure_moves: number;
   time_pressure_blunders: number;
@@ -500,6 +646,29 @@ export const puzzlesAPI = {
       body: JSON.stringify({ correct, time_taken: timeTaken }),
     });
   },
+
+  history(params?: { limit?: number; offset?: number }): Promise<PuzzleHistoryResponse> {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    return fetchAPI<PuzzleHistoryResponse>(`/puzzles/history?${q}`);
+  },
+
+  dailyWarmup(): Promise<DailyWarmupResponse> {
+    return fetchAPI<DailyWarmupResponse>("/puzzles/daily-warmup");
+  },
+
+  completeDailyWarmup(): Promise<{ status: string; completed_at: string }> {
+    return fetchAPI("/puzzles/daily-warmup/complete", { method: "POST" });
+  },
+
+  advantagePositions(limit = 10): Promise<AdvantagePositionsResponse> {
+    return fetchAPI<AdvantagePositionsResponse>(`/puzzles/advantage-positions?limit=${limit}`);
+  },
+
+  intuitionChallenge(count = 5): Promise<IntuitionChallengeResponse> {
+    return fetchAPI<IntuitionChallengeResponse>(`/puzzles/intuition-challenge?count=${count}`);
+  },
 };
 
 // ─── Insights ───────────────────────────────────────────
@@ -548,6 +717,19 @@ export const insightsAPI = {
   advancedAnalytics(timeControl?: string): Promise<AdvancedAnalytics> {
     const q = timeControl && timeControl !== "all" ? `?time_control=${timeControl}` : "";
     return fetchAPI<AdvancedAnalytics>(`/insights/advanced-analytics${q}`);
+  },
+
+  skillProfile(): Promise<SkillProfile> {
+    return fetchAPI<SkillProfile>("/insights/skill-profile");
+  },
+
+  progress(months?: number): Promise<ProgressResponse> {
+    const q = months ? `?months=${months}` : "";
+    return fetchAPI<ProgressResponse>(`/insights/progress${q}`);
+  },
+
+  studyPlan(): Promise<StudyPlanResponse> {
+    return fetchAPI<StudyPlanResponse>("/insights/study-plan");
   },
 };
 

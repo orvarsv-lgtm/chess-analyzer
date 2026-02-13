@@ -3,6 +3,7 @@
 import { type CSSProperties, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import {
@@ -19,8 +20,14 @@ import {
   Globe,
   User,
   Clock,
+  History,
+  Sunrise,
+  Trophy,
+  Shield,
+  Eye,
 } from "lucide-react";
-import { puzzlesAPI, insightsAPI, type PuzzleItem, type Weakness } from "@/lib/api";
+import { puzzlesAPI, insightsAPI, type PuzzleItem, type Weakness, type PuzzleHistoryResponse, type DailyWarmupResponse, type AdvantagePositionsResponse, type IntuitionChallengeResponse } from "@/lib/api";
+import { playMove, playCorrect, playIncorrect, playStreak, playWarmupComplete } from "@/lib/sounds";
 import {
   Button,
   Badge,
@@ -30,7 +37,7 @@ import {
   Spinner,
 } from "@/components/ui";
 
-type TrainView = "hub" | "session";
+type TrainView = "hub" | "session" | "intuition";
 type PuzzleState = "solving" | "correct" | "incorrect";
 type PuzzleSource = "my" | "global" | "game";
 
@@ -63,6 +70,21 @@ function TrainPageInner() {
   // ─── Hub data ────────────────────────────────────────
   const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
   const [hubLoading, setHubLoading] = useState(true);
+  const [hubTab, setHubTab] = useState<"train" | "history">("train");
+  const [history, setHistory] = useState<PuzzleHistoryResponse | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // ─── Daily Warmup ────────────────────────────────────
+  const [warmup, setWarmup] = useState<DailyWarmupResponse | null>(null);
+  const [warmupLoading, setWarmupLoading] = useState(false);
+  const [isWarmupSession, setIsWarmupSession] = useState(false);
+  const [advantagePositions, setAdvantagePositions] = useState<AdvantagePositionsResponse | null>(null);
+
+  // ─── Intuition Trainer ───────────────────────────────
+  const [intuitionChallenges, setIntuitionChallenges] = useState<IntuitionChallengeResponse | null>(null);
+  const [intuitionIdx, setIntuitionIdx] = useState(0);
+  const [intuitionPicked, setIntuitionPicked] = useState<number | null>(null);
+  const [intuitionScore, setIntuitionScore] = useState(0);
 
   // ─── Puzzle queue state ──────────────────────────────
   const [queue, setQueue] = useState<PuzzleItem[]>([]);
@@ -139,12 +161,30 @@ function TrainPageInner() {
   useEffect(() => {
     if (!session) return;
     setHubLoading(true);
-    insightsAPI
-      .weaknesses()
-      .then((w) => setWeaknesses(w.weaknesses ?? []))
-      .catch(() => {})
-      .finally(() => setHubLoading(false));
+    Promise.all([
+      insightsAPI
+        .weaknesses()
+        .then((w) => setWeaknesses(w.weaknesses ?? []))
+        .catch(() => {}),
+      puzzlesAPI
+        .dailyWarmup()
+        .then((w) => setWarmup(w))
+        .catch(() => {}),
+      puzzlesAPI
+        .advantagePositions(10)
+        .then((a) => setAdvantagePositions(a))
+        .catch(() => {}),
+    ]).finally(() => setHubLoading(false));
   }, [session]);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const data = await puzzlesAPI.history({ limit: 50 });
+      setHistory(data);
+    } catch { /* */ }
+    finally { setHistoryLoading(false); }
+  }, []);
 
   // ─── Load puzzles ────────────────────────────────────
   const loadPuzzles = useCallback(async (source?: PuzzleSource) => {
@@ -202,6 +242,73 @@ function TrainPageInner() {
     setSolvedToday(0);
     setCorrectToday(0);
     setStreak(0);
+    setIsWarmupSession(false);
+  }
+
+  function startWarmup() {
+    if (!warmup || warmup.puzzles.length === 0) return;
+    // Convert warmup puzzles to PuzzleItem format
+    const items: PuzzleItem[] = warmup.puzzles.map((p) => ({
+      id: p.id,
+      puzzle_key: `warmup-${p.id}`,
+      fen: p.fen,
+      side_to_move: p.side_to_move,
+      best_move_san: p.best_move_san,
+      best_move_uci: p.best_move_uci ?? undefined,
+      eval_loss_cp: p.eval_loss_cp,
+      phase: p.phase,
+      puzzle_type: p.puzzle_type,
+      difficulty: p.difficulty,
+      explanation: null,
+      themes: p.themes,
+    }));
+    setQueue(items);
+    setCurrentIdx(0);
+    setView("session");
+    setSolvedToday(0);
+    setCorrectToday(0);
+    setStreak(0);
+    setIsTimed(false);
+    setIsWarmupSession(true);
+  }
+
+  function startAdvantageSession() {
+    if (!advantagePositions || advantagePositions.positions.length === 0) return;
+    const items: PuzzleItem[] = advantagePositions.positions.map((p) => ({
+      id: p.id,
+      puzzle_key: `advantage-${p.id}`,
+      fen: p.fen,
+      side_to_move: p.side_to_move,
+      best_move_san: p.best_move_san,
+      best_move_uci: p.best_move_uci ?? undefined,
+      eval_loss_cp: p.cp_loss,
+      phase: p.phase,
+      puzzle_type: "advantage",
+      difficulty: p.advantage_cp > 500 ? "gold" : "silver",
+      explanation: null,
+      themes: ["advantage_capitalization"],
+    }));
+    setQueue(items);
+    setCurrentIdx(0);
+    setView("session");
+    setSolvedToday(0);
+    setCorrectToday(0);
+    setStreak(0);
+    setIsTimed(false);
+    setIsWarmupSession(false);
+  }
+
+  async function startIntuition() {
+    setView("intuition");
+    setIntuitionIdx(0);
+    setIntuitionPicked(null);
+    setIntuitionScore(0);
+    try {
+      const data = await puzzlesAPI.intuitionChallenge(5);
+      setIntuitionChallenges(data);
+    } catch {
+      setIntuitionChallenges({ challenges: [], total: 0 });
+    }
   }
 
   // ─── Handle move ─────────────────────────────────────
@@ -219,13 +326,19 @@ function TrainPageInner() {
     setBoardFen(chessRef.current.fen());
     setSelectedSquare(null);
     setLegalMoves([]);
+    playMove();
 
     const bestMoveSan = currentPuzzle.best_move_san;
     const isCorrect = move.san === bestMoveSan;
 
     if (isCorrect) {
       setPuzzleState("correct");
-      setStreak((s) => s + 1);
+      setStreak((s) => {
+        const newStreak = s + 1;
+        if (newStreak > 0 && newStreak % 5 === 0) playStreak();
+        else playCorrect();
+        return newStreak;
+      });
       setSolvedToday((s) => s + 1);
       setCorrectToday((s) => s + 1);
       reportAttempt(true);
@@ -233,6 +346,7 @@ function TrainPageInner() {
       setPuzzleState("incorrect");
       setStreak(0);
       setSolvedToday((s) => s + 1);
+      playIncorrect();
       reportAttempt(false);
     }
 
@@ -365,6 +479,13 @@ function TrainPageInner() {
   function nextPuzzle() {
     if (currentIdx < queue.length - 1) {
       setCurrentIdx((i) => i + 1);
+    } else if (isWarmupSession) {
+      // Warmup finished — mark complete and go back to hub
+      puzzlesAPI.completeDailyWarmup().catch(() => {});
+      setWarmup((prev) => prev ? { ...prev, completed_today: true } : prev);
+      setIsWarmupSession(false);
+      playWarmupComplete();
+      setView("hub");
     } else {
       loadPuzzles();
     }
@@ -405,6 +526,144 @@ function TrainPageInner() {
             Solve puzzles to improve your game.
           </p>
         </div>
+
+        {/* Top tabs: Train / History */}
+        <div className="flex rounded-lg bg-surface-2 p-1">
+          <button
+            onClick={() => setHubTab("train")}
+            className={`flex-1 py-2.5 px-3 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+              hubTab === "train" ? "bg-brand-600 text-white" : "text-gray-400 hover:text-white"
+            }`}
+          >
+            <Dumbbell className="h-4 w-4" /> Train
+          </button>
+          <button
+            onClick={() => { setHubTab("history"); if (!history) loadHistory(); }}
+            className={`flex-1 py-2.5 px-3 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+              hubTab === "history" ? "bg-brand-600 text-white" : "text-gray-400 hover:text-white"
+            }`}
+          >
+            <History className="h-4 w-4" /> History
+          </button>
+        </div>
+
+        {/* ─── History Tab ─── */}
+        {hubTab === "history" && (
+          <div className="space-y-6">
+            {historyLoading ? (
+              <div className="flex justify-center py-12">
+                <Spinner className="h-8 w-8 text-brand-500" />
+              </div>
+            ) : !history || history.stats.total_attempts === 0 ? (
+              <Card>
+                <EmptyState
+                  icon={<History className="h-12 w-12" />}
+                  title="No attempts yet"
+                  description="Start solving puzzles and your history will appear here."
+                />
+              </Card>
+            ) : (
+              <>
+                {/* Stats summary */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <Card className="p-4 text-center">
+                    <p className="text-xs text-gray-500 uppercase">Solved</p>
+                    <p className="text-2xl font-bold mt-1">{history.stats.total_attempts}</p>
+                  </Card>
+                  <Card className="p-4 text-center">
+                    <p className="text-xs text-gray-500 uppercase">Accuracy</p>
+                    <p className="text-2xl font-bold mt-1 text-brand-400">{history.stats.accuracy}%</p>
+                  </Card>
+                  <Card className="p-4 text-center">
+                    <p className="text-xs text-gray-500 uppercase">Avg Time</p>
+                    <p className="text-2xl font-bold mt-1">{history.stats.avg_time ? `${history.stats.avg_time}s` : "—"}</p>
+                  </Card>
+                  <Card className="p-4 text-center">
+                    <p className="text-xs text-gray-500 uppercase">Best Streak</p>
+                    <p className="text-2xl font-bold mt-1 text-orange-400">{history.stats.best_streak}</p>
+                  </Card>
+                </div>
+
+                {/* Attempt list */}
+                <Card>
+                  <div className="p-5">
+                    <h3 className="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-4">Recent Attempts</h3>
+                    <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                      {history.attempts.map((a) => (
+                        <div
+                          key={a.id}
+                          className={`flex items-center justify-between px-4 py-2.5 rounded-lg text-sm ${
+                            a.correct ? "bg-green-900/10 border border-green-800/20" : "bg-red-900/10 border border-red-800/20"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {a.correct ? (
+                              <CheckCircle className="h-4 w-4 text-green-400" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-red-400" />
+                            )}
+                            <div>
+                              <span className="font-medium capitalize">
+                                {a.puzzle?.puzzle_type ?? "Puzzle"} • {a.puzzle?.phase ?? ""}
+                              </span>
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <Badge variant={
+                                  a.puzzle?.difficulty === "platinum" || a.puzzle?.difficulty === "gold" ? "warning" :
+                                  a.puzzle?.difficulty === "silver" ? "default" : "success"
+                                }>
+                                  {a.puzzle?.difficulty}
+                                </Badge>
+                                {a.time_taken && <span>{a.time_taken}s</span>}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-xs text-gray-500">
+                            {a.attempted_at ? new Date(a.attempted_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ─── Train Tab ─── */}
+        {hubTab === "train" && (
+          <>
+
+        {/* ─── Daily Warmup ─── */}
+        {warmup && !warmup.completed_today && warmup.total_puzzles > 0 && (
+          <Card className="p-5 border-amber-500/30 bg-gradient-to-r from-amber-900/10 to-orange-900/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                  <Sunrise className="h-6 w-6 text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold">Daily Warmup</h2>
+                  <p className="text-sm text-gray-400">
+                    {warmup.total_puzzles} puzzles • Review + Weak spots + Fresh
+                  </p>
+                </div>
+              </div>
+              <Button onClick={startWarmup} size="lg" className="bg-amber-600 hover:bg-amber-500 border-0">
+                <Sunrise className="h-5 w-5" />
+                Start
+              </Button>
+            </div>
+          </Card>
+        )}
+        {warmup?.completed_today && (
+          <Card className="p-4 border-green-800/30 bg-green-900/10">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="h-5 w-5 text-green-400" />
+              <span className="text-sm text-green-300 font-medium">Daily Warmup Complete ✓</span>
+            </div>
+          </Card>
+        )}
 
         {/* Puzzle source tabs */}
         <div className="flex rounded-lg bg-surface-2 p-1">
@@ -517,6 +776,67 @@ function TrainPageInner() {
                     </div>
                   </div>
                 )}
+
+                {/* ─── Training Modes ─── */}
+                <div>
+                  <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+                    Training Modes
+                  </h2>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {/* Advantage Capitalization */}
+                    {advantagePositions && advantagePositions.total > 0 && (
+                      <Card
+                        className="p-4 cursor-pointer transition-colors hover:border-amber-500/50 border-amber-600/20"
+                        onClick={startAdvantageSession}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <Trophy className="h-4 w-4 text-amber-400" />
+                          <span className="font-semibold text-sm">Capitalize Advantages</span>
+                        </div>
+                        <p className="text-xs text-gray-500 line-clamp-2">
+                          {advantagePositions.total} positions where you were winning but didn&apos;t convert.
+                        </p>
+                        <p className="text-xs mt-2 text-amber-400 flex items-center gap-1">
+                          Practice <ArrowRight className="h-3 w-3" />
+                        </p>
+                      </Card>
+                    )}
+
+                    {/* Blunder Preventer */}
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-red-500/50 border-red-600/20"
+                      onClick={() => startSession("my")}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Shield className="h-4 w-4 text-red-400" />
+                        <span className="font-semibold text-sm">Blunder Preventer</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Can you find the safe move? Avoid the blunders from your games.
+                      </p>
+                      <p className="text-xs mt-2 text-red-400 flex items-center gap-1">
+                        Practice <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+
+                    {/* Intuition Trainer */}
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-purple-500/50 border-purple-600/20"
+                      onClick={startIntuition}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Eye className="h-4 w-4 text-purple-400" />
+                        <span className="font-semibold text-sm">Intuition Trainer</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Spot the blunder! Given 4 moves, can you identify which one was the mistake?
+                      </p>
+                      <p className="text-xs mt-2 text-purple-400 flex items-center gap-1">
+                        Play <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                  </div>
+                </div>
               </>
             )}
 
@@ -533,6 +853,120 @@ function TrainPageInner() {
                   Start Global Session
                 </Button>
               </Card>
+            )}
+          </>
+        )}
+
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Intuition Trainer view ──────────────────────────
+  if (view === "intuition") {
+    const challenge = intuitionChallenges?.challenges[intuitionIdx];
+    const isLast = intuitionIdx >= (intuitionChallenges?.total ?? 0) - 1;
+
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Eye className="h-6 w-6 text-purple-400" /> Intuition Trainer
+            </h1>
+            <p className="text-gray-500 mt-1">
+              Spot the blunder among these moves
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Badge variant="default">
+              Score: {intuitionScore}/{intuitionIdx + (intuitionPicked !== null ? 1 : 0)}
+            </Badge>
+            <Button variant="ghost" size="sm" onClick={() => setView("hub")}>
+              ← Back
+            </Button>
+          </div>
+        </div>
+
+        {!intuitionChallenges ? (
+          <div className="flex justify-center py-12">
+            <Spinner className="h-8 w-8 text-purple-500" />
+          </div>
+        ) : !challenge ? (
+          <Card className="p-8 text-center">
+            <Eye className="h-12 w-12 text-purple-400 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold mb-2">
+              {intuitionChallenges.total === 0
+                ? "No challenges available"
+                : `Session Complete! ${intuitionScore}/${intuitionChallenges.total} correct`}
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              {intuitionChallenges.total === 0
+                ? "Analyze more games to generate intuition challenges."
+                : "Great work training your chess intuition!"}
+            </p>
+            <Button onClick={() => setView("hub")}>Back to Hub</Button>
+          </Card>
+        ) : (
+          <>
+            <p className="text-sm text-gray-400 text-center">
+              Challenge {intuitionIdx + 1} of {intuitionChallenges.total} — Which move is the blunder?
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              {challenge.options.map((opt, i) => {
+                const picked = intuitionPicked !== null;
+                const isThis = intuitionPicked === i;
+                const isBlunder = opt.is_blunder;
+
+                let borderClass = "border-surface-3 hover:border-purple-500/50";
+                if (picked) {
+                  if (isBlunder) borderClass = "border-green-500 bg-green-900/10";
+                  else if (isThis) borderClass = "border-red-500 bg-red-900/10";
+                  else borderClass = "border-surface-3 opacity-60";
+                }
+
+                return (
+                  <Card
+                    key={i}
+                    className={`p-5 cursor-pointer transition-all ${borderClass} ${!picked ? "hover:scale-[1.02]" : ""}`}
+                    onClick={() => {
+                      if (picked) return;
+                      setIntuitionPicked(i);
+                      if (isBlunder) setIntuitionScore((s) => s + 1);
+                    }}
+                  >
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500 mb-1">Move {opt.move_number}</p>
+                      <p className="text-2xl font-bold font-mono">{opt.san}</p>
+                      <Badge className="mt-2" variant="default">{opt.phase}</Badge>
+                      {picked && isBlunder && (
+                        <p className="text-xs text-red-400 mt-2">Blunder! (−{opt.cp_loss} cp)</p>
+                      )}
+                      {picked && isThis && !isBlunder && (
+                        <p className="text-xs text-gray-500 mt-2">Not a blunder (−{opt.cp_loss} cp)</p>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+            {intuitionPicked !== null && (
+              <div className="flex justify-center">
+                <Button
+                  onClick={() => {
+                    if (isLast) {
+                      setIntuitionIdx((i) => i + 1); // triggers "complete" screen
+                    } else {
+                      setIntuitionIdx((i) => i + 1);
+                      setIntuitionPicked(null);
+                    }
+                  }}
+                  size="lg"
+                >
+                  {isLast ? "See Results" : "Next Challenge"} <ArrowRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
             )}
           </>
         )}
@@ -624,9 +1058,19 @@ function TrainPageInner() {
               />
 
               {/* Feedback overlay */}
+              <AnimatePresence>
               {puzzleState !== "solving" && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg">
-                  <div
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.2 }}
+                  className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg"
+                >
+                  <motion.div
+                    initial={{ y: 20 }}
+                    animate={{ y: 0 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
                     className={`flex flex-col items-center gap-3 px-8 py-6 rounded-xl ${
                       puzzleState === "correct"
                         ? "bg-green-900/90"
@@ -672,9 +1116,10 @@ function TrainPageInner() {
                         <SkipForward className="h-4 w-4" /> Next
                       </Button>
                     </div>
-                  </div>
-                </div>
+                  </motion.div>
+                </motion.div>
               )}
+              </AnimatePresence>
             </div>
 
             {/* Prompt */}
@@ -739,11 +1184,18 @@ function TrainPageInner() {
                 <div className="space-y-3 text-sm">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Flame
-                        className={`h-4 w-4 ${
-                          streak > 0 ? "text-orange-400" : "text-gray-600"
-                        }`}
-                      />
+                      <motion.div
+                        key={streak}
+                        initial={streak > 0 ? { scale: 1.4, rotate: -10 } : {}}
+                        animate={{ scale: 1, rotate: 0 }}
+                        transition={{ type: "spring", stiffness: 400, damping: 15 }}
+                      >
+                        <Flame
+                          className={`h-4 w-4 ${
+                            streak > 0 ? "text-orange-400" : "text-gray-600"
+                          }`}
+                        />
+                      </motion.div>
                       <span className="text-gray-500">Streak</span>
                     </div>
                     <span

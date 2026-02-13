@@ -38,6 +38,8 @@ from app.analysis_core import (
     generate_puzzle_data,
     extract_opening_name,
     avg,
+    parse_clock_comment,
+    classify_blunder_subtype,
 )
 
 router = APIRouter()
@@ -70,9 +72,26 @@ class MoveEvalOut(BaseModel):
     win_prob_before: Optional[float] = None
     win_prob_after: Optional[float] = None
     accuracy: Optional[float] = None
+    time_remaining: Optional[float] = None
+    blunder_subtype: Optional[str] = None
 
 
 class PuzzleCandidateOut(BaseModel):
+    puzzle_key: str
+    fen: str
+    side_to_move: str
+    best_move_san: str
+    best_move_uci: Optional[str] = None
+    played_move_san: str
+    eval_loss_cp: int
+    phase: str
+    puzzle_type: str
+    difficulty: str
+    move_number: int
+    themes: list[str]
+
+
+class ClaimPuzzleCandidateIn(BaseModel):
     puzzle_key: str
     fen: str
     side_to_move: str
@@ -109,6 +128,8 @@ class GameAnalysisOut(BaseModel):
     great_moves: int = 0
     brilliant_moves: int = 0
     missed_wins: int = 0
+    average_move_time: Optional[float] = None
+    time_trouble_blunders: int = 0
     moves: list[MoveEvalOut]
     puzzle_candidates: list[PuzzleCandidateOut] = []
 
@@ -138,9 +159,8 @@ class ClaimMoveIn(BaseModel):
     win_prob_before: Optional[float] = None
     win_prob_after: Optional[float] = None
     accuracy: Optional[float] = None
-
-
-class ClaimPuzzleCandidateIn(BaseModel):
+    time_remaining: Optional[float] = None
+    blunder_subtype: Optional[str] = None
     puzzle_key: str
     fen: str
     side_to_move: str
@@ -177,6 +197,8 @@ class ClaimGameIn(BaseModel):
     great_moves: int = 0
     brilliant_moves: int = 0
     missed_wins: int = 0
+    average_move_time: Optional[float] = None
+    time_trouble_blunders: int = 0
     moves: list[ClaimMoveIn]
     puzzle_candidates: list[ClaimPuzzleCandidateIn] = []
 
@@ -416,6 +438,8 @@ async def claim_anonymous_results(
             great_moves_count=g.great_moves,
             brilliant_moves_count=g.brilliant_moves,
             missed_wins_count=g.missed_wins,
+            average_move_time=g.average_move_time,
+            time_trouble_blunders=g.time_trouble_blunders,
             analysis_depth=12,
         )
         db.add(analysis_row)
@@ -438,6 +462,8 @@ async def claim_anonymous_results(
                 win_prob_before=m.win_prob_before,
                 win_prob_after=m.win_prob_after,
                 accuracy=m.accuracy,
+                time_remaining=m.time_remaining,
+                blunder_subtype=m.blunder_subtype,
             )
             db.add(move_row)
 
@@ -694,12 +720,21 @@ async def _analyze_game(
     castled_black = False
     puzzle_candidates: list[dict] = []
 
-    for move in pgn_game.mainline_moves():
+    prev_clock: float | None = None
+    move_times: list[float] = []
+    time_trouble_blunders_count = 0
+
+    for node in pgn_game.mainline():
+        move = node.move
         move_num += 1
         mv_color = "white" if board.turn == chess.WHITE else "black"
         san = board.san(move)
         fen_before = board.fen()
         is_player_move = (mv_color == color)
+
+        # Parse clock annotation
+        clock_remaining = parse_clock_comment(node.comment) if node.comment else None
+        time_remaining_val = clock_remaining
 
         # Track castling
         if board.is_castling(move):
@@ -811,6 +846,7 @@ async def _analyze_game(
                 quality = "Blunder"
 
         # Aggregate metrics for player's moves
+        blunder_sub = None
         if is_player_move:
             player_move_count += 1
             player_accuracies.append(mv_accuracy)
@@ -831,6 +867,24 @@ async def _analyze_game(
                 mistakes += 1
             elif quality == "Blunder":
                 blunders += 1
+
+            # ── Blunder subtype classification ──
+            blunder_sub = None
+            if quality == "Blunder":
+                board.pop()  # undo for classification context
+                blunder_sub = classify_blunder_subtype(board, move, best_move_obj, phase)
+                board.push(move)  # re-push
+                if time_remaining_val is not None and time_remaining_val < 30:
+                    time_trouble_blunders_count += 1
+
+            # ── Track move time for player moves ──
+            if clock_remaining is not None and prev_clock is not None:
+                mt = prev_clock - clock_remaining
+                if mt > 0:
+                    move_times.append(mt)
+
+            if is_player_move and clock_remaining is not None:
+                prev_clock = clock_remaining
 
             # Collect puzzle candidates (filtered by quality)
             puzzle_data = generate_puzzle_data(
@@ -863,6 +917,8 @@ async def _analyze_game(
             win_prob_before=round(wp_before, 4),
             win_prob_after=round(wp_after, 4),
             accuracy=round(mv_accuracy, 1),
+            time_remaining=time_remaining_val,
+            blunder_subtype=blunder_sub if is_player_move else None,
         ))
 
         prev_score_cp = score_cp
@@ -895,6 +951,8 @@ async def _analyze_game(
         great_moves=great_moves_count,
         brilliant_moves=brilliant_moves_count,
         missed_wins=missed_wins_count,
+        average_move_time=round(sum(move_times) / len(move_times), 1) if move_times else None,
+        time_trouble_blunders=time_trouble_blunders_count,
         moves=move_evals,
         puzzle_candidates=[PuzzleCandidateOut(**p) for p in puzzle_candidates],
     )

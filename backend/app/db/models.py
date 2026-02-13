@@ -54,6 +54,7 @@ class User(Base):
     lichess_username = Column(String, nullable=True)
     chesscom_username = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    daily_warmup_completed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     accounts = relationship("Account", back_populates="user", cascade="all, delete-orphan")
