@@ -49,21 +49,27 @@ export default function OpeningsPage() {
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
 
-  // ─── Board interaction ─────────────────────────────
-  function onPieceClick(piece: string, square: Square) {
-    // If a piece is already selected, try to move to the clicked square
-    // (capturing the piece on that square)
-    if (selectedSquare && selectedSquare !== square) {
-      const moves = game.moves({ square: selectedSquare, verbose: true });
-      const target = moves.find((m) => m.to === square);
-      if (target) {
-        game.move({ from: selectedSquare, to: square, promotion: "q" });
+  function tryMove(sourceSquare: Square, targetSquare: Square): boolean {
+    try {
+      const result = game.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
+      if (result) {
         setFen(game.fen());
-        setMoveHistory((prev) => [...prev, target.san]);
+        setMoveHistory((prev) => [...prev, result.san]);
         setSelectedSquare(null);
         setLegalMoves([]);
-        return;
+        return true;
       }
+    } catch {
+      // invalid move
+    }
+    return false;
+  }
+
+  // ─── Board interaction ─────────────────────────────
+  function onPieceClick(piece: string, square: Square) {
+    // If a piece is selected, try to move/capture first.
+    if (selectedSquare && selectedSquare !== square) {
+      if (tryMove(selectedSquare, square)) return;
     }
 
     // Select this piece (if it belongs to the side to move)
@@ -78,17 +84,19 @@ export default function OpeningsPage() {
     }
   }
 
-  function onSquareClick(square: Square) {
+  function onSquareClick(square: Square, piece?: string) {
     // If a piece is already selected, try to move to the clicked square
     if (selectedSquare) {
-      const moves = game.moves({ square: selectedSquare, verbose: true });
-      const target = moves.find((m) => m.to === square);
-      if (target) {
-        game.move({ from: selectedSquare, to: square, promotion: "q" });
-        setFen(game.fen());
-        setMoveHistory((prev) => [...prev, target.san]);
-        setSelectedSquare(null);
-        setLegalMoves([]);
+      if (tryMove(selectedSquare, square)) return;
+    }
+
+    // Fallback selection path when square click includes a piece.
+    if (piece) {
+      const p = game.get(square);
+      if (p && p.color === game.turn()) {
+        setSelectedSquare(square);
+        const moves = game.moves({ square, verbose: true });
+        setLegalMoves(moves.map((m) => m.to as Square));
         return;
       }
     }
@@ -96,6 +104,19 @@ export default function OpeningsPage() {
     // Clicked on an empty square or non-target — deselect
     setSelectedSquare(null);
     setLegalMoves([]);
+  }
+
+  function onPieceDragBegin(piece: string, square: Square) {
+    const p = game.get(square);
+    if (p && p.color === game.turn()) {
+      setSelectedSquare(square);
+      const moves = game.moves({ square, verbose: true });
+      setLegalMoves(moves.map((m) => m.to as Square));
+    }
+  }
+
+  function onPieceDrop(sourceSquare: string, targetSquare: string): boolean {
+    return tryMove(sourceSquare as Square, targetSquare as Square);
   }
 
 
@@ -256,9 +277,11 @@ export default function OpeningsPage() {
                 position={fen}
                 boardOrientation={orientation}
                 boardWidth={400}
-                arePiecesDraggable={false}
+                arePiecesDraggable={true}
                 onPieceClick={onPieceClick}
                 onSquareClick={onSquareClick}
+                onPieceDragBegin={onPieceDragBegin}
+                onPieceDrop={onPieceDrop}
                 customSquareStyles={squareStyles}
                 customBoardStyle={{
                   borderRadius: "8px",
