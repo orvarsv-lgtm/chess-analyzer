@@ -7,6 +7,7 @@ import { Chessboard } from "react-chessboard";
 import {
   BookOpen,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Database,
   Globe,
@@ -40,6 +41,7 @@ export default function OpeningsPage() {
   const [game] = useState(() => new Chess());
   const [fen, setFen] = useState(game.fen());
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
+  const [redoStack, setRedoStack] = useState<string[]>([]);
   const [explorer, setExplorer] = useState<ExplorerResponse | null>(null);
   const [personal, setPersonal] = useState<PersonalRepertoireResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -74,6 +76,7 @@ export default function OpeningsPage() {
       if (result) {
         setFen(game.fen());
         setMoveHistory((prev) => [...prev, result.san]);
+        setRedoStack([]);
         setSelectedSquare(null);
         setLegalMoves([]);
         return true;
@@ -223,6 +226,7 @@ export default function OpeningsPage() {
       const newFen = game.fen();
       setFen(newFen);
       setMoveHistory((prev) => [...prev, san]);
+      setRedoStack([]);
       setSelectedSquare(null);
       setLegalMoves([]);
     } catch {
@@ -234,17 +238,46 @@ export default function OpeningsPage() {
     game.reset();
     setFen(game.fen());
     setMoveHistory([]);
+    setRedoStack([]);
     setSelectedSquare(null);
     setLegalMoves([]);
   }
 
   function undoMove() {
+    const lastMove = moveHistory[moveHistory.length - 1];
+    if (!lastMove) return;
     game.undo();
     setFen(game.fen());
     setMoveHistory((prev) => prev.slice(0, -1));
+    setRedoStack((prev) => [lastMove, ...prev]);
     setSelectedSquare(null);
     setLegalMoves([]);
   }
+
+  function redoMove() {
+    const next = redoStack[0];
+    if (!next) return;
+    try {
+      game.move(next);
+      setFen(game.fen());
+      setMoveHistory((prev) => [...prev, next]);
+      setRedoStack((prev) => prev.slice(1));
+      setSelectedSquare(null);
+      setLegalMoves([]);
+    } catch {
+      setRedoStack([]);
+    }
+  }
+
+  // ─── Keyboard navigation ─────────────────────────────
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "ArrowLeft") { e.preventDefault(); undoMove(); }
+      if (e.key === "ArrowRight") { e.preventDefault(); redoMove(); }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  });
 
   // ─── Move history display ───────────────────────────
   const moveHistoryDisplay = useMemo(() => {
@@ -331,7 +364,15 @@ export default function OpeningsPage() {
                 onClick={undoMove}
                 disabled={moveHistory.length === 0}
               >
-                Undo
+                <ChevronLeft className="h-4 w-4" /> Back
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={redoMove}
+                disabled={redoStack.length === 0}
+              >
+                Forward <ChevronRight className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"

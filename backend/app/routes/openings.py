@@ -9,6 +9,8 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Optional
 
 import httpx
@@ -22,6 +24,30 @@ from app.db.models import Game, OpeningRepertoire, User
 from app.db.session import get_db
 
 router = APIRouter()
+
+# ═══════════════════════════════════════════════════════════
+# In-memory cache for explorer responses (TTL-based)
+# ═══════════════════════════════════════════════════════════
+
+_explorer_cache: dict[str, tuple[float, "ExplorerResponse"]] = {}
+_CACHE_TTL = 600  # 10 minutes
+_CACHE_MAX = 500  # max entries
+
+
+def _cache_get(key: str) -> "ExplorerResponse | None":
+    entry = _explorer_cache.get(key)
+    if entry and time.time() - entry[0] < _CACHE_TTL:
+        return entry[1]
+    if entry:
+        del _explorer_cache[key]
+    return None
+
+
+def _cache_set(key: str, value: "ExplorerResponse") -> None:
+    if len(_explorer_cache) >= _CACHE_MAX:
+        oldest_key = min(_explorer_cache, key=lambda k: _explorer_cache[k][0])
+        del _explorer_cache[oldest_key]
+    _explorer_cache[key] = (time.time(), value)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -296,61 +322,69 @@ async def opening_tree(
 # ═══════════════════════════════════════════════════════════
 
 
+async def _lichess_get(url: str, params: dict, retries: int = 3) -> dict:
+    """GET from Lichess with retry on 429 rate-limit."""
+    for attempt in range(retries):
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, params=params)
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 429:
+            wait = 1.5 * (attempt + 1)
+            await asyncio.sleep(wait)
+            continue
+        raise HTTPException(502, f"Lichess explorer API error (HTTP {resp.status_code})")
+    raise HTTPException(502, "Lichess explorer API rate limited – try again shortly")
+
+
 async def _fetch_lichess_masters(fen: str) -> ExplorerResponse:
-    """Fetch from Lichess masters database."""
-    url = "https://explorer.lichess.ovh/masters"
-    params = {"fen": fen}
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url, params=params)
-
-    if resp.status_code != 200:
-        raise HTTPException(502, "Lichess explorer API error")
-
-    data = resp.json()
-    return _parse_explorer_response(data, fen, "masters")
+    """Fetch from Lichess masters database (cached)."""
+    cache_key = f"masters:{fen}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached
+    data = await _lichess_get("https://explorer.lichess.ovh/masters", {"fen": fen})
+    result = _parse_explorer_response(data, fen, "masters")
+    _cache_set(cache_key, result)
+    return result
 
 
 async def _fetch_lichess_database(
     fen: str, ratings: Optional[str], speeds: Optional[str]
 ) -> ExplorerResponse:
-    """Fetch from Lichess player database."""
-    url = "https://explorer.lichess.ovh/lichess"
+    """Fetch from Lichess database (cached)."""
+    cache_key = f"lichess:{fen}:{ratings}:{speeds}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached
     params: dict = {"fen": fen}
     if ratings:
         params["ratings"] = ratings
     if speeds:
         params["speeds"] = speeds
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url, params=params)
-
-    if resp.status_code != 200:
-        raise HTTPException(502, "Lichess explorer API error")
-
-    data = resp.json()
-    return _parse_explorer_response(data, fen, "lichess")
+    data = await _lichess_get("https://explorer.lichess.ovh/lichess", params)
+    result = _parse_explorer_response(data, fen, "lichess")
+    _cache_set(cache_key, result)
+    return result
 
 
 async def _fetch_lichess_player(
     fen: str, player: str, color: Optional[str], speeds: Optional[str]
 ) -> ExplorerResponse:
-    """Fetch from Lichess specific player database."""
-    url = "https://explorer.lichess.ovh/player"
+    """Fetch from Lichess player database (cached)."""
+    cache_key = f"player:{player}:{color}:{fen}:{speeds}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached
     params: dict = {"fen": fen, "player": player}
     if color:
         params["color"] = color
     if speeds:
         params["speeds"] = speeds
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url, params=params)
-
-    if resp.status_code != 200:
-        raise HTTPException(502, "Lichess explorer API error")
-
-    data = resp.json()
-    return _parse_explorer_response(data, fen, "player")
+    data = await _lichess_get("https://explorer.lichess.ovh/player", params)
+    result = _parse_explorer_response(data, fen, "player")
+    _cache_set(cache_key, result)
+    return result
 
 
 def _parse_explorer_response(data: dict, fen: str, source: str) -> ExplorerResponse:
