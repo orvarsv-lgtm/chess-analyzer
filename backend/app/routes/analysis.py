@@ -458,6 +458,7 @@ async def run_analysis_sync(
                         # ── Generate puzzles ──
                         for pd in puzzle_candidates:
                             pd["source_game_id"] = game_id
+                            pd["source_user_id"] = user.id
                             # Skip duplicates
                             existing = await save_db.execute(
                                 select(Puzzle).where(Puzzle.puzzle_key == pd["puzzle_key"])
