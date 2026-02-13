@@ -590,7 +590,7 @@ export default function GameDetailPage() {
 
           {/* Train From This Game CTA */}
           {game.analysis && (
-            <Link href="/train">
+            <Link href={`/train?game_id=${game.id}`}>
               <Button variant="secondary" className="w-full">
                 <Dumbbell className="h-4 w-4" />
                 Train From This Game

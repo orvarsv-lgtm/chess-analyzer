@@ -82,7 +82,8 @@ def move_accuracy(win_prob_before: float, win_prob_after: float, color: str) -> 
         win_pct_loss = max(0, (win_prob_after - win_prob_before) * 100)
 
     # Chess.com-style exponential decay on win% loss
-    acc = 103.1668 * math.exp(-0.04354 * win_pct_loss) - 3.1668
+    # Coefficient softened from -0.04354 to -0.03 for more generous accuracy
+    acc = 103.1668 * math.exp(-0.03 * win_pct_loss) - 3.1668
     return max(0.0, min(100.0, acc))
 
 
@@ -96,6 +97,26 @@ def compute_game_accuracy(move_accuracies: list[float]) -> float:
 # ═══════════════════════════════════════════════════════════
 # Move Classification (chess.com-style)
 # ═══════════════════════════════════════════════════════════
+
+
+# ── ELO-relative classification thresholds (chess.com-style) ──
+# Each band defines (excellent, good, inaccuracy, mistake) max wp_loss_pct.
+# Anything above the mistake threshold is a Blunder.
+ELO_THRESHOLDS = {
+    "beginner":     {"excellent": 3,   "good": 8,  "inaccuracy": 15, "mistake": 25},   # <1200
+    "intermediate": {"excellent": 2,   "good": 5,  "inaccuracy": 10, "mistake": 20},   # 1200-1800
+    "advanced":     {"excellent": 1.5, "good": 4,  "inaccuracy": 7,  "mistake": 15},   # 1800+
+}
+
+
+def _get_elo_band(player_elo: int | None) -> dict:
+    """Return classification thresholds for the player's ELO band."""
+    if player_elo is None or player_elo < 1200:
+        return ELO_THRESHOLDS["beginner"]
+    elif player_elo < 1800:
+        return ELO_THRESHOLDS["intermediate"]
+    else:
+        return ELO_THRESHOLDS["advanced"]
 
 
 def classify_move(
@@ -114,9 +135,11 @@ def classify_move(
     is_mate_after: bool,
     mate_before: int | None,
     mate_after: int | None,
+    player_elo: int | None = None,
 ) -> str:
     """
     Classify a move using chess.com-style categories.
+    Thresholds are ELO-relative: lower-rated players get wider bands.
 
     Returns one of:
         Brilliant, Great, Best, Excellent, Good,
@@ -174,16 +197,17 @@ def classify_move(
     if cp_loss == 0:
         return "Best"
 
-    # ── Classification by win% loss (chess.com-style thresholds) ──
+    # ── Classification by win% loss (ELO-relative thresholds) ──
     wp_loss_pct = wp_loss * 100  # convert to percentage points
+    thresholds = _get_elo_band(player_elo)
 
-    if wp_loss_pct <= 2:
+    if wp_loss_pct <= thresholds["excellent"]:
         return "Excellent"
-    elif wp_loss_pct <= 5:
+    elif wp_loss_pct <= thresholds["good"]:
         return "Good"
-    elif wp_loss_pct <= 10:
+    elif wp_loss_pct <= thresholds["inaccuracy"]:
         return "Inaccuracy"
-    elif wp_loss_pct <= 20:
+    elif wp_loss_pct <= thresholds["mistake"]:
         return "Mistake"
     else:
         return "Blunder"
@@ -294,6 +318,12 @@ def detect_phase(board: chess.Board, move_num: int, castled_white: bool, castled
     if material <= 13:
         return "endgame"
     if not has_queens and material <= 20:
+        return "endgame"
+    # Late-game with reduced material (e.g. Q+minor vs Q+minor)
+    if move_num >= 40 and material <= 24:
+        return "endgame"
+    # Very late game with some pieces — endgame by definition
+    if move_num >= 50 and material <= 30:
         return "endgame"
 
     if move_num <= 15 and material > 26 and developed < 6:

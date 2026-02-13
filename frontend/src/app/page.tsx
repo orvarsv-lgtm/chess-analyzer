@@ -659,77 +659,175 @@ function LoggedInDashboard({
 
   const trendText =
     overview?.trend === "improving"
-      ? "Your accuracy is improving"
+      ? "Improving"
       : overview?.trend === "declining"
-      ? "Accuracy dipping — review recent games"
+      ? "Declining"
       : overview?.trend === "stable"
-      ? "Accuracy is steady"
+      ? "Stable"
       : null;
 
+  // Phase accuracy from overview
+  const phaseAcc = overview?.phase_accuracy;
+  const openingAcc = phaseAcc?.opening != null ? cplToAccuracy(phaseAcc.opening) : null;
+  const middlegameAcc = phaseAcc?.middlegame != null ? cplToAccuracy(phaseAcc.middlegame) : null;
+  const endgameAcc = phaseAcc?.endgame != null ? cplToAccuracy(phaseAcc.endgame) : null;
+
   return (
-    <div className="max-w-3xl mx-auto px-6 py-12 animate-fade-in">
-      {/* Greeting + accuracy hero */}
-      <div className="text-center space-y-3 mb-10">
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-          Welcome back
-        </h1>
-        {loading && !overview && (
-          <div className="flex justify-center py-4">
-            <Spinner className="h-6 w-6 text-brand-500" />
-          </div>
-        )}
-        {accuracy !== null && (
-          <div className="flex flex-col items-center gap-1">
-            <p className={`text-5xl font-bold ${accuracyColor(accuracy)}`}>
-              {accuracy}%
-            </p>
-            <p className="text-sm text-gray-500">overall accuracy</p>
-          </div>
-        )}
-        {trendText && overview?.trend && (
-          <div
-            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
-              overview.trend === "improving"
-                ? "bg-green-900/20 text-green-400"
-                : overview.trend === "declining"
-                ? "bg-red-900/20 text-red-400"
-                : "bg-surface-2 text-gray-400"
-            }`}
-          >
-            {trendIcon}
-            {trendText}
-            {recentAccuracy !== null && (
-              <span className="ml-1 opacity-80">(recent: {recentAccuracy}%)</span>
-            )}
-          </div>
-        )}
+    <div className="max-w-4xl mx-auto px-6 py-10 animate-fade-in">
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-gray-500 mt-1">Your chess performance at a glance</p>
       </div>
 
-      {/* Single primary CTA */}
-      <div className="mb-10">
-        <Link href="/games">
-          <Button className="w-full" size="lg">
-            <Swords className="h-5 w-5" />
-            Analyze New Games
-          </Button>
-        </Link>
+      {loading && !overview && (
+        <div className="flex justify-center py-12">
+          <Spinner className="h-8 w-8 text-brand-500" />
+        </div>
+      )}
+
+      {/* Top row: ELO + Accuracy + Trend */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* ELO Card */}
+        <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-8 w-8 rounded-lg bg-brand-600/20 flex items-center justify-center">
+              <span className="text-brand-400 font-bold text-sm">♔</span>
+            </div>
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</span>
+          </div>
+          <p className="text-3xl font-bold text-white">
+            {overview?.current_elo ?? "—"}
+          </p>
+          {overview?.elo_trend != null && overview.elo_trend !== 0 && (
+            <div className={`flex items-center gap-1 mt-1 text-xs font-medium ${
+              overview.elo_trend > 0 ? "text-green-400" : "text-red-400"
+            }`}>
+              {overview.elo_trend > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+              {overview.elo_trend > 0 ? "+" : ""}{overview.elo_trend} last 30 games
+            </div>
+          )}
+        </Card>
+
+        {/* Accuracy Card */}
+        <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-8 w-8 rounded-lg bg-brand-600/20 flex items-center justify-center">
+              <Target className="h-4 w-4 text-brand-400" />
+            </div>
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Accuracy</span>
+          </div>
+          <p className={`text-3xl font-bold ${accuracyColor(accuracy)}`}>
+            {accuracy != null ? `${accuracy}%` : "—"}
+          </p>
+          {recentAccuracy != null && (
+            <p className="text-xs text-gray-500 mt-1">Recent: {recentAccuracy}%</p>
+          )}
+        </Card>
+
+        {/* Win Rate Card */}
+        <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-8 w-8 rounded-lg bg-green-600/20 flex items-center justify-center">
+              <Zap className="h-4 w-4 text-green-400" />
+            </div>
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Win Rate</span>
+          </div>
+          <p className="text-3xl font-bold text-white">
+            {overview?.win_rate != null ? `${overview.win_rate}%` : "—"}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">{overview?.total_games ?? 0} games</p>
+        </Card>
+
+        {/* Trend Card */}
+        <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
+          <div className="flex items-center gap-2 mb-2">
+            <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+              overview?.trend === "improving" ? "bg-green-600/20" : overview?.trend === "declining" ? "bg-red-600/20" : "bg-surface-2"
+            }`}>
+              {trendIcon}
+            </div>
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Trend</span>
+          </div>
+          <p className={`text-xl font-bold ${
+            overview?.trend === "improving" ? "text-green-400" : overview?.trend === "declining" ? "text-red-400" : "text-gray-300"
+          }`}>
+            {trendText ?? "—"}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {overview?.blunder_rate != null ? `${overview.blunder_rate} blunders/100` : ""}
+          </p>
+        </Card>
       </div>
 
-      {/* Today's Focus — weakness card */}
-      {topWeakness && (
+      {/* Phase Accuracy Breakdown */}
+      {(openingAcc != null || middlegameAcc != null || endgameAcc != null) && (
         <div className="mb-8">
           <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
-            Today's Focus
+            Phase Accuracy
           </h2>
-          <Link href="/train">
-            <Card className="p-5 hover:border-brand-600/50 transition-colors cursor-pointer group">
-              <div className="flex items-start gap-4">
-                <div className="h-10 w-10 rounded-lg bg-brand-600/20 flex items-center justify-center flex-shrink-0">
-                  <Dumbbell className="h-5 w-5 text-brand-400" />
+          <Card className="p-5">
+            <div className="grid grid-cols-3 gap-6">
+              {[
+                { label: "Opening", acc: openingAcc, emoji: "📖" },
+                { label: "Middlegame", acc: middlegameAcc, emoji: "⚔️" },
+                { label: "Endgame", acc: endgameAcc, emoji: "🏁" },
+              ].map(({ label, acc: phAcc, emoji }) => (
+                <div key={label} className="text-center">
+                  <div className="text-lg mb-1">{emoji}</div>
+                  <p className={`text-2xl font-bold ${accuracyColor(phAcc)}`}>
+                    {phAcc != null ? `${phAcc}%` : "—"}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">{label}</p>
+                  {phAcc != null && (
+                    <div className="mt-2 h-1.5 bg-surface-2 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          phAcc >= 75 ? "bg-green-500" : phAcc >= 60 ? "bg-yellow-500" : phAcc >= 45 ? "bg-orange-500" : "bg-red-500"
+                        }`}
+                        style={{ width: `${Math.min(100, phAcc)}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold">{topWeakness.area}</span>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Two-column: CTA + Today's Focus */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        {/* Analyze CTA */}
+        <Card className="p-6 bg-gradient-to-br from-brand-600/10 to-brand-600/5 border-brand-600/20">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="h-10 w-10 rounded-xl bg-brand-600/20 flex items-center justify-center">
+              <Swords className="h-5 w-5 text-brand-400" />
+            </div>
+            <div>
+              <h3 className="font-semibold">Analyze Games</h3>
+              <p className="text-xs text-gray-500">Import new games for analysis</p>
+            </div>
+          </div>
+          <Link href="/games">
+            <Button className="w-full" size="lg">
+              <Swords className="h-4 w-4" />
+              Analyze New Games
+            </Button>
+          </Link>
+        </Card>
+
+        {/* Today's Focus */}
+        {topWeakness ? (
+          <Link href="/train">
+            <Card className="p-6 hover:border-brand-600/50 transition-colors cursor-pointer h-full">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="h-10 w-10 rounded-xl bg-orange-600/20 flex items-center justify-center">
+                  <Dumbbell className="h-5 w-5 text-orange-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Today&apos;s Focus</h3>
+                  <div className="flex items-center gap-2">
                     <Badge
                       variant={
                         topWeakness.severity === "high"
@@ -741,19 +839,31 @@ function LoggedInDashboard({
                     >
                       {topWeakness.severity}
                     </Badge>
+                    <span className="text-xs text-gray-500">{topWeakness.area}</span>
                   </div>
-                  <p className="text-sm text-gray-400 line-clamp-2">
-                    {topWeakness.message}
-                  </p>
-                  <p className="text-sm text-brand-400 mt-2 flex items-center gap-1 group-hover:gap-2 transition-all">
-                    Train this weakness <ArrowRight className="h-3 w-3" />
-                  </p>
                 </div>
               </div>
+              <p className="text-sm text-gray-400 line-clamp-2">{topWeakness.message}</p>
+              <p className="text-sm text-brand-400 mt-3 flex items-center gap-1">
+                Train this weakness <ArrowRight className="h-3 w-3" />
+              </p>
             </Card>
           </Link>
-        </div>
-      )}
+        ) : (
+          <Link href="/train">
+            <Card className="p-6 hover:border-brand-600/50 transition-colors cursor-pointer h-full flex flex-col items-center justify-center text-center">
+              <Dumbbell className="h-8 w-8 text-gray-600 mb-2" />
+              <h3 className="font-semibold">Training</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                {overview?.puzzle_count ? `${overview.puzzle_count} puzzles available` : "Solve puzzles from your games"}
+              </p>
+              <p className="text-sm text-brand-400 mt-3 flex items-center gap-1">
+                Start training <ArrowRight className="h-3 w-3" />
+              </p>
+            </Card>
+          </Link>
+        )}
+      </div>
 
       {/* Recent games */}
       {recentGames.length > 0 && (
@@ -797,6 +907,9 @@ function LoggedInDashboard({
                       <div className="flex items-center gap-2 text-xs text-gray-500">
                         <span>{date}</span>
                         {g.time_control && <span>{g.time_control}</span>}
+                        {g.player_elo && (
+                          <span className="text-gray-600">{g.player_elo}</span>
+                        )}
                       </div>
                     </div>
                     <Badge
@@ -823,13 +936,13 @@ function LoggedInDashboard({
         </div>
       )}
 
-      {/* Weekly snapshot — compact stats */}
+      {/* Bottom stats row */}
       {overview && overview.total_games > 0 && (
         <div>
           <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
             Overview
           </h2>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Card className="p-4 text-center">
               <p className="text-xs text-gray-500">Games</p>
               <p className="text-xl font-bold mt-1">{overview.total_games}</p>
@@ -844,6 +957,12 @@ function LoggedInDashboard({
               <p className="text-xs text-gray-500">Blunders/100</p>
               <p className="text-xl font-bold mt-1">
                 {overview.blunder_rate ?? "—"}
+              </p>
+            </Card>
+            <Card className="p-4 text-center">
+              <p className="text-xs text-gray-500">Puzzles</p>
+              <p className="text-xl font-bold mt-1">
+                {overview.puzzle_count ?? 0}
               </p>
             </Card>
           </div>

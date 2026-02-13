@@ -653,6 +653,17 @@ async def _analyze_game(
     black = headers.get("Black", "?")
     result_raw = headers.get("Result", "*")
 
+    # Extract ELO from PGN headers for ELO-relative classification
+    try:
+        white_elo = int(headers.get("WhiteElo", 0)) or None
+    except (ValueError, TypeError):
+        white_elo = None
+    try:
+        black_elo = int(headers.get("BlackElo", 0)) or None
+    except (ValueError, TypeError):
+        black_elo = None
+    player_elo = white_elo if color == "white" else black_elo
+
     # Determine result from player's perspective
     if result_raw == "1-0":
         result = "win" if color == "white" else "loss"
@@ -782,6 +793,7 @@ async def _analyze_game(
                 is_mate_after=is_mate,
                 mate_before=prev_mate_in,
                 mate_after=mate_in,
+                player_elo=player_elo,
             )
             board.push(move)
         else:

@@ -11,7 +11,7 @@ from sqlalchemy import case, func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
-from app.db.models import Game, GameAnalysis, MoveEvaluation, OpeningRepertoire, User
+from app.db.models import Game, GameAnalysis, MoveEvaluation, OpeningRepertoire, Puzzle, User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -73,6 +73,10 @@ async def get_overview(
             "blunder_rate": None,
             "recent_cpl": None,
             "trend": None,
+            "current_elo": None,
+            "elo_trend": None,
+            "phase_accuracy": {"opening": None, "middlegame": None, "endgame": None},
+            "puzzle_count": 0,
         }
 
     # Win rate
@@ -127,6 +131,53 @@ async def get_overview(
         else:
             trend = "stable"
 
+    # ── Current ELO (from most recent game with ELO data) ──
+    elo_q = (
+        select(Game.player_elo)
+        .where(Game.user_id == user.id, Game.player_elo.isnot(None))
+        .order_by(Game.date.desc())
+        .limit(1)
+    )
+    current_elo = (await db.execute(elo_q)).scalar()
+
+    # ELO trend: compare latest ELO with ELO from ~30 games ago
+    elo_trend = None
+    if current_elo:
+        old_elo_q = (
+            select(Game.player_elo)
+            .where(Game.user_id == user.id, Game.player_elo.isnot(None))
+            .order_by(Game.date.desc())
+            .offset(30)
+            .limit(1)
+        )
+        old_elo = (await db.execute(old_elo_q)).scalar()
+        if old_elo:
+            elo_trend = current_elo - old_elo
+
+    # ── Phase accuracy (average CPL per phase across all analyzed games) ──
+    phase_accuracy = {"opening": None, "middlegame": None, "endgame": None}
+    for phase_key, col in [
+        ("opening", GameAnalysis.phase_opening_cpl),
+        ("middlegame", GameAnalysis.phase_middlegame_cpl),
+        ("endgame", GameAnalysis.phase_endgame_cpl),
+    ]:
+        phase_q = (
+            select(func.avg(col))
+            .join(Game, Game.id == GameAnalysis.game_id)
+            .where(Game.user_id == user.id, col.isnot(None))
+        )
+        val = (await db.execute(phase_q)).scalar()
+        if val is not None:
+            phase_accuracy[phase_key] = round(val, 1)
+
+    # ── Puzzle count ──
+    puzzle_count_q = (
+        select(func.count())
+        .select_from(Puzzle)
+        .where(Puzzle.source_user_id == user.id)
+    )
+    puzzle_count = (await db.execute(puzzle_count_q)).scalar() or 0
+
     return {
         "total_games": total_games,
         "overall_cpl": overall_cpl,
@@ -134,6 +185,10 @@ async def get_overview(
         "blunder_rate": blunder_rate,
         "recent_cpl": recent_cpl,
         "trend": trend,
+        "current_elo": current_elo,
+        "elo_trend": elo_trend,
+        "phase_accuracy": phase_accuracy,
+        "puzzle_count": puzzle_count,
     }
 
 

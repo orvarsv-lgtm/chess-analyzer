@@ -201,6 +201,7 @@ async def run_analysis_sync(
             "white_player": g.white_player,
             "black_player": g.black_player,
             "opening_name": g.opening_name,
+            "player_elo": g.player_elo,
         })
 
     total = len(game_data)
@@ -350,6 +351,7 @@ async def run_analysis_sync(
                                 is_mate_after=is_mate,
                                 mate_before=prev_mate_in,
                                 mate_after=mate_in,
+                                player_elo=gd.get("player_elo"),
                             )
                             board.push(move)  # re-push
                         else:

@@ -174,6 +174,14 @@ export interface InsightsOverview {
   blunder_rate: number | null;
   recent_cpl: number | null;
   trend: "improving" | "declining" | "stable" | null;
+  current_elo: number | null;
+  elo_trend: number | null;
+  phase_accuracy: {
+    opening: number | null;
+    middlegame: number | null;
+    endgame: number | null;
+  };
+  puzzle_count: number;
 }
 
 export interface PhaseBreakdown {
@@ -453,13 +461,29 @@ export const puzzlesAPI = {
     phase?: string;
     puzzle_type?: string;
     limit?: number;
+    game_id?: number;
   }): Promise<PuzzleItem[]> {
     const q = new URLSearchParams();
     if (params?.difficulty) q.set("difficulty", params.difficulty);
     if (params?.phase) q.set("phase", params.phase);
     if (params?.puzzle_type) q.set("puzzle_type", params.puzzle_type);
     if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.game_id) q.set("game_id", String(params.game_id));
     return fetchAPI<PuzzleItem[]>(`/puzzles?${q}`);
+  },
+
+  global(params?: {
+    difficulty?: string;
+    phase?: string;
+    puzzle_type?: string;
+    limit?: number;
+  }): Promise<PuzzleItem[]> {
+    const q = new URLSearchParams();
+    if (params?.difficulty) q.set("difficulty", params.difficulty);
+    if (params?.phase) q.set("phase", params.phase);
+    if (params?.puzzle_type) q.set("puzzle_type", params.puzzle_type);
+    if (params?.limit) q.set("limit", String(params.limit));
+    return fetchAPI<PuzzleItem[]>(`/puzzles/global?${q}`);
   },
 
   reviewQueue(limit = 10): Promise<PuzzleItem[]> {

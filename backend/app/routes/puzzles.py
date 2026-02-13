@@ -62,12 +62,16 @@ async def list_puzzles(
     difficulty: Optional[str] = None,
     phase: Optional[str] = None,
     puzzle_type: Optional[str] = None,
+    game_id: Optional[int] = None,
     limit: int = Query(20, ge=1, le=100),
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List puzzles generated from the user's games."""
+    """List puzzles generated from the user's games. Optionally filter by game_id."""
     query = select(Puzzle).where(Puzzle.source_user_id == user.id)
+
+    if game_id:
+        query = query.where(Puzzle.source_game_id == game_id)
 
     if difficulty:
         query = query.where(Puzzle.difficulty == difficulty)
@@ -77,6 +81,56 @@ async def list_puzzles(
         query = query.where(Puzzle.puzzle_type == puzzle_type)
 
     query = query.order_by(Puzzle.created_at.desc()).limit(limit)
+    result = await db.execute(query)
+    puzzles = result.scalars().all()
+
+    return [
+        PuzzleOut(
+            id=p.id,
+            fen=p.fen,
+            side_to_move=p.side_to_move,
+            best_move_san=p.best_move_san,
+            best_move_uci=p.best_move_uci,
+            eval_loss_cp=p.eval_loss_cp,
+            phase=p.phase,
+            puzzle_type=p.puzzle_type,
+            difficulty=p.difficulty,
+            explanation=p.explanation,
+            themes=p.themes or [],
+        )
+        for p in puzzles
+    ]
+
+
+@router.get("/global", response_model=list[PuzzleOut])
+async def global_puzzles(
+    difficulty: Optional[str] = None,
+    phase: Optional[str] = None,
+    puzzle_type: Optional[str] = None,
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List puzzles from ALL users' games (community puzzles). Excludes already-solved."""
+    # Subquery: puzzle IDs the user has already solved correctly
+    solved_sq = (
+        select(PuzzleAttempt.puzzle_id)
+        .where(PuzzleAttempt.user_id == user.id, PuzzleAttempt.correct == True)
+        .distinct()
+        .subquery()
+    )
+
+    query = select(Puzzle).where(Puzzle.id.notin_(select(solved_sq)))
+
+    if difficulty:
+        query = query.where(Puzzle.difficulty == difficulty)
+    if phase:
+        query = query.where(Puzzle.phase == phase)
+    if puzzle_type:
+        query = query.where(Puzzle.puzzle_type == puzzle_type)
+
+    # Random ordering for variety, dedup by puzzle_key
+    query = query.group_by(Puzzle.id).order_by(func.random()).limit(limit)
     result = await db.execute(query)
     puzzles = result.scalars().all()
 
