@@ -98,33 +98,7 @@ export default function OpeningsPage() {
     setLegalMoves([]);
   }
 
-  function onPieceDragBegin(piece: string, square: Square) {
-    // Show legal moves when a drag starts (fires reliably, unlike onClick)
-    const p = game.get(square);
-    if (p && p.color === game.turn()) {
-      setSelectedSquare(square);
-      const moves = game.moves({ square, verbose: true });
-      setLegalMoves(moves.map((m) => m.to as Square));
-    }
-  }
 
-  function onPieceDrop(sourceSquare: string, targetSquare: string) {
-    try {
-      const result = game.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
-      if (result) {
-        setFen(game.fen());
-        setMoveHistory((prev) => [...prev, result.san]);
-        setSelectedSquare(null);
-        setLegalMoves([]);
-        return true;
-      }
-    } catch {
-      // invalid move
-    }
-    setSelectedSquare(null);
-    setLegalMoves([]);
-    return false;
-  }
 
   // Build custom square styles for selection highlight + legal move dots
   const squareStyles = useMemo(() => {
@@ -282,10 +256,8 @@ export default function OpeningsPage() {
                 position={fen}
                 boardOrientation={orientation}
                 boardWidth={400}
-                arePiecesDraggable={true}
-                onPieceDrop={onPieceDrop}
+                arePiecesDraggable={false}
                 onPieceClick={onPieceClick}
-                onPieceDragBegin={onPieceDragBegin}
                 onSquareClick={onSquareClick}
                 customSquareStyles={squareStyles}
                 customBoardStyle={{
