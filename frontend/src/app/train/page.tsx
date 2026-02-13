@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
@@ -56,19 +56,16 @@ export default function TrainPage() {
   const currentPuzzle = queue[currentIdx] ?? null;
 
   // ─── Chess instance for puzzle position ──────────────
-  const chess = useMemo(() => {
-    if (!currentPuzzle) return null;
-    try {
-      return new Chess(currentPuzzle.fen);
-    } catch {
-      return null;
-    }
-  }, [currentPuzzle]);
-
+  const chessRef = useRef<Chess | null>(null);
   const [boardFen, setBoardFen] = useState(currentPuzzle?.fen ?? "start");
 
   useEffect(() => {
     if (currentPuzzle) {
+      try {
+        chessRef.current = new Chess(currentPuzzle.fen);
+      } catch {
+        chessRef.current = null;
+      }
       setBoardFen(currentPuzzle.fen);
       setPuzzleState("solving");
       setStartTime(Date.now());
@@ -120,9 +117,9 @@ export default function TrainPage() {
 
   // ─── Handle move ─────────────────────────────────────
   function onDrop(sourceSquare: Square, targetSquare: Square): boolean {
-    if (!chess || !currentPuzzle || puzzleState !== "solving") return false;
+    if (!chessRef.current || !currentPuzzle || puzzleState !== "solving") return false;
 
-    const move = chess.move({
+    const move = chessRef.current.move({
       from: sourceSquare,
       to: targetSquare,
       promotion: "q",
@@ -130,7 +127,7 @@ export default function TrainPage() {
 
     if (!move) return false;
 
-    setBoardFen(chess.fen());
+    setBoardFen(chessRef.current.fen());
 
     const bestMoveSan = currentPuzzle.best_move_san;
     const isCorrect = move.san === bestMoveSan;
@@ -173,8 +170,8 @@ export default function TrainPage() {
   function retryPuzzle() {
     if (!currentPuzzle) return;
     try {
-      const c = new Chess(currentPuzzle.fen);
-      setBoardFen(c.fen());
+      chessRef.current = new Chess(currentPuzzle.fen);
+      setBoardFen(currentPuzzle.fen);
       setPuzzleState("solving");
       setStartTime(Date.now());
     } catch {}
