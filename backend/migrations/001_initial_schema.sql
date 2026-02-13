@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS games (
     time_control     TEXT,
     player_elo       INTEGER,
     opponent_elo     INTEGER,
+    white_player     TEXT,
+    black_player     TEXT,
     moves_count      INTEGER,
     moves_pgn        TEXT NOT NULL,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
