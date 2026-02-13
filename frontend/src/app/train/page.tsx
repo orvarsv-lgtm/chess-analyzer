@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Globe,
   User,
+  Clock,
 } from "lucide-react";
 import { puzzlesAPI, insightsAPI, type PuzzleItem, type Weakness } from "@/lib/api";
 import {
@@ -45,6 +46,12 @@ function TrainPageInner() {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
   const gameIdParam = searchParams.get("game_id");
+  const isTimed = searchParams.get("mode") === "timed";
+
+  // ─── Timed mode constants ─────────────────────────
+  const TIMED_LIMIT = 30;
+  const YELLOW_AT = 20;
+  const RED_AT = 25;
 
   // ─── View state ──────────────────────────────────────
   const [view, setView] = useState<TrainView>("hub");
@@ -64,6 +71,9 @@ function TrainPageInner() {
   // ─── Solving state ───────────────────────────────────
   const [puzzleState, setPuzzleState] = useState<PuzzleState>("solving");
   const [startTime, setStartTime] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [timedOut, setTimedOut] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval>>();
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
 
@@ -88,10 +98,34 @@ function TrainPageInner() {
       setBoardFen(currentPuzzle.fen);
       setPuzzleState("solving");
       setStartTime(Date.now());
+      setElapsedSeconds(0);
+      setTimedOut(false);
       setSelectedSquare(null);
       setLegalMoves([]);
     }
   }, [currentPuzzle]);
+
+  // ─── Timer tick ──────────────────────────────────
+  useEffect(() => {
+    if (puzzleState === "solving" && startTime > 0) {
+      const tick = () => setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+      tick();
+      timerRef.current = setInterval(tick, 200);
+      return () => clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [puzzleState, startTime]);
+
+  // ─── Timed mode auto-fail ───────────────────────
+  useEffect(() => {
+    if (isTimed && puzzleState === "solving" && elapsedSeconds >= TIMED_LIMIT) {
+      setPuzzleState("incorrect");
+      setTimedOut(true);
+      setStreak(0);
+      setSolvedToday((s) => s + 1);
+      reportAttempt(false);
+    }
+  }, [isTimed, puzzleState, elapsedSeconds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Determine board orientation from FEN
   const boardOrientation = useMemo(() => {
@@ -149,6 +183,14 @@ function TrainPageInner() {
       setView("session");
     }
   }, [gameIdParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-start session if mode=timed
+  useEffect(() => {
+    if (isTimed && !gameIdParam && session) {
+      loadPuzzles("my");
+      setView("session");
+    }
+  }, [isTimed, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function startSession(source?: PuzzleSource) {
     const src = source ?? puzzleSource;
@@ -333,6 +375,8 @@ function TrainPageInner() {
       setBoardFen(currentPuzzle.fen);
       setPuzzleState("solving");
       setStartTime(Date.now());
+      setElapsedSeconds(0);
+      setTimedOut(false);
       setSelectedSquare(null);
       setLegalMoves([]);
     } catch {}
@@ -489,7 +533,9 @@ function TrainPageInner() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">
-            {puzzleSource === "game"
+            {isTimed
+              ? "⏱ Timed Training"
+              : puzzleSource === "game"
               ? "Game Puzzles"
               : puzzleSource === "global"
               ? "Global Puzzles"
@@ -529,6 +575,22 @@ function TrainPageInner() {
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Board */}
           <div className="flex-1 max-w-[560px]">
+            {/* Timer */}
+            <div className={`text-center mb-3 font-mono text-3xl font-bold transition-colors ${
+              puzzleState === "correct" ? "text-green-400" :
+              puzzleState === "incorrect" || timedOut ? "text-red-400" :
+              isTimed && elapsedSeconds >= RED_AT ? "text-red-400 animate-pulse" :
+              isTimed && elapsedSeconds >= YELLOW_AT ? "text-yellow-400" :
+              "text-gray-400"
+            }`}>
+              {isTimed && puzzleState === "solving" && (
+                <div className="text-xs text-gray-500 font-sans font-normal mb-1 flex items-center justify-center gap-1">
+                  <Clock className="h-3 w-3" /> Time Limit: {TIMED_LIMIT}s
+                </div>
+              )}
+              <span>{Math.floor(elapsedSeconds / 60)}:{(elapsedSeconds % 60).toString().padStart(2, '0')}</span>
+            </div>
+
             <div className="relative">
               <Chessboard
                 position={boardFen}
@@ -567,9 +629,13 @@ function TrainPageInner() {
                       </>
                     ) : (
                       <>
-                        <XCircle className="h-12 w-12 text-red-400" />
+                        {timedOut ? (
+                          <Clock className="h-12 w-12 text-red-400" />
+                        ) : (
+                          <XCircle className="h-12 w-12 text-red-400" />
+                        )}
                         <p className="text-lg font-bold text-red-300">
-                          Incorrect
+                          {timedOut ? "Time\u2019s Up!" : "Incorrect"}
                         </p>
                         <p className="text-sm text-red-400/80">
                           Best move was{" "}

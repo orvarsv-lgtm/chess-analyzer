@@ -348,6 +348,7 @@ def generate_puzzle_data(
     move_quality: str,
     move_number: int,
     best_second_gap_cp: int | None = None,
+    eval_before_cp: int | None = None,
 ) -> dict | None:
     """
     Generate puzzle data from a blunder/mistake/missed-win move.
@@ -359,12 +360,20 @@ def generate_puzzle_data(
       and second-best engine line must be >= 150 cp.  If the gap is
       smaller, multiple moves are acceptable and the position is not a
       clean puzzle.
+    - The position must not already be completely winning for one side
+      (abs eval >= 600 cp) — those puzzles are trivial.
     - The user must have missed it (implied by move_quality check above;
       Best/Great/Excellent/Good moves never reach here).
     """
     if move_quality not in ("Blunder", "Mistake", "Missed Win"):
         return None
     if not fen_before or not best_move_san:
+        return None
+
+    # ── Reject completely winning positions ──
+    # If one side is already up 600+ cp the puzzle is trivial/uninteresting.
+    PUZZLE_EVAL_LIMIT_CP = 600
+    if eval_before_cp is not None and abs(eval_before_cp) >= PUZZLE_EVAL_LIMIT_CP:
         return None
 
     # ── Only-one-good-move filter ──

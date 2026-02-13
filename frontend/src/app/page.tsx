@@ -906,7 +906,7 @@ function LoggedInDashboard({
                       <p className="text-sm text-gray-400">{w.message}</p>
                     </div>
                   </div>
-                  <Link href="/train">
+                  <Link href={w.area.toLowerCase().includes("time") ? "/train?mode=timed" : "/train"}>
                     <Button size="sm" variant="secondary" className="flex-shrink-0">
                       <Dumbbell className="h-3.5 w-3.5" />
                       Train
@@ -935,7 +935,7 @@ function LoggedInDashboard({
                       <p className="text-sm text-gray-400">{r.message}</p>
                     </div>
                   </div>
-                  <Link href="/train">
+                  <Link href={r.category.toLowerCase().includes("time") ? "/train?mode=timed" : "/train"}>
                     <Button size="sm" variant="secondary" className="flex-shrink-0">
                       <Dumbbell className="h-3.5 w-3.5" />
                       Train

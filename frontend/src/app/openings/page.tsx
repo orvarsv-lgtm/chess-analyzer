@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
@@ -48,6 +48,25 @@ export default function OpeningsPage() {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
+
+  // ─── Debounce, cache & responsive board ────────────
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const cacheRef = useRef<Map<string, ExplorerResponse>>(new Map());
+  const boardContainerRef = useRef<HTMLDivElement>(null);
+  const [boardWidth, setBoardWidth] = useState(400);
+
+  useEffect(() => {
+    const el = boardContainerRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      setBoardWidth(Math.min(Math.max(w, 280), 560));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   function tryMove(sourceSquare: Square, targetSquare: Square): boolean {
     try {
@@ -148,6 +167,12 @@ export default function OpeningsPage() {
 
   // ─── Fetch explorer data ─────────────────────────────
   const fetchExplorer = useCallback(async (currentFen: string) => {
+    const cacheKey = `${source}:${currentFen}`;
+    const cached = cacheRef.current.get(cacheKey);
+    if (cached) {
+      setExplorer(cached);
+      return;
+    }
     setLoading(true);
     try {
       const data = await openingsAPI.explore({
@@ -155,6 +180,7 @@ export default function OpeningsPage() {
         source: source === "personal" ? "lichess" : source,
       });
       setExplorer(data);
+      if (data) cacheRef.current.set(cacheKey, data);
     } catch {
       setExplorer(null);
     } finally {
@@ -178,7 +204,9 @@ export default function OpeningsPage() {
 
   useEffect(() => {
     if (source !== "personal") {
-      fetchExplorer(fen);
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => fetchExplorer(fen), 300);
+      return () => clearTimeout(debounceRef.current);
     }
   }, [fen, source, fetchExplorer]);
 
@@ -271,12 +299,12 @@ export default function OpeningsPage() {
         /* Explorer view (Masters / Lichess) */
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Left: Board */}
-          <div className="flex-shrink-0">
-            <div className="w-[400px] h-[400px]">
+          <div className="flex-shrink-0 w-full lg:w-[480px]" ref={boardContainerRef}>
+            <div style={{ width: boardWidth, height: boardWidth }}>
               <Chessboard
                 position={fen}
                 boardOrientation={orientation}
-                boardWidth={400}
+                boardWidth={boardWidth}
                 arePiecesDraggable={true}
                 onPieceClick={onPieceClick}
                 onSquareClick={onSquareClick}
