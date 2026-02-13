@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Chess } from "chess.js";
+import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import {
   BookOpen,
@@ -46,6 +46,77 @@ export default function OpeningsPage() {
   const [personalLoading, setPersonalLoading] = useState(false);
   const [personalColor, setPersonalColor] = useState<string | undefined>(undefined);
   const [orientation, setOrientation] = useState<"white" | "black">("white");
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+  const [legalMoves, setLegalMoves] = useState<Square[]>([]);
+
+  // ─── Board interaction ─────────────────────────────
+  function onSquareClick(square: Square) {
+    // If a piece is already selected, try to move to the clicked square
+    if (selectedSquare) {
+      const moves = game.moves({ square: selectedSquare, verbose: true });
+      const target = moves.find((m) => m.to === square);
+      if (target) {
+        game.move({ from: selectedSquare, to: square, promotion: "q" });
+        setFen(game.fen());
+        setMoveHistory((prev) => [...prev, target.san]);
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+    }
+
+    // Select a new piece (if one exists on this square)
+    const piece = game.get(square);
+    if (piece && piece.color === game.turn()) {
+      setSelectedSquare(square);
+      const moves = game.moves({ square, verbose: true });
+      setLegalMoves(moves.map((m) => m.to as Square));
+    } else {
+      setSelectedSquare(null);
+      setLegalMoves([]);
+    }
+  }
+
+  function onPieceDrop(sourceSquare: string, targetSquare: string) {
+    try {
+      const result = game.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
+      if (result) {
+        setFen(game.fen());
+        setMoveHistory((prev) => [...prev, result.san]);
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return true;
+      }
+    } catch {
+      // invalid move
+    }
+    return false;
+  }
+
+  // Build custom square styles for selection highlight + legal move dots
+  const squareStyles = useMemo(() => {
+    const styles: Record<string, React.CSSProperties> = {};
+    if (selectedSquare) {
+      styles[selectedSquare] = {
+        backgroundColor: "rgba(255, 255, 0, 0.4)",
+      };
+    }
+    for (const sq of legalMoves) {
+      const piece = game.get(sq as Square);
+      if (piece) {
+        // Capture: ring around the square
+        styles[sq] = {
+          background: "radial-gradient(transparent 51%, rgba(0,0,0,0.3) 51%)",
+        };
+      } else {
+        // Empty square: small dot
+        styles[sq] = {
+          background: "radial-gradient(circle, rgba(0,0,0,0.3) 25%, transparent 25%)",
+        };
+      }
+    }
+    return styles;
+  }, [selectedSquare, legalMoves, game]);
 
   // ─── Fetch explorer data ─────────────────────────────
   const fetchExplorer = useCallback(async (currentFen: string) => {
@@ -96,6 +167,8 @@ export default function OpeningsPage() {
       const newFen = game.fen();
       setFen(newFen);
       setMoveHistory((prev) => [...prev, san]);
+      setSelectedSquare(null);
+      setLegalMoves([]);
     } catch {
       // Invalid move
     }
@@ -105,12 +178,16 @@ export default function OpeningsPage() {
     game.reset();
     setFen(game.fen());
     setMoveHistory([]);
+    setSelectedSquare(null);
+    setLegalMoves([]);
   }
 
   function undoMove() {
     game.undo();
     setFen(game.fen());
     setMoveHistory((prev) => prev.slice(0, -1));
+    setSelectedSquare(null);
+    setLegalMoves([]);
   }
 
   // ─── Move history display ───────────────────────────
@@ -172,7 +249,10 @@ export default function OpeningsPage() {
                 position={fen}
                 boardOrientation={orientation}
                 boardWidth={400}
-                arePiecesDraggable={false}
+                arePiecesDraggable={true}
+                onPieceDrop={onPieceDrop}
+                onSquareClick={onSquareClick}
+                customSquareStyles={squareStyles}
                 customBoardStyle={{
                   borderRadius: "8px",
                   boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
