@@ -50,6 +50,34 @@ export default function OpeningsPage() {
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
 
   // ─── Board interaction ─────────────────────────────
+  function onPieceClick(piece: string, square: Square) {
+    // If a piece is already selected, try to move to the clicked square
+    // (capturing the piece on that square)
+    if (selectedSquare && selectedSquare !== square) {
+      const moves = game.moves({ square: selectedSquare, verbose: true });
+      const target = moves.find((m) => m.to === square);
+      if (target) {
+        game.move({ from: selectedSquare, to: square, promotion: "q" });
+        setFen(game.fen());
+        setMoveHistory((prev) => [...prev, target.san]);
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+    }
+
+    // Select this piece (if it belongs to the side to move)
+    const p = game.get(square);
+    if (p && p.color === game.turn()) {
+      setSelectedSquare(square);
+      const moves = game.moves({ square, verbose: true });
+      setLegalMoves(moves.map((m) => m.to as Square));
+    } else {
+      setSelectedSquare(null);
+      setLegalMoves([]);
+    }
+  }
+
   function onSquareClick(square: Square) {
     // If a piece is already selected, try to move to the clicked square
     if (selectedSquare) {
@@ -65,16 +93,9 @@ export default function OpeningsPage() {
       }
     }
 
-    // Select a new piece (if one exists on this square)
-    const piece = game.get(square);
-    if (piece && piece.color === game.turn()) {
-      setSelectedSquare(square);
-      const moves = game.moves({ square, verbose: true });
-      setLegalMoves(moves.map((m) => m.to as Square));
-    } else {
-      setSelectedSquare(null);
-      setLegalMoves([]);
-    }
+    // Clicked on an empty square or non-target — deselect
+    setSelectedSquare(null);
+    setLegalMoves([]);
   }
 
   function onPieceDrop(sourceSquare: string, targetSquare: string) {
@@ -251,6 +272,7 @@ export default function OpeningsPage() {
                 boardWidth={400}
                 arePiecesDraggable={true}
                 onPieceDrop={onPieceDrop}
+                onPieceClick={onPieceClick}
                 onSquareClick={onSquareClick}
                 customSquareStyles={squareStyles}
                 customBoardStyle={{
