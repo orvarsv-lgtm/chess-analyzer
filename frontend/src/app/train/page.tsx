@@ -227,6 +227,20 @@ export default function TrainPage() {
     setLegalMoves([]);
   }
 
+  function onPieceDragBegin(piece: string, square: Square) {
+    if (!chessRef.current || puzzleState !== "solving") return;
+    const p = chessRef.current.get(square);
+    if (p && p.color === chessRef.current.turn()) {
+      setSelectedSquare(square);
+      const moves = chessRef.current.moves({ square, verbose: true });
+      setLegalMoves(moves.map((m) => m.to as Square));
+    }
+  }
+
+  function onPieceDrop(sourceSquare: string, targetSquare: string): boolean {
+    return tryMove(sourceSquare as Square, targetSquare as Square);
+  }
+
   const squareStyles = useMemo(() => {
     const styles: Record<string, CSSProperties> = {};
 
@@ -428,9 +442,11 @@ export default function TrainPage() {
                 position={boardFen}
                 onPieceClick={onPieceClick}
                 onSquareClick={onSquareClick}
+                onPieceDragBegin={onPieceDragBegin}
+                onPieceDrop={onPieceDrop}
                 boardOrientation={boardOrientation}
                 boardWidth={560}
-                arePiecesDraggable={false}
+                arePiecesDraggable={puzzleState === "solving"}
                 customSquareStyles={squareStyles}
                 customBoardStyle={{
                   borderRadius: "8px",
