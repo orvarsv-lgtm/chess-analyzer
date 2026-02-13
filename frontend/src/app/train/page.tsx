@@ -46,12 +46,13 @@ function TrainPageInner() {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
   const gameIdParam = searchParams.get("game_id");
-  const isTimed = searchParams.get("mode") === "timed";
+  const timedParam = searchParams.get("mode") === "timed";
 
-  // ─── Timed mode constants ─────────────────────────
-  const TIMED_LIMIT = 30;
-  const YELLOW_AT = 20;
-  const RED_AT = 25;
+  // ─── Timed mode ───────────────────────────────────
+  const TIMED_LIMIT = 10;
+  const YELLOW_AT = 6;
+  const RED_AT = 8;
+  const [isTimed, setIsTimed] = useState(timedParam);
 
   // ─── View state ──────────────────────────────────────
   const [view, setView] = useState<TrainView>("hub");
@@ -184,16 +185,17 @@ function TrainPageInner() {
     }
   }, [gameIdParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start session if mode=timed
+  // Auto-start session if mode=timed from URL
   useEffect(() => {
-    if (isTimed && !gameIdParam && session) {
+    if (timedParam && !gameIdParam && session) {
       loadPuzzles("my");
       setView("session");
     }
-  }, [isTimed, session]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [timedParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function startSession(source?: PuzzleSource) {
+  function startSession(source?: PuzzleSource, timed?: boolean) {
     const src = source ?? puzzleSource;
+    if (timed !== undefined) setIsTimed(timed);
     setPuzzleSource(src);
     loadPuzzles(src);
     setView("session");
@@ -475,32 +477,43 @@ function TrainPageInner() {
                       From Your Mistakes
                     </h2>
                     <div className="grid gap-3 sm:grid-cols-3">
-                      {weaknesses.slice(0, 3).map((w, i) => (
-                        <Card
-                          key={i}
-                          className="p-4 cursor-pointer hover:border-brand-600/50 transition-colors"
-                          onClick={() => startSession("my")}
-                        >
-                          <div className="flex items-center gap-2 mb-2">
-                            <AlertTriangle
-                              className={`h-4 w-4 ${
-                                w.severity === "high"
-                                  ? "text-red-400"
-                                  : w.severity === "medium"
-                                  ? "text-yellow-400"
-                                  : "text-gray-400"
-                              }`}
-                            />
-                            <span className="font-semibold text-sm">{w.area}</span>
-                          </div>
-                          <p className="text-xs text-gray-500 line-clamp-2">
-                            {w.message}
-                          </p>
-                          <p className="text-xs text-brand-400 mt-2 flex items-center gap-1">
-                            Practice <ArrowRight className="h-3 w-3" />
-                          </p>
-                        </Card>
-                      ))}
+                      {weaknesses.slice(0, 3).map((w, i) => {
+                        const isTimeMgmt = w.area.toLowerCase().includes("time");
+                        return (
+                          <Card
+                            key={i}
+                            className={`p-4 cursor-pointer transition-colors ${
+                              isTimeMgmt ? "hover:border-yellow-500/50 border-yellow-600/20" : "hover:border-brand-600/50"
+                            }`}
+                            onClick={() => startSession("my", isTimeMgmt)}
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              {isTimeMgmt ? (
+                                <Clock className={`h-4 w-4 text-yellow-400`} />
+                              ) : (
+                                <AlertTriangle
+                                  className={`h-4 w-4 ${
+                                    w.severity === "high"
+                                      ? "text-red-400"
+                                      : w.severity === "medium"
+                                      ? "text-yellow-400"
+                                      : "text-gray-400"
+                                  }`}
+                                />
+                              )}
+                              <span className="font-semibold text-sm">{w.area}</span>
+                            </div>
+                            <p className="text-xs text-gray-500 line-clamp-2">
+                              {w.message}
+                            </p>
+                            <p className={`text-xs mt-2 flex items-center gap-1 ${
+                              isTimeMgmt ? "text-yellow-400" : "text-brand-400"
+                            }`}>
+                              {isTimeMgmt ? "⏱ Timed Training" : "Practice"} <ArrowRight className="h-3 w-3" />
+                            </p>
+                          </Card>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
