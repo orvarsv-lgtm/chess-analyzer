@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
@@ -47,6 +47,8 @@ export default function TrainPage() {
   // ─── Solving state ───────────────────────────────────
   const [puzzleState, setPuzzleState] = useState<PuzzleState>("solving");
   const [startTime, setStartTime] = useState(0);
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+  const [legalMoves, setLegalMoves] = useState<Square[]>([]);
 
   // ─── Stats ───────────────────────────────────────────
   const [streak, setStreak] = useState(0);
@@ -69,6 +71,8 @@ export default function TrainPage() {
       setBoardFen(currentPuzzle.fen);
       setPuzzleState("solving");
       setStartTime(Date.now());
+      setSelectedSquare(null);
+      setLegalMoves([]);
     }
   }, [currentPuzzle]);
 
@@ -116,7 +120,7 @@ export default function TrainPage() {
   }
 
   // ─── Handle move ─────────────────────────────────────
-  function onDrop(sourceSquare: Square, targetSquare: Square): boolean {
+  function tryMove(sourceSquare: Square, targetSquare: Square): boolean {
     if (!chessRef.current || !currentPuzzle || puzzleState !== "solving") return false;
 
     const move = chessRef.current.move({
@@ -128,6 +132,8 @@ export default function TrainPage() {
     if (!move) return false;
 
     setBoardFen(chessRef.current.fen());
+    setSelectedSquare(null);
+    setLegalMoves([]);
 
     const bestMoveSan = currentPuzzle.best_move_san;
     const isCorrect = move.san === bestMoveSan;
@@ -147,6 +153,60 @@ export default function TrainPage() {
 
     return true;
   }
+
+  function onPieceClick(piece: string, square: Square) {
+    if (!chessRef.current || puzzleState !== "solving") return;
+
+    if (selectedSquare && selectedSquare !== square) {
+      if (tryMove(selectedSquare, square)) return;
+    }
+
+    const p = chessRef.current.get(square);
+    if (p && p.color === chessRef.current.turn()) {
+      setSelectedSquare(square);
+      const moves = chessRef.current.moves({ square, verbose: true });
+      setLegalMoves(moves.map((m) => m.to as Square));
+    } else {
+      setSelectedSquare(null);
+      setLegalMoves([]);
+    }
+  }
+
+  function onSquareClick(square: Square) {
+    if (!chessRef.current || puzzleState !== "solving") return;
+
+    if (selectedSquare) {
+      if (tryMove(selectedSquare, square)) return;
+    }
+
+    setSelectedSquare(null);
+    setLegalMoves([]);
+  }
+
+  const squareStyles = useMemo(() => {
+    const styles: Record<string, CSSProperties> = {};
+
+    if (selectedSquare) {
+      styles[selectedSquare] = {
+        backgroundColor: "rgba(255, 255, 0, 0.35)",
+      };
+    }
+
+    for (const sq of legalMoves) {
+      const piece = chessRef.current?.get(sq);
+      if (piece) {
+        styles[sq] = {
+          background: "radial-gradient(transparent 56%, rgba(0,0,0,0.35) 56%)",
+        };
+      } else {
+        styles[sq] = {
+          background: "radial-gradient(circle, rgba(0,0,0,0.35) 22%, transparent 23%)",
+        };
+      }
+    }
+
+    return styles;
+  }, [selectedSquare, legalMoves, boardFen]);
 
   async function reportAttempt(correct: boolean) {
     if (!currentPuzzle) return;
@@ -174,6 +234,8 @@ export default function TrainPage() {
       setBoardFen(currentPuzzle.fen);
       setPuzzleState("solving");
       setStartTime(Date.now());
+      setSelectedSquare(null);
+      setLegalMoves([]);
     } catch {}
   }
 
@@ -320,10 +382,12 @@ export default function TrainPage() {
             <div className="relative">
               <Chessboard
                 position={boardFen}
-                onPieceDrop={onDrop}
+                onPieceClick={onPieceClick}
+                onSquareClick={onSquareClick}
                 boardOrientation={boardOrientation}
                 boardWidth={560}
-                arePiecesDraggable={puzzleState === "solving"}
+                arePiecesDraggable={false}
+                customSquareStyles={squareStyles}
                 customBoardStyle={{
                   borderRadius: "8px",
                   boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
