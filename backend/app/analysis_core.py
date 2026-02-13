@@ -379,7 +379,7 @@ def generate_puzzle_data(
     # ── Only-one-good-move filter ──
     # If we have the gap between best and 2nd-best move, reject positions
     # where the 2nd-best move is close to the best (multiple good options).
-    PUZZLE_GAP_THRESHOLD_CP = 150
+    PUZZLE_GAP_THRESHOLD_CP = 300
     if best_second_gap_cp is not None and best_second_gap_cp < PUZZLE_GAP_THRESHOLD_CP:
         return None
 
