@@ -10,9 +10,42 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from typing import Optional
 
 import chess
+
+
+# ═══════════════════════════════════════════════════════════
+# Opening Name Extraction
+# ═══════════════════════════════════════════════════════════
+
+
+def extract_opening_name(headers: dict) -> str | None:
+    """
+    Extract a human-readable opening name from PGN headers.
+    Handles both Lichess (Opening header) and Chess.com (ECOUrl header).
+    Falls back to ECO code if nothing better is available.
+    """
+    # Lichess and some PGNs include an explicit Opening header
+    opening = headers.get("Opening")
+    if opening:
+        return opening
+
+    # Chess.com uses ECOUrl, e.g.
+    # https://www.chess.com/openings/Queens-Gambit-Accepted-Central-Variation-Greco-Variation-4.a4
+    eco_url = headers.get("ECOUrl", "")
+    if "/openings/" in eco_url:
+        slug = eco_url.split("/openings/")[-1]
+        # Remove trailing move annotations like "-4.a4", "-3...d5"
+        slug = re.sub(r'-\d+\.+.*$', '', slug)
+        # Convert hyphens to spaces
+        name = slug.replace("-", " ").strip()
+        if name:
+            return name
+
+    # Last resort: ECO code
+    return headers.get("ECO", None)
 
 
 # ═══════════════════════════════════════════════════════════

@@ -36,6 +36,7 @@ from app.analysis_core import (
     detect_phase,
     count_material,
     generate_puzzle_data,
+    extract_opening_name,
     avg,
 )
 
@@ -823,7 +824,7 @@ async def _analyze_game(
         white=white,
         black=black,
         result=result,
-        opening=headers.get("Opening", headers.get("ECO")),
+        opening=extract_opening_name(headers),
         eco=headers.get("ECO"),
         date=headers.get("UTCDate", headers.get("Date")),
         time_control=headers.get("TimeControl"),

@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.auth import require_user
 from app.db.models import Game, User
 from app.db.session import get_db
+from app.analysis_core import extract_opening_name
 
 router = APIRouter()
 
@@ -463,7 +464,7 @@ async def _import_pgn_games(
         player_elo = white_elo if color == "white" else black_elo
         opponent_elo = black_elo if color == "white" else white_elo
 
-        opening = headers.get("Opening", headers.get("ECO", None))
+        opening = extract_opening_name(headers)
         eco = headers.get("ECO", None)
         time_control = headers.get("TimeControl", None)
 
