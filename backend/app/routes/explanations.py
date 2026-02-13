@@ -24,6 +24,7 @@ from app.auth import require_user
 from app.config import get_settings
 from app.db.models import Streak, User
 from app.db.session import get_db
+from app.analysis_core import describe_board_for_ai
 
 router = APIRouter()
 
@@ -341,8 +342,14 @@ Rules:
 - If the move was good, explain what it achieves strategically or tactically
 - Never use vague statements like "this was a mistake"
 - Always explain the REASON (hanging piece, weakened squares, tempo loss, etc.)
-- Be specific about squares, pieces, and threats
-- Be encouraging but honest"""
+- Be encouraging but honest
+
+CRITICAL RULES — DO NOT VIOLATE:
+- You are given a detailed board description below. ONLY reference pieces and squares that are explicitly listed in that description.
+- NEVER invent captures, threats, or tactical ideas that are not supported by the board description.
+- NEVER claim a piece can be captured unless the board description explicitly states it is hanging or the move description says it is a capture.
+- If you are unsure about a specific tactical detail, describe the strategic idea instead.
+- Focus on the evaluation change and what it means, not on speculating about specific lines."""
 
 
 def _build_explanation_prompt(
@@ -350,31 +357,10 @@ def _build_explanation_prompt(
 ) -> str:
     """Build the prompt for GPT move explanation."""
 
-    # Try to describe the position
-    pos_desc = ""
-    try:
-        board = chess.Board(body.fen)
-        # Count material
-        white_material = sum(
-            len(board.pieces(pt, chess.WHITE)) * v
-            for pt, v in [(chess.PAWN, 1), (chess.KNIGHT, 3), (chess.BISHOP, 3),
-                          (chess.ROOK, 5), (chess.QUEEN, 9)]
-        )
-        black_material = sum(
-            len(board.pieces(pt, chess.BLACK)) * v
-            for pt, v in [(chess.PAWN, 1), (chess.KNIGHT, 3), (chess.BISHOP, 3),
-                          (chess.ROOK, 5), (chess.QUEEN, 9)]
-        )
-        material_diff = white_material - black_material
-        if material_diff > 0:
-            pos_desc = f"White is up {material_diff} points of material. "
-        elif material_diff < 0:
-            pos_desc = f"Black is up {abs(material_diff)} points of material. "
-        else:
-            pos_desc = "Material is roughly equal. "
-    except (ValueError, TypeError):
-        pass
+    # ── Human-readable board description (replaces raw FEN) ──
+    board_desc = describe_board_for_ai(body.fen, body.san)
 
+    # Try to describe evaluation context
     eval_desc = ""
     if body.eval_before is not None:
         eval_pawns = body.eval_before / 100
@@ -385,10 +371,25 @@ def _build_explanation_prompt(
         else:
             eval_desc = f"Black had an advantage of {abs(eval_pawns):.1f} pawns"
 
+    eval_change = ""
+    if body.eval_before is not None and body.eval_after is not None:
+        before_p = body.eval_before / 100
+        after_p = body.eval_after / 100
+        diff = after_p - before_p
+        if abs(diff) >= 0.3:
+            direction = "towards White" if diff > 0 else "towards Black"
+            eval_change = f"After this move, the evaluation shifted by {abs(diff):.1f} pawns {direction} (from {before_p:+.1f} to {after_p:+.1f})."
+
     quality_desc = ""
     if body.move_quality and body.cp_loss is not None:
         if body.cp_loss > 0:
             quality_desc = f"This was classified as a {body.move_quality} (lost {body.cp_loss} centipawns)."
+        elif body.move_quality == "Forced":
+            quality_desc = "This was a forced move (only legal or only reasonable option)."
+        elif body.move_quality == "Brilliant":
+            quality_desc = "This was classified as a Brilliant move — a strong sacrifice or hard-to-find best move."
+        elif body.move_quality == "Great":
+            quality_desc = "This was classified as a Great move — the only strong option in a complex position."
         else:
             quality_desc = f"This was classified as the {body.move_quality} move."
 
@@ -396,17 +397,20 @@ def _build_explanation_prompt(
     if body.best_move_san and body.best_move_san != body.san and body.best_move_san != "?":
         best_move_desc = f"The engine's recommended move was {body.best_move_san}."
 
-    return f"""Position (FEN): {body.fen}
+    return f"""Board state before the move:
+{board_desc}
+
 Move played: {body.san} (move {body.move_number or '?'}, {body.color or '?'} to move)
 Phase: {body.phase or 'unknown'}
 
-{pos_desc}{eval_desc}
+{eval_desc}
+{eval_change}
 {quality_desc}
 {best_move_desc}
 
 Detected concepts: {', '.join(concepts)}
 
-Explain this move in 2-4 sentences."""
+Explain this move in 2-4 sentences. ONLY reference pieces and squares described in the board state above. Do NOT speculate about captures or threats that are not shown."""
 
 
 def _extract_alternative(explanation: str, best_move_san: str) -> Optional[str]:

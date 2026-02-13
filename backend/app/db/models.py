@@ -165,6 +165,10 @@ class GameAnalysis(Base):
     mistakes_count = Column(Integer, default=0)
     inaccuracies_count = Column(Integer, default=0)
     best_moves_count = Column(Integer, default=0)
+    great_moves_count = Column(Integer, default=0)
+    brilliant_moves_count = Column(Integer, default=0)
+    missed_wins_count = Column(Integer, default=0)
+    accuracy = Column(Float, nullable=True)  # chess.com-style win-prob accuracy
     average_move_time = Column(Float, nullable=True)
     time_trouble_blunders = Column(Integer, default=0)
     analysis_depth = Column(Integer, default=12)
@@ -195,6 +199,12 @@ class MoveEvaluation(Base):
     blunder_subtype = Column(String, nullable=True)
     eval_before = Column(Integer, nullable=True)
     eval_after = Column(Integer, nullable=True)
+    fen_before = Column(Text, nullable=True)
+    best_move_san = Column(String, nullable=True)
+    best_move_uci = Column(String, nullable=True)
+    win_prob_before = Column(Float, nullable=True)
+    win_prob_after = Column(Float, nullable=True)
+    accuracy = Column(Float, nullable=True)  # per-move chess.com-style accuracy
     time_remaining = Column(Float, nullable=True)
     is_mate_before = Column(Boolean, default=False)
     is_mate_after = Column(Boolean, default=False)

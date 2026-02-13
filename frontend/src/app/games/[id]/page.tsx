@@ -41,7 +41,7 @@ import {
   moveQualityBg,
   resultBadgeVariant,
 } from "@/components/ui";
-import { cplToAccuracy, accuracyColor, formatAccuracy } from "@/lib/utils";
+import { cplToAccuracy, accuracyColor, formatAccuracy, getAccuracy, moveQualityAnnotation } from "@/lib/utils";
 import Link from "next/link";
 
 export default function GameDetailPage() {
@@ -334,6 +334,7 @@ export default function GameDetailPage() {
                       const result = await explanationsAPI.explainMove({
                         fen: fenBefore,
                         san: currentMoveEval.san,
+                        best_move_san: currentMoveEval.best_move_san ?? undefined,
                         eval_before: currentMoveEval.eval_before ?? undefined,
                         eval_after: currentMoveEval.eval_after ?? undefined,
                         cp_loss: currentMoveEval.cp_loss,
@@ -403,8 +404,8 @@ export default function GameDetailPage() {
             <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-surface-1 border border-surface-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500 uppercase">Accuracy</span>
-                <span className={`text-lg font-bold ${accuracyColor(cplToAccuracy(game.analysis.overall_cpl))}`}>
-                  {formatAccuracy(game.analysis.overall_cpl)}
+                <span className={`text-lg font-bold ${accuracyColor(getAccuracy(game.analysis.accuracy, game.analysis.overall_cpl))}`}>
+                  {formatAccuracy(game.analysis.overall_cpl, game.analysis.accuracy)}
                 </span>
               </div>
               <div className="w-px h-6 bg-surface-3" />
@@ -426,8 +427,8 @@ export default function GameDetailPage() {
               <CollapsibleSection title="Key Moments" defaultOpen={false}>
                 <div className="space-y-2">
                   {analysis?.moves
-                    ?.filter((m) => m.move_quality === "Blunder" || m.move_quality === "Mistake")
-                    .slice(0, 3)
+                    ?.filter((m) => m.move_quality === "Blunder" || m.move_quality === "Mistake" || m.move_quality === "Missed Win" || m.move_quality === "Brilliant")
+                    .slice(0, 5)
                     .map((m, i) => (
                       <div
                         key={i}
@@ -449,7 +450,7 @@ export default function GameDetailPage() {
                         </span>
                       </div>
                     ))}
-                  {(!analysis?.moves?.some((m) => m.move_quality === "Blunder" || m.move_quality === "Mistake")) && (
+                  {(!analysis?.moves?.some((m) => m.move_quality === "Blunder" || m.move_quality === "Mistake" || m.move_quality === "Missed Win" || m.move_quality === "Brilliant")) && (
                     <p className="text-sm text-gray-500">No blunders or mistakes — clean game!</p>
                   )}
                 </div>
@@ -465,14 +466,32 @@ export default function GameDetailPage() {
 
               <CollapsibleSection title="Full Details" defaultOpen={false}>
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-gray-500">Inaccuracies</span>
-                    <p className="text-lg font-bold text-yellow-400">{game.analysis.inaccuracies}</p>
-                  </div>
+                  {(game.analysis.brilliant_moves ?? 0) > 0 && (
+                    <div>
+                      <span className="text-gray-500">Brilliant</span>
+                      <p className="text-lg font-bold text-cyan-300">{game.analysis.brilliant_moves}</p>
+                    </div>
+                  )}
+                  {(game.analysis.great_moves ?? 0) > 0 && (
+                    <div>
+                      <span className="text-gray-500">Great</span>
+                      <p className="text-lg font-bold text-blue-400">{game.analysis.great_moves}</p>
+                    </div>
+                  )}
                   <div>
                     <span className="text-gray-500">Best moves</span>
                     <p className="text-lg font-bold text-cyan-400">{game.analysis.best_moves}</p>
                   </div>
+                  <div>
+                    <span className="text-gray-500">Inaccuracies</span>
+                    <p className="text-lg font-bold text-yellow-400">{game.analysis.inaccuracies}</p>
+                  </div>
+                  {(game.analysis.missed_wins ?? 0) > 0 && (
+                    <div>
+                      <span className="text-gray-500">Missed wins</span>
+                      <p className="text-lg font-bold text-orange-500">{game.analysis.missed_wins}</p>
+                    </div>
+                  )}
                   <div>
                     <span className="text-gray-500">Depth</span>
                     <p className="text-lg font-bold">{game.analysis.depth}</p>
@@ -726,11 +745,13 @@ function MoveCell({
       } ${moveQualityColor(isActive ? null : quality)}`}
     >
       {san}
-      {quality && quality !== "Best" && quality !== "Excellent" && quality !== "Good" && (
-        <span className="ml-1 text-[10px] opacity-60">
-          {quality === "Blunder" ? "??" : quality === "Mistake" ? "?" : "?!"}
+      {quality && quality !== "Best" && quality !== "Excellent" && quality !== "Good" && quality !== "Forced" && (
+        <span className={`ml-1 text-[10px] opacity-60 ${quality === "Brilliant" ? "text-cyan-300" : quality === "Great" ? "text-blue-400" : ""}`}>
+          {moveQualityAnnotation(quality)}
         </span>
       )}
+      {quality === "Brilliant" && <span className="ml-0.5 text-[10px]">💎</span>}
+      {quality === "Great" && <span className="ml-0.5 text-[10px]">⭐</span>}
     </button>
   );
 }
@@ -784,7 +805,7 @@ function PhaseChip({
 }) {
   if (cpl === null) return null;
 
-  const acc = cplToAccuracy(cpl);
+  const acc = getAccuracy(null, cpl);
   const color = accuracyColor(acc);
 
   return (

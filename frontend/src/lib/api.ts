@@ -127,6 +127,10 @@ export interface GameDetail extends GameSummary {
     mistakes: number;
     inaccuracies: number;
     best_moves: number;
+    great_moves: number;
+    brilliant_moves: number;
+    missed_wins: number;
+    accuracy: number | null;
     depth: number;
   };
 }
@@ -141,6 +145,12 @@ export interface MoveEval {
   blunder_subtype: string | null;
   eval_before: number | null;
   eval_after: number | null;
+  fen_before: string | null;
+  best_move_san: string | null;
+  best_move_uci: string | null;
+  win_prob_before: number | null;
+  win_prob_after: number | null;
+  accuracy: number | null;
 }
 
 export interface AnalysisResult {
@@ -759,6 +769,7 @@ export interface AnonGameAnalysis {
   time_control: string | null;
   color: string;
   overall_cpl: number;
+  accuracy: number | null;
   phase_opening_cpl: number | null;
   phase_middlegame_cpl: number | null;
   phase_endgame_cpl: number | null;
@@ -766,6 +777,9 @@ export interface AnonGameAnalysis {
   mistakes: number;
   inaccuracies: number;
   best_moves: number;
+  great_moves: number;
+  brilliant_moves: number;
+  missed_wins: number;
   moves: {
     move_number: number;
     color: string;
@@ -778,6 +792,9 @@ export interface AnonGameAnalysis {
     fen_before?: string | null;
     best_move_san?: string | null;
     best_move_uci?: string | null;
+    win_prob_before?: number | null;
+    win_prob_after?: number | null;
+    accuracy?: number | null;
   }[];
 }
 

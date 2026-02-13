@@ -13,8 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import require_user
-from app.db.models import AnalysisJob, Game, GameAnalysis, MoveEvaluation, User
+from app.db.models import AnalysisJob, Game, GameAnalysis, MoveEvaluation, Puzzle, User
 from app.db.session import get_db, async_session
+from app.analysis_core import (
+    win_probability,
+    move_accuracy,
+    compute_game_accuracy,
+    classify_move,
+    detect_phase,
+    count_material,
+    count_developed_minors,
+    queens_on_board,
+    generate_puzzle_data,
+    avg,
+)
 
 router = APIRouter()
 
@@ -47,6 +59,12 @@ class MoveEvalOut(BaseModel):
     blunder_subtype: Optional[str]
     eval_before: Optional[int]
     eval_after: Optional[int]
+    fen_before: Optional[str] = None
+    best_move_san: Optional[str] = None
+    best_move_uci: Optional[str] = None
+    win_prob_before: Optional[float] = None
+    win_prob_after: Optional[float] = None
+    accuracy: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -206,17 +224,23 @@ async def run_analysis_sync(
 
                     board = pgn_game.board()
                     move_evals = []
-                    player_cp_losses = []  # only player's moves
+                    player_cp_losses = []
+                    player_accuracies = []  # per-move accuracy for player
                     phase_losses = {"opening": [], "middlegame": [], "endgame": []}
                     blunders = 0
                     mistakes = 0
                     inaccuracies = 0
                     best_moves_count = 0
+                    great_moves_count = 0
+                    brilliant_moves_count = 0
+                    missed_wins_count = 0
                     move_num = 0
                     prev_score_cp = 0
                     prev_is_mate = False
+                    prev_mate_in = None
                     castled_white = False
                     castled_black = False
+                    puzzle_candidates = []
 
                     player_color = gd["color"]  # "white" or "black"
 
@@ -225,6 +249,7 @@ async def run_analysis_sync(
                         mv_color = "white" if board.turn == chess.WHITE else "black"
                         san = board.san(move)
                         is_player_move = (mv_color == player_color)
+                        fen_before = board.fen()
 
                         # Track piece moved BEFORE push
                         from_sq = move.from_square
@@ -238,6 +263,23 @@ async def run_analysis_sync(
                             else:
                                 castled_black = True
 
+                        # ── Pre-move engine query (for player moves) ──
+                        best_move_san = None
+                        best_move_uci = None
+                        best_move_obj = None
+                        is_only_legal = (board.legal_moves.count() == 1)
+
+                        if is_player_move:
+                            pre_info = await engine.analyse(
+                                board, chess.engine.Limit(depth=depth),
+                                info=chess.engine.INFO_ALL
+                            )
+                            pv = pre_info.get("pv")
+                            if pv and len(pv) > 0:
+                                best_move_obj = pv[0]
+                                best_move_uci = pv[0].uci()
+                                best_move_san = board.san(pv[0])
+
                         board.push(move)
 
                         info = await engine.analyse(board, chess.engine.Limit(depth=depth))
@@ -245,58 +287,107 @@ async def run_analysis_sync(
                         score = info.get("score")
                         score_cp = 0
                         is_mate = False
+                        mate_in = None
                         if score:
                             pov = score.pov(chess.WHITE)
                             if pov.is_mate():
                                 is_mate = True
-                                mate_val = pov.mate()
-                                # Cap mate scores at ±1500 to avoid wild CPL spikes
-                                score_cp = 1500 if (mate_val and mate_val > 0) else -1500
+                                mate_in = pov.mate()
+                                score_cp = 1500 if (mate_in and mate_in > 0) else -1500
                             else:
                                 score_cp = max(-1500, min(1500, pov.score() or 0))
 
-                        # Skip cp_loss for transitions involving mates on both sides
+                        # CP loss calculation
                         if prev_is_mate and is_mate:
                             cp_loss = 0
                         elif mv_color == "white":
                             cp_loss = max(0, prev_score_cp - score_cp)
                         else:
                             cp_loss = max(0, score_cp - prev_score_cp)
-
-                        # Cap individual cp_loss to prevent outliers
                         cp_loss = min(cp_loss, 800)
 
-                        if cp_loss == 0:
-                            quality = "Best"
-                        elif cp_loss <= 10:
-                            quality = "Excellent"
-                        elif cp_loss <= 25:
-                            quality = "Good"
-                        elif cp_loss <= 100:
-                            quality = "Inaccuracy"
-                        elif cp_loss <= 300:
-                            quality = "Mistake"
+                        # ── Win probability ──
+                        wp_before = win_probability(prev_score_cp, prev_is_mate, prev_mate_in)
+                        wp_after = win_probability(score_cp, is_mate, mate_in)
+
+                        # ── Per-move accuracy ──
+                        mv_accuracy = move_accuracy(wp_before, wp_after, mv_color)
+
+                        # ── Phase detection ──
+                        phase = detect_phase(board, move_num, castled_white, castled_black)
+
+                        # ── Move classification ──
+                        # For opponent moves, use simple cp_loss classification
+                        if is_player_move:
+                            # Undo the push temporarily for classification context
+                            board.pop()
+                            quality = classify_move(
+                                cp_loss=cp_loss,
+                                win_prob_before=wp_before,
+                                win_prob_after=wp_after,
+                                color=mv_color,
+                                board_before=board,
+                                move=move,
+                                best_move=best_move_obj,
+                                is_only_legal=is_only_legal,
+                                eval_before_cp=prev_score_cp,
+                                eval_after_cp=score_cp,
+                                is_mate_before=prev_is_mate,
+                                is_mate_after=is_mate,
+                                mate_before=prev_mate_in,
+                                mate_after=mate_in,
+                            )
+                            board.push(move)  # re-push
                         else:
-                            quality = "Blunder"
+                            # Simple classification for opponent moves
+                            if cp_loss == 0:
+                                quality = "Best"
+                            elif cp_loss <= 10:
+                                quality = "Excellent"
+                            elif cp_loss <= 25:
+                                quality = "Good"
+                            elif cp_loss <= 100:
+                                quality = "Inaccuracy"
+                            elif cp_loss <= 300:
+                                quality = "Mistake"
+                            else:
+                                quality = "Blunder"
 
                         # Only count player's move quality stats
                         if is_player_move:
+                            player_accuracies.append(mv_accuracy)
+                            player_cp_losses.append(cp_loss)
+
                             if quality == "Best":
                                 best_moves_count += 1
+                            elif quality == "Great":
+                                great_moves_count += 1
+                            elif quality == "Brilliant":
+                                brilliant_moves_count += 1
+                            elif quality == "Missed Win":
+                                missed_wins_count += 1
                             elif quality == "Inaccuracy":
                                 inaccuracies += 1
                             elif quality == "Mistake":
                                 mistakes += 1
                             elif quality == "Blunder":
                                 blunders += 1
-                            player_cp_losses.append(cp_loss)
 
-                        # Multi-factor phase detection
-                        phase = _detect_phase(board, move_num, castled_white, castled_black)
-
-                        # Only accumulate player's phase losses
-                        if is_player_move:
                             phase_losses[phase].append(cp_loss)
+
+                            # Collect puzzle candidates
+                            puzzle_data = generate_puzzle_data(
+                                fen_before=fen_before,
+                                san=san,
+                                best_move_san=best_move_san,
+                                best_move_uci=best_move_uci,
+                                cp_loss=cp_loss,
+                                phase=phase,
+                                move_quality=quality,
+                                move_number=move_num,
+                            )
+                            if puzzle_data:
+                                puzzle_candidates.append(puzzle_data)
 
                         move_evals.append({
                             "game_id": game_id,
@@ -309,39 +400,62 @@ async def run_analysis_sync(
                             "move_quality": quality,
                             "eval_before": prev_score_cp,
                             "eval_after": score_cp,
+                            "fen_before": fen_before,
+                            "best_move_san": best_move_san if is_player_move else None,
+                            "best_move_uci": best_move_uci if is_player_move else None,
+                            "win_prob_before": round(wp_before, 4),
+                            "win_prob_after": round(wp_after, 4),
+                            "accuracy": round(mv_accuracy, 1),
                             "is_mate_before": prev_is_mate,
                             "is_mate_after": is_mate,
                         })
 
                         prev_score_cp = score_cp
                         prev_is_mate = is_mate
+                        prev_mate_in = mate_in
 
                     # CPL = average of player's moves only
                     overall_cpl = round(sum(player_cp_losses) / len(player_cp_losses), 2) if player_cp_losses else 0
+                    game_acc = compute_game_accuracy(player_accuracies)
 
                     # Save to DB
                     async with async_session() as save_db:
                         analysis_row = GameAnalysis(
                             game_id=game_id,
                             overall_cpl=overall_cpl,
-                            phase_opening_cpl=_avg(phase_losses["opening"]),
-                            phase_middlegame_cpl=_avg(phase_losses["middlegame"]),
-                            phase_endgame_cpl=_avg(phase_losses["endgame"]),
+                            phase_opening_cpl=avg(phase_losses["opening"]),
+                            phase_middlegame_cpl=avg(phase_losses["middlegame"]),
+                            phase_endgame_cpl=avg(phase_losses["endgame"]),
                             blunders_count=blunders,
                             mistakes_count=mistakes,
                             inaccuracies_count=inaccuracies,
                             best_moves_count=best_moves_count,
+                            great_moves_count=great_moves_count,
+                            brilliant_moves_count=brilliant_moves_count,
+                            missed_wins_count=missed_wins_count,
+                            accuracy=game_acc,
                             analysis_depth=depth,
                         )
                         save_db.add(analysis_row)
                         for me in move_evals:
                             save_db.add(MoveEvaluation(**me))
+
+                        # ── Generate puzzles ──
+                        for pd in puzzle_candidates:
+                            pd["source_game_id"] = game_id
+                            # Skip duplicates
+                            existing = await save_db.execute(
+                                select(Puzzle).where(Puzzle.puzzle_key == pd["puzzle_key"])
+                            )
+                            if not existing.scalar_one_or_none():
+                                save_db.add(Puzzle(**pd))
+
                         await save_db.commit()
 
                     # Progress event
                     wp = gd.get("white_player", "?")
                     bp = gd.get("black_player", "?")
-                    yield f"data: {json.dumps({'type': 'progress', 'completed': idx + 1, 'total': total, 'game_id': game_id, 'game_label': f'{wp} vs {bp}', 'overall_cpl': overall_cpl, 'blunders': blunders, 'mistakes': mistakes})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'completed': idx + 1, 'total': total, 'game_id': game_id, 'game_label': f'{wp} vs {bp}', 'overall_cpl': overall_cpl, 'accuracy': game_acc, 'blunders': blunders, 'mistakes': mistakes})}\n\n"
 
                 except Exception as e:
                     yield f"data: {json.dumps({'type': 'game_error', 'game_id': game_id, 'message': str(e)[:200]})}\n\n"
@@ -398,6 +512,12 @@ async def get_game_analysis(
             blunder_subtype=m.blunder_subtype,
             eval_before=m.eval_before,
             eval_after=m.eval_after,
+            fen_before=m.fen_before,
+            best_move_san=m.best_move_san,
+            best_move_uci=m.best_move_uci,
+            win_prob_before=m.win_prob_before,
+            win_prob_after=m.win_prob_after,
+            accuracy=m.accuracy,
         )
         for m in sorted(game.move_evals, key=lambda x: x.move_number)
     ]
@@ -413,6 +533,10 @@ async def get_game_analysis(
             "mistakes": a.mistakes_count,
             "inaccuracies": a.inaccuracies_count,
             "best_moves": a.best_moves_count,
+            "great_moves": a.great_moves_count,
+            "brilliant_moves": a.brilliant_moves_count,
+            "missed_wins": a.missed_wins_count,
+            "accuracy": a.accuracy,
             "depth": a.analysis_depth,
             "analyzed_at": a.analyzed_at.isoformat() if a.analyzed_at else None,
         },
@@ -421,77 +545,5 @@ async def get_game_analysis(
 
 
 # ═══════════════════════════════════════════════════════════
-# Helpers
+# Helpers (phase detection + utility now in analysis_core.py)
 # ═══════════════════════════════════════════════════════════
-
-def _count_material(board) -> int:
-    """Count non-pawn material value (for phase detection)."""
-    import chess as _chess
-    values = {_chess.KNIGHT: 3, _chess.BISHOP: 3, _chess.ROOK: 5, _chess.QUEEN: 9}
-    total = 0
-    for piece_type, value in values.items():
-        total += len(board.pieces(piece_type, _chess.WHITE)) * value
-        total += len(board.pieces(piece_type, _chess.BLACK)) * value
-    return total
-
-
-def _count_developed_minors(board) -> int:
-    """Count how many minor pieces (N/B) have left their starting squares."""
-    import chess as _chess
-    starting = {
-        _chess.WHITE: {
-            _chess.KNIGHT: [_chess.B1, _chess.G1],
-            _chess.BISHOP: [_chess.C1, _chess.F1],
-        },
-        _chess.BLACK: {
-            _chess.KNIGHT: [_chess.B8, _chess.G8],
-            _chess.BISHOP: [_chess.C8, _chess.F8],
-        },
-    }
-    developed = 0
-    for color in [_chess.WHITE, _chess.BLACK]:
-        for piece_type, home_squares in starting[color].items():
-            for sq in home_squares:
-                piece = board.piece_at(sq)
-                if not piece or piece.piece_type != piece_type or piece.color != color:
-                    developed += 1
-    return developed
-
-
-def _queens_on_board(board) -> bool:
-    """Check if any queens remain on the board."""
-    import chess as _chess
-    return bool(board.pieces(_chess.QUEEN, _chess.WHITE) or board.pieces(_chess.QUEEN, _chess.BLACK))
-
-
-def _detect_phase(board, move_num: int, castled_white: bool, castled_black: bool) -> str:
-    """
-    Multi-factor game phase detection:
-    - Opening: move ≤ 15 AND high material AND few pieces developed
-    - Endgame: low material OR no queens with reduced material OR only pawns + kings
-    - Middlegame: everything else
-    """
-    material = _count_material(board)
-    developed = _count_developed_minors(board)
-    has_queens = _queens_on_board(board)
-
-    # Endgame detection (takes priority — once you're in endgame, you stay there)
-    if material == 0:
-        return "endgame"
-    if material <= 13:
-        return "endgame"
-    if not has_queens and material <= 20:
-        return "endgame"
-
-    # Opening detection
-    if move_num <= 15 and material > 26 and developed < 6:
-        return "opening"
-
-    # Everything else is middlegame
-    return "middlegame"
-
-
-def _avg(lst: list) -> float | None:
-    if not lst:
-        return None
-    return round(sum(lst) / len(lst), 2)

@@ -213,16 +213,24 @@ export function StatCard({ label, value, subtitle, icon, trend }: StatCardProps)
 
 export function moveQualityColor(quality: string | null): string {
   switch (quality) {
+    case "Brilliant":
+      return "text-cyan-300";
+    case "Great":
+      return "text-blue-400";
     case "Best":
       return "text-cyan-400";
     case "Excellent":
       return "text-green-400";
     case "Good":
       return "text-green-300";
+    case "Forced":
+      return "text-gray-400";
     case "Inaccuracy":
       return "text-yellow-400";
     case "Mistake":
       return "text-orange-400";
+    case "Missed Win":
+      return "text-orange-500";
     case "Blunder":
       return "text-red-400";
     default:
@@ -232,16 +240,24 @@ export function moveQualityColor(quality: string | null): string {
 
 export function moveQualityBg(quality: string | null): string {
   switch (quality) {
+    case "Brilliant":
+      return "bg-cyan-300/10";
+    case "Great":
+      return "bg-blue-400/10";
     case "Best":
       return "bg-cyan-400/10";
     case "Excellent":
       return "bg-green-400/10";
     case "Good":
       return "bg-green-300/10";
+    case "Forced":
+      return "bg-gray-400/10";
     case "Inaccuracy":
       return "bg-yellow-400/10";
     case "Mistake":
       return "bg-orange-400/10";
+    case "Missed Win":
+      return "bg-orange-500/10";
     case "Blunder":
       return "bg-red-400/10";
     default:
