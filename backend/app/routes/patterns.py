@@ -104,6 +104,7 @@ async def get_recurring_patterns(
         .where(
             Game.user_id == user.id,
             MoveEvaluation.phase.isnot(None),
+            MoveEvaluation.color == Game.color,  # only player's moves
         )
         .group_by(MoveEvaluation.phase)
     )
@@ -150,6 +151,7 @@ async def get_recurring_patterns(
         .where(
             Game.user_id == user.id,
             MoveEvaluation.move_quality == "Blunder",
+            MoveEvaluation.color == Game.color,  # only player's blunders
         )
         .group_by(MoveEvaluation.phase)
     )
@@ -206,6 +208,7 @@ async def get_recurring_patterns(
             Game.user_id == user.id,
             MoveEvaluation.piece.isnot(None),
             MoveEvaluation.cp_loss > 25,
+            MoveEvaluation.color == Game.color,  # only player's moves
         )
         .group_by(MoveEvaluation.piece)
         .having(func.count(MoveEvaluation.id) >= 5)
@@ -320,7 +323,8 @@ async def get_progress(
         avg_cpl = round(float(row[2]), 1) if row[2] else None
         total_blunders = row[3] or 0
         total_moves = row[4] or 1
-        blunder_rate = round((total_blunders / max(total_moves, 1)) * 100, 2)
+        player_moves = max(total_moves / 2, 1)  # moves_count includes both sides
+        blunder_rate = round((total_blunders / player_moves) * 100, 2)
 
         overall.append(ProgressPoint(
             period=period,
@@ -348,6 +352,7 @@ async def get_progress(
             .where(
                 Game.user_id == user.id,
                 MoveEvaluation.phase == phase_name,
+                MoveEvaluation.color == Game.color,  # only player's moves
                 Game.date >= cutoff,
             )
             .group_by(func.to_char(Game.date, 'YYYY-MM'))

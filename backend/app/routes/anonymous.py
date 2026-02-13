@@ -293,8 +293,10 @@ async def claim_anonymous_results(
         player_elo = None
         opponent_elo = None
 
-        # Count moves
-        moves_count = len(g.moves) * 2 if g.moves else 0  # approximate: both sides
+        # Count moves — g.moves only contains player's moves, so we need
+        # to estimate total ply count. Each player move ≈ 1 ply, so roughly
+        # double for both sides.
+        moves_count = len(g.moves) * 2 if g.moves else 0
 
         # We don't have the PGN text in the claim request, but we can
         # reconstruct a minimal placeholder
@@ -614,8 +616,10 @@ async def _analyze_game(
     inaccuracies = 0
     best_moves_count = 0
     player_move_count = 0
+    total_move_count = 0
     move_num = 0
     prev_score_cp = 0
+    prev_is_mate = False
 
     for move in pgn_game.mainline_moves():
         move_num += 1
@@ -642,19 +646,27 @@ async def _analyze_game(
 
         score = info.get("score")
         score_cp = 0
+        is_mate = False
         if score:
             pov = score.pov(chess.WHITE)
             if pov.is_mate():
+                is_mate = True
                 mate_val = pov.mate()
-                score_cp = 10000 if (mate_val and mate_val > 0) else -10000
+                # Cap mate scores at ±1500 to avoid wild CPL spikes
+                score_cp = 1500 if (mate_val and mate_val > 0) else -1500
             else:
-                score_cp = pov.score() or 0
+                score_cp = max(-1500, min(1500, pov.score() or 0))
 
-        # CP loss
-        if mv_color == "white":
+        # Skip cp_loss for transitions involving mates on both sides
+        if prev_is_mate and is_mate:
+            cp_loss = 0
+        elif mv_color == "white":
             cp_loss = max(0, prev_score_cp - score_cp)
         else:
             cp_loss = max(0, score_cp - prev_score_cp)
+
+        # Cap individual cp_loss to prevent outliers
+        cp_loss = min(cp_loss, 800)
 
         # Quality
         if cp_loss == 0:
@@ -709,6 +721,8 @@ async def _analyze_game(
             ))
 
         prev_score_cp = score_cp
+        prev_is_mate = is_mate
+        total_move_count += 1
 
     overall_cpl = round(total_cp_loss / player_move_count, 1) if player_move_count > 0 else 0
 

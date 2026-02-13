@@ -89,7 +89,8 @@ async def get_overview(
     overall_cpl = (await db.execute(cpl_q)).scalar()
     overall_cpl = round(overall_cpl, 1) if overall_cpl else None
 
-    # Blunder rate per 100 moves
+    # Blunder rate per 100 player moves
+    # blunders_count is player-only, so divide by player moves (total_moves / 2)
     blunder_q = (
         select(
             func.sum(GameAnalysis.blunders_count).label("total_blunders"),
@@ -101,7 +102,8 @@ async def get_overview(
     row = (await db.execute(blunder_q)).one_or_none()
     blunder_rate = None
     if row and row.total_moves and row.total_moves > 0:
-        blunder_rate = round(row.total_blunders / row.total_moves * 100, 2)
+        player_moves = row.total_moves / 2  # moves_count includes both sides
+        blunder_rate = round(row.total_blunders / player_moves * 100, 2)
 
     # Recent CPL (last 10 games) for trend
     recent_q = (
