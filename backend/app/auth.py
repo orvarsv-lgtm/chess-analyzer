@@ -58,13 +58,13 @@ async def get_current_user(
         result = await db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
 
-    # Auto-create user in dev mode if they don't exist yet
-    if user is None and settings.env == "development":
+    # Auto-create user if they don't exist yet (first sign-in via NextAuth)
+    if user is None:
         import uuid
         user = User(
             id=str(uuid.uuid4()),
             email=email or user_id,
-            name=(email or user_id).split("@")[0] if email or user_id else "Dev User",
+            name=(email or user_id).split("@")[0] if email or user_id else "User",
         )
         db.add(user)
         await db.commit()
