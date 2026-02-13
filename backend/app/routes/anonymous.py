@@ -293,14 +293,12 @@ async def claim_anonymous_results(
         player_elo = None
         opponent_elo = None
 
-        # Count moves — g.moves only contains player's moves, so we need
-        # to estimate total ply count. Each player move ≈ 1 ply, so roughly
-        # double for both sides.
-        moves_count = len(g.moves) * 2 if g.moves else 0
+        # g.moves now contains ALL moves (both players), so total count is direct
+        moves_count = len(g.moves) if g.moves else 0
 
-        # We don't have the PGN text in the claim request, but we can
-        # reconstruct a minimal placeholder
-        moves_pgn = f'[White "{g.white}"]\n[Black "{g.black}"]\n[Result "{_result_pgn(g.result, g.color)}"]\n'
+        # Reconstruct full PGN from the move SAN data
+        result_pgn = _result_pgn(g.result, g.color)
+        moves_pgn = f'[White "{g.white}"]\n[Black "{g.black}"]\n[Result "{result_pgn}"]\n'
         if g.opening:
             moves_pgn += f'[Opening "{g.opening}"]\n'
         if g.eco:
@@ -309,6 +307,17 @@ async def claim_anonymous_results(
             moves_pgn += f'[Date "{g.date}"]\n'
         if g.time_control:
             moves_pgn += f'[TimeControl "{g.time_control}"]\n'
+        moves_pgn += "\n"
+
+        # Build the move text from SAN data
+        move_text_parts: list[str] = []
+        for m in g.moves:
+            if m.color == "white":
+                move_text_parts.append(f"{m.move_number}. {m.san}")
+            else:
+                move_text_parts.append(m.san)
+        if move_text_parts:
+            moves_pgn += " ".join(move_text_parts) + f" {result_pgn}\n"
 
         game_row = Game(
             user_id=user_id,
@@ -691,7 +700,7 @@ async def _analyze_game(
         else:
             phase = "middlegame"
 
-        # Only count/evaluate metrics for the player's own moves
+        # Count/evaluate aggregate metrics only for the player's own moves
         if mv_color == color:
             player_move_count += 1
             phase_losses[phase].append(cp_loss)
@@ -706,19 +715,23 @@ async def _analyze_game(
             elif quality == "Blunder":
                 blunders += 1
 
-            move_evals.append(MoveEvalOut(
-                move_number=move_num,
-                color=mv_color,
-                san=san,
-                cp_loss=cp_loss,
-                phase=phase,
-                move_quality=quality,
-                eval_before=prev_score_cp,
-                eval_after=score_cp,
-                fen_before=fen_before,
-                best_move_san=best_move_san,
-                best_move_uci=best_move_uci,
-            ))
+        # Append ALL moves (both players) so the claim can reconstruct
+        # the full game PGN and create complete MoveEvaluation rows.
+        # Opponent moves get cp_loss and quality but aren't counted in
+        # the player's aggregate metrics above.
+        move_evals.append(MoveEvalOut(
+            move_number=move_num,
+            color=mv_color,
+            san=san,
+            cp_loss=cp_loss,
+            phase=phase,
+            move_quality=quality,
+            eval_before=prev_score_cp,
+            eval_after=score_cp,
+            fen_before=fen_before,
+            best_move_san=best_move_san if mv_color == color else None,
+            best_move_uci=best_move_uci if mv_color == color else None,
+        ))
 
         prev_score_cp = score_cp
         prev_is_mate = is_mate

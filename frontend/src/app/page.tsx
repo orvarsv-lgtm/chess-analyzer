@@ -29,7 +29,7 @@ import {
 import { Card, CardContent, StatCard, Badge, Button, Spinner } from "@/components/ui";
 import { cplToAccuracy, accuracyColor, formatAccuracy } from "@/lib/utils";
 
-type Step = "input" | "analyzing" | "results-locked" | "results";
+type Step = "input" | "analyzing" | "results-locked" | "claiming" | "results";
 
 export default function HomePage() {
   const { data: session, status: authStatus } = useSession();
@@ -38,12 +38,14 @@ export default function HomePage() {
   const [overview, setOverview] = useState<InsightsOverview | null>(null);
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
   const [topWeakness, setTopWeakness] = useState<Weakness | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
 
   // ─── Anonymous analysis state ───────────────────────
   const [platform, setPlatform] = useState<"lichess" | "chess.com" | "pgn">("lichess");
   const [username, setUsername] = useState("");
   const [pgnText, setPgnText] = useState("");
   const [error, setError] = useState("");
+  const [claimError, setClaimError] = useState("");
 
   // Progress
   const [progressTotal, setProgressTotal] = useState(0);
@@ -61,34 +63,50 @@ export default function HomePage() {
     try {
       const raw = sessionStorage.getItem("anon_analysis_results");
       if (raw) {
-        setResults(JSON.parse(raw) as AnonAnalysisResults);
+        const parsed = JSON.parse(raw) as AnonAnalysisResults;
+        setResults(parsed);
         setStep("results-locked");
       }
     } catch {}
   }, []);
 
-  // Once auth resolves AND we're in results-locked with data, unlock results
-  // and persist them to the user's account.
+  // Claim helper — persists results to user account, awaits completion
+  const doClaim = useCallback(async (data: AnonAnalysisResults) => {
+    setStep("claiming");
+    setClaimError("");
+    try {
+      await claimAnonymousResults(data);
+      // Claim succeeded — safe to clear sessionStorage now
+      try { sessionStorage.removeItem("anon_analysis_results"); } catch {}
+      setStep("results");
+    } catch (err) {
+      console.error("Failed to claim anonymous results:", err);
+      setClaimError(
+        err instanceof Error ? err.message : "Failed to save your results. Please try again."
+      );
+      // Stay on "claiming" step so user can retry — sessionStorage still has data
+      setStep("results-locked");
+    }
+  }, []);
+
+  // Once auth resolves AND we're in results-locked with data, start the claim
   useEffect(() => {
     if (authStatus === "authenticated" && session && step === "results-locked" && results) {
-      setStep("results");
-      sessionStorage.removeItem("anon_analysis_results");
-
-      // Persist results to user's account in the background
-      claimAnonymousResults(results).catch((err) => {
-        console.warn("Failed to claim anonymous results:", err);
-      });
+      doClaim(results);
     }
-  }, [authStatus, session, step, results]);
+  }, [authStatus, session, step, results, doClaim]);
 
   // Load dashboard data for logged-in users
   useEffect(() => {
     if (session && step === "input") {
-      insightsAPI.overview().then(setOverview).catch(() => {});
-      insightsAPI.recentGames(3).then(setRecentGames).catch(() => {});
-      insightsAPI.weaknesses().then((w) => {
-        if (w.weaknesses?.length) setTopWeakness(w.weaknesses[0]);
-      }).catch(() => {});
+      setDashboardLoading(true);
+      Promise.all([
+        insightsAPI.overview().then(setOverview).catch(() => {}),
+        insightsAPI.recentGames(3).then(setRecentGames).catch(() => {}),
+        insightsAPI.weaknesses().then((w) => {
+          if (w.weaknesses?.length) setTopWeakness(w.weaknesses[0]);
+        }).catch(() => {}),
+      ]).finally(() => setDashboardLoading(false));
     }
   }, [session, step]);
 
@@ -134,14 +152,9 @@ export default function HomePage() {
       try {
         sessionStorage.setItem("anon_analysis_results", JSON.stringify(finalResults));
       } catch {}
-      // If user is already signed in, go straight to results and persist
+      // If user is already signed in, claim immediately
       if (session) {
-        setStep("results");
-        sessionStorage.removeItem("anon_analysis_results");
-        // Persist results to user's account in the background
-        claimAnonymousResults(finalResults).catch((err) => {
-          console.warn("Failed to claim anonymous results:", err);
-        });
+        doClaim(finalResults);
       } else {
         setStep("results-locked");
       }
@@ -149,7 +162,7 @@ export default function HomePage() {
       setError(err instanceof Error ? err.message : "Analysis failed");
       setStep("input");
     }
-  }, [platform, username, pgnText, session]);
+  }, [platform, username, pgnText, session, doClaim]);
 
   // Wait until client has mounted AND auth has resolved before deciding view
   if (!hasMounted || authStatus === "loading") {
@@ -162,7 +175,7 @@ export default function HomePage() {
 
   // ─── If signed in and no analysis in progress, show dashboard ──
   if (session && step === "input" && !results) {
-    return <LoggedInDashboard overview={overview} recentGames={recentGames} topWeakness={topWeakness} />;
+    return <LoggedInDashboard overview={overview} recentGames={recentGames} topWeakness={topWeakness} loading={dashboardLoading} />;
   }
 
   // ─── Render based on step ───────────────────────────
@@ -203,7 +216,20 @@ export default function HomePage() {
 
       {/* Step: Results locked (need sign-in) */}
       {step === "results-locked" && results && (
-        <ResultsLocked results={results} />
+        <ResultsLocked results={results} claimError={claimError} />
+      )}
+
+      {/* Step: Claiming — saving results to account */}
+      {step === "claiming" && (
+        <Card>
+          <CardContent className="py-12 space-y-4 text-center">
+            <Spinner className="h-10 w-10 text-brand-500 mx-auto" />
+            <h2 className="text-xl font-semibold">Saving your results...</h2>
+            <p className="text-gray-400 text-sm">
+              Persisting {results?.total_games ?? 0} games to your account
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {/* Step: Results (signed in) */}
@@ -374,7 +400,7 @@ function AnalyzingProgress({ total, done }: { total: number; done: number }) {
 // Results Locked (Sign-in required)
 // ═══════════════════════════════════════════════════════════
 
-function ResultsLocked({ results }: { results: AnonAnalysisResults }) {
+function ResultsLocked({ results, claimError }: { results: AnonAnalysisResults; claimError?: string }) {
   return (
     <div className="space-y-6">
       {/* Completion banner */}
@@ -388,6 +414,14 @@ function ResultsLocked({ results }: { results: AnonAnalysisResults }) {
           </p>
         </CardContent>
       </Card>
+
+      {/* Claim error banner */}
+      {claimError && (
+        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">
+          <AlertTriangle className="h-5 w-5 inline-block mr-2" />
+          {claimError} — Sign in again to retry.
+        </div>
+      )}
 
       {/* Blurred preview */}
       <div className="relative">
@@ -604,10 +638,12 @@ function LoggedInDashboard({
   overview,
   recentGames,
   topWeakness,
+  loading,
 }: {
   overview: InsightsOverview | null;
   recentGames: RecentGame[];
   topWeakness: Weakness | null;
+  loading?: boolean;
 }) {
   const accuracy = cplToAccuracy(overview?.overall_cpl);
   const recentAccuracy = cplToAccuracy(overview?.recent_cpl);
@@ -637,6 +673,11 @@ function LoggedInDashboard({
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
           Welcome back
         </h1>
+        {loading && !overview && (
+          <div className="flex justify-center py-4">
+            <Spinner className="h-6 w-6 text-brand-500" />
+          </div>
+        )}
         {accuracy !== null && (
           <div className="flex flex-col items-center gap-1">
             <p className={`text-5xl font-bold ${accuracyColor(accuracy)}`}>
