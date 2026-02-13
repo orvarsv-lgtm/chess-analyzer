@@ -157,12 +157,29 @@ export default function TrainPage() {
   function onPieceClick(piece: string, square: Square) {
     if (!chessRef.current || puzzleState !== "solving") return;
 
-    if (selectedSquare && selectedSquare !== square) {
+    const clicked = chessRef.current.get(square);
+
+    if (selectedSquare) {
+      // Toggle off when clicking the same piece again
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+
+      // If clicking another friendly piece, just clear selection/dots
+      // (do not immediately switch selection)
+      if (clicked && clicked.color === chessRef.current.turn()) {
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+
+      // Otherwise try to move (e.g. capture on enemy piece)
       if (tryMove(selectedSquare, square)) return;
     }
 
-    const p = chessRef.current.get(square);
-    if (p && p.color === chessRef.current.turn()) {
+    if (clicked && clicked.color === chessRef.current.turn()) {
       setSelectedSquare(square);
       const moves = chessRef.current.moves({ square, verbose: true });
       setLegalMoves(moves.map((m) => m.to as Square));
@@ -175,15 +192,30 @@ export default function TrainPage() {
   function onSquareClick(square: Square, piece?: string) {
     if (!chessRef.current || puzzleState !== "solving") return;
 
+    const clicked = chessRef.current.get(square);
+
     if (selectedSquare) {
+      // Toggle off when clicking same square
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+
+      // Clicking another friendly piece should clear selection/dots
+      if (clicked && clicked.color === chessRef.current.turn()) {
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+
       if (tryMove(selectedSquare, square)) return;
     }
 
     // Fallback selection path: react-chessboard always passes piece on square-click,
     // even when onPieceClick doesn't fire in some interaction modes.
     if (piece) {
-      const p = chessRef.current.get(square);
-      if (p && p.color === chessRef.current.turn()) {
+      if (clicked && clicked.color === chessRef.current.turn()) {
         setSelectedSquare(square);
         const moves = chessRef.current.moves({ square, verbose: true });
         setLegalMoves(moves.map((m) => m.to as Square));
