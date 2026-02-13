@@ -275,33 +275,21 @@ async def get_weaknesses(
     weaknesses = []
     baseline = phase.overall or 50
 
-    # Phase weaknesses
-    if phase.opening and phase.opening > baseline * 1.15:
-        weaknesses.append({
-            "area": "Opening",
-            "severity": "high" if phase.opening > baseline * 1.3 else "medium",
-            "message": "Your opening accuracy is below your overall level.",
-            "cpl": round(phase.opening, 1),
-            "action": "Focus on learning your opening lines deeper.",
-        })
-
-    if phase.middlegame and phase.middlegame > baseline * 1.15:
-        weaknesses.append({
-            "area": "Middlegame",
-            "severity": "high" if phase.middlegame > baseline * 1.3 else "medium",
-            "message": "You lose accuracy in complex middlegame positions.",
-            "cpl": round(phase.middlegame, 1),
-            "action": "Practice tactical puzzles to improve calculation.",
-        })
-
-    if phase.endgame and phase.endgame > baseline * 1.15:
-        weaknesses.append({
-            "area": "Endgame",
-            "severity": "high" if phase.endgame > baseline * 1.3 else "medium",
-            "message": "Your endgame technique needs work.",
-            "cpl": round(phase.endgame, 1),
-            "action": "Study basic endgame positions (K+P, R+P).",
-        })
+    # Phase weaknesses – relative comparison first, then absolute fallback
+    phase_entries = [
+        ("Opening", phase.opening, "Your opening accuracy is below your overall level.", "Focus on learning your opening lines deeper."),
+        ("Middlegame", phase.middlegame, "You lose accuracy in complex middlegame positions.", "Practice tactical puzzles to improve calculation."),
+        ("Endgame", phase.endgame, "Your endgame technique needs work.", "Study basic endgame positions (K+P, R+P)."),
+    ]
+    for area, cpl, msg, action in phase_entries:
+        if cpl and cpl > baseline * 1.15:
+            weaknesses.append({
+                "area": area,
+                "severity": "high" if cpl > baseline * 1.3 else "medium",
+                "message": msg,
+                "cpl": round(cpl, 1),
+                "action": action,
+            })
 
     # Blunder pattern
     blunder_q = (
@@ -336,11 +324,73 @@ async def get_weaknesses(
             "action": f"Train positions involving {top_blunder.blunder_subtype.replace('_', ' ')}.",
         })
 
+    # Converting advantages – games where player was winning but lost
+    collapse_q = (
+        select(func.count(func.distinct(MoveEvaluation.game_id)))
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            Game.result == "loss",
+            MoveEvaluation.eval_after.isnot(None),
+            MoveEvaluation.eval_after > 200,
+        )
+    )
+    collapses = (await db.execute(collapse_q)).scalar() or 0
+    if collapses >= 2:
+        weaknesses.append({
+            "area": "Converting Advantages",
+            "severity": "high" if collapses >= 5 else "medium",
+            "message": f"You collapsed from winning positions {collapses} times. Practice converting won endgames.",
+            "count": collapses,
+            "action": "Focus on technique in won positions.",
+        })
+
+    # Time control weakness – find worst performing time control
+    tc_q = (
+        select(
+            Game.time_control,
+            func.count().label("cnt"),
+            func.avg(GameAnalysis.overall_cpl).label("tc_cpl"),
+            func.sum(case((Game.result == "win", 1), else_=0)).label("wins"),
+        )
+        .join(GameAnalysis, GameAnalysis.game_id == Game.id)
+        .where(Game.user_id == user.id, Game.time_control.isnot(None))
+        .group_by(Game.time_control)
+        .having(func.count() >= 3)
+        .order_by(func.avg(GameAnalysis.overall_cpl).desc())
+        .limit(1)
+    )
+    worst_tc_row = (await db.execute(tc_q)).one_or_none()
+    if worst_tc_row and worst_tc_row.tc_cpl and worst_tc_row.tc_cpl > baseline * 1.1:
+        weaknesses.append({
+            "area": "Time Management",
+            "severity": "medium",
+            "message": f"You underperform in {worst_tc_row.time_control} games. Consider adjusting your time usage in that format.",
+            "action": "Review your clock usage in this format.",
+        })
+
+    # Fallback: if no weaknesses found, identify the worst phase by absolute CPL
+    if not weaknesses:
+        worst_phase = None
+        worst_cpl = 0.0
+        for area, cpl in [("Opening", phase.opening), ("Middlegame", phase.middlegame), ("Endgame", phase.endgame)]:
+            if cpl and cpl > worst_cpl:
+                worst_cpl = cpl
+                worst_phase = area
+        if worst_phase:
+            weaknesses.append({
+                "area": worst_phase,
+                "severity": "medium" if worst_cpl > 40 else "low",
+                "message": f"Your {worst_phase.lower()} is your weakest phase at {round(worst_cpl, 1)} avg CPL.",
+                "cpl": round(worst_cpl, 1),
+                "action": f"Focus training on {worst_phase.lower()} positions.",
+            })
+
     # Sort by severity
     severity_order = {"high": 0, "medium": 1, "low": 2}
     weaknesses.sort(key=lambda w: severity_order.get(w["severity"], 2))
 
-    return {"weaknesses": weaknesses[:3]}
+    return {"weaknesses": weaknesses[:5]}
 
 
 @router.get("/time-analysis")

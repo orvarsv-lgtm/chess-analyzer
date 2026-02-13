@@ -25,6 +25,7 @@ import {
   type InsightsOverview,
   type RecentGame,
   type Weakness,
+  type AdvancedAnalytics,
   type AnonAnalysisResults,
   type AnonProgressEvent,
 } from "@/lib/api";
@@ -40,6 +41,7 @@ export default function HomePage() {
   const [overview, setOverview] = useState<InsightsOverview | null>(null);
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
   const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
+  const [studyRecs, setStudyRecs] = useState<{ priority: string; category: string; message: string }[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
 
   // ─── Anonymous analysis state ───────────────────────
@@ -107,6 +109,9 @@ export default function HomePage() {
         insightsAPI.recentGames(3).then(setRecentGames).catch(() => {}),
         insightsAPI.weaknesses().then((w) => {
           setWeaknesses(w.weaknesses ?? []);
+        }).catch(() => {}),
+        insightsAPI.advancedAnalytics().then((a) => {
+          setStudyRecs(a.recommendations ?? []);
         }).catch(() => {}),
       ]).finally(() => setDashboardLoading(false));
     }
@@ -177,7 +182,7 @@ export default function HomePage() {
 
   // ─── If signed in and no analysis in progress, show dashboard ──
   if (session && step === "input" && !results) {
-    return <LoggedInDashboard overview={overview} recentGames={recentGames} weaknesses={weaknesses} loading={dashboardLoading} />;
+    return <LoggedInDashboard overview={overview} recentGames={recentGames} weaknesses={weaknesses} studyRecs={studyRecs} loading={dashboardLoading} />;
   }
 
   // ─── Render based on step ───────────────────────────
@@ -636,15 +641,19 @@ function ResultsView({
 // Logged-In Dashboard
 // ═══════════════════════════════════════════════════════════
 
+type StudyRec = { priority: string; category: string; message: string };
+
 function LoggedInDashboard({
   overview,
   recentGames,
   weaknesses,
+  studyRecs,
   loading,
 }: {
   overview: InsightsOverview | null;
   recentGames: RecentGame[];
   weaknesses: Weakness[];
+  studyRecs: StudyRec[];
   loading?: boolean;
 }) {
   const topWeakness = weaknesses[0] ?? null;
@@ -872,15 +881,16 @@ function LoggedInDashboard({
       </div>
 
       {/* Study Recommendations */}
-      {weaknesses.length > 0 && (
+      {(weaknesses.length > 0 || studyRecs.length > 0) && (
         <div className="mb-8">
           <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
             <BookOpen className="h-4 w-4" />
             Study Recommendations
           </h2>
           <div className="space-y-3">
+            {/* Weakness-based recommendations */}
             {weaknesses.map((w, i) => (
-              <Card key={i} className="p-4">
+              <Card key={`w-${i}`} className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <AlertTriangle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
@@ -894,6 +904,35 @@ function LoggedInDashboard({
                         </Badge>
                       </div>
                       <p className="text-sm text-gray-400">{w.message}</p>
+                    </div>
+                  </div>
+                  <Link href="/train">
+                    <Button size="sm" variant="secondary" className="flex-shrink-0">
+                      <Dumbbell className="h-3.5 w-3.5" />
+                      Train
+                    </Button>
+                  </Link>
+                </div>
+              </Card>
+            ))}
+            {/* Advanced analytics recommendations (deduplicated) */}
+            {studyRecs
+              .filter((r) => !weaknesses.some((w) => w.area === r.category))
+              .map((r, i) => (
+              <Card key={`r-${i}`} className="p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <Sparkles className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
+                      r.priority === "high" ? "text-red-400" : r.priority === "medium" ? "text-yellow-400" : "text-brand-400"
+                    }`} />
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-semibold text-sm">{r.category}</span>
+                        <Badge variant={r.priority === "high" ? "danger" : r.priority === "medium" ? "warning" : "default"}>
+                          {r.priority}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-400">{r.message}</p>
                     </div>
                   </div>
                   <Link href="/train">
