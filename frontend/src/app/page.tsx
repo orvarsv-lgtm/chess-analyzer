@@ -15,6 +15,8 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  BookOpen,
+  Sparkles,
 } from "lucide-react";
 import {
   insightsAPI,
@@ -37,7 +39,7 @@ export default function HomePage() {
   // ─── Logged-in dashboard state ──────────────────────
   const [overview, setOverview] = useState<InsightsOverview | null>(null);
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
-  const [topWeakness, setTopWeakness] = useState<Weakness | null>(null);
+  const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
 
   // ─── Anonymous analysis state ───────────────────────
@@ -104,7 +106,7 @@ export default function HomePage() {
         insightsAPI.overview().then(setOverview).catch(() => {}),
         insightsAPI.recentGames(3).then(setRecentGames).catch(() => {}),
         insightsAPI.weaknesses().then((w) => {
-          if (w.weaknesses?.length) setTopWeakness(w.weaknesses[0]);
+          setWeaknesses(w.weaknesses ?? []);
         }).catch(() => {}),
       ]).finally(() => setDashboardLoading(false));
     }
@@ -175,7 +177,7 @@ export default function HomePage() {
 
   // ─── If signed in and no analysis in progress, show dashboard ──
   if (session && step === "input" && !results) {
-    return <LoggedInDashboard overview={overview} recentGames={recentGames} topWeakness={topWeakness} loading={dashboardLoading} />;
+    return <LoggedInDashboard overview={overview} recentGames={recentGames} weaknesses={weaknesses} loading={dashboardLoading} />;
   }
 
   // ─── Render based on step ───────────────────────────
@@ -637,14 +639,18 @@ function ResultsView({
 function LoggedInDashboard({
   overview,
   recentGames,
-  topWeakness,
+  weaknesses,
   loading,
 }: {
   overview: InsightsOverview | null;
   recentGames: RecentGame[];
-  topWeakness: Weakness | null;
+  weaknesses: Weakness[];
   loading?: boolean;
 }) {
+  const topWeakness = weaknesses[0] ?? null;
+  const [showAnalyzeSlider, setShowAnalyzeSlider] = useState(false);
+  const [sliderValue, setSliderValue] = useState(20);
+
   const accuracy = cplToAccuracy(overview?.overall_cpl);
   const recentAccuracy = cplToAccuracy(overview?.recent_cpl);
 
@@ -863,6 +869,108 @@ function LoggedInDashboard({
             </Card>
           </Link>
         )}
+      </div>
+
+      {/* Study Recommendations */}
+      {weaknesses.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <BookOpen className="h-4 w-4" />
+            Study Recommendations
+          </h2>
+          <div className="space-y-3">
+            {weaknesses.map((w, i) => (
+              <Card key={i} className="p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <AlertTriangle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
+                      w.severity === "high" ? "text-red-400" : w.severity === "medium" ? "text-yellow-400" : "text-gray-400"
+                    }`} />
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-semibold text-sm">{w.area}</span>
+                        <Badge variant={w.severity === "high" ? "danger" : w.severity === "medium" ? "warning" : "default"}>
+                          {w.severity}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-400">{w.message}</p>
+                    </div>
+                  </div>
+                  <Link href="/train">
+                    <Button size="sm" variant="secondary" className="flex-shrink-0">
+                      <Dumbbell className="h-3.5 w-3.5" />
+                      Train
+                    </Button>
+                  </Link>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Analyze More Games for Better Accuracy */}
+      <div className="mb-8">
+        <Card className="p-6 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="h-10 w-10 rounded-xl bg-brand-600/20 flex items-center justify-center">
+              <Swords className="h-5 w-5 text-brand-400" />
+            </div>
+            <div>
+              <h3 className="font-semibold">Analyze More Games for Better Accuracy</h3>
+              <p className="text-xs text-gray-500">More analyzed games = more precise insights</p>
+            </div>
+          </div>
+
+          {!showAnalyzeSlider ? (
+            <Button
+              onClick={() => setShowAnalyzeSlider(true)}
+              className="w-full"
+              variant="secondary"
+            >
+              <Swords className="h-4 w-4" />
+              Choose number of games
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          ) : (
+            <div className="space-y-4 animate-fade-in">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-400">Number of games</span>
+                  <span className="text-lg font-bold text-brand-400">{sliderValue}</span>
+                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={50}
+                  step={5}
+                  value={sliderValue}
+                  onChange={(e) => setSliderValue(Number(e.target.value))}
+                  className="w-full h-2 bg-surface-2 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-brand-500 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg"
+                />
+                <div className="flex justify-between text-xs text-gray-600 mt-1">
+                  <span>5</span>
+                  <span>25</span>
+                  <span>50</span>
+                </div>
+              </div>
+
+              {sliderValue >= 50 && (
+                <div className="p-3 rounded-lg bg-brand-600/10 border border-brand-600/20 text-sm text-brand-300 flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 flex-shrink-0" />
+                  Upgrade to analyse 50+ games at once
+                </div>
+              )}
+
+              <Link href="/games">
+                <Button className="w-full" size="lg">
+                  <Swords className="h-4 w-4" />
+                  Import &amp; Analyze {sliderValue} Games
+                </Button>
+              </Link>
+            </div>
+          )}
+        </Card>
       </div>
 
       {/* Recent games */}
