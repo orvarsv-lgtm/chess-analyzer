@@ -317,14 +317,31 @@ def generate_puzzle_data(
     phase: str,
     move_quality: str,
     move_number: int,
+    best_second_gap_cp: int | None = None,
 ) -> dict | None:
     """
     Generate puzzle data from a blunder/mistake/missed-win move.
     Returns a dict with puzzle fields, or None if not suitable.
+
+    Filtering rules:
+    - Only Blunder / Mistake / Missed Win moves qualify.
+    - There must be essentially ONE good move: the gap between the best
+      and second-best engine line must be >= 150 cp.  If the gap is
+      smaller, multiple moves are acceptable and the position is not a
+      clean puzzle.
+    - The user must have missed it (implied by move_quality check above;
+      Best/Great/Excellent/Good moves never reach here).
     """
     if move_quality not in ("Blunder", "Mistake", "Missed Win"):
         return None
     if not fen_before or not best_move_san:
+        return None
+
+    # ── Only-one-good-move filter ──
+    # If we have the gap between best and 2nd-best move, reject positions
+    # where the 2nd-best move is close to the best (multiple good options).
+    PUZZLE_GAP_THRESHOLD_CP = 150
+    if best_second_gap_cp is not None and best_second_gap_cp < PUZZLE_GAP_THRESHOLD_CP:
         return None
 
     puzzle_key = hashlib.md5(f"{fen_before}|{san}".encode()).hexdigest()

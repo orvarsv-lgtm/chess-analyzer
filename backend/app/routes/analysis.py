@@ -267,18 +267,32 @@ async def run_analysis_sync(
                         best_move_san = None
                         best_move_uci = None
                         best_move_obj = None
+                        best_second_gap_cp = None
                         is_only_legal = (board.legal_moves.count() == 1)
 
                         if is_player_move:
-                            pre_info = await engine.analyse(
+                            multi_info = await engine.analyse(
                                 board, chess.engine.Limit(depth=depth),
-                                info=chess.engine.INFO_ALL
+                                multipv=2, info=chess.engine.INFO_ALL
                             )
+                            pre_info = multi_info[0] if multi_info else {}
                             pv = pre_info.get("pv")
                             if pv and len(pv) > 0:
                                 best_move_obj = pv[0]
                                 best_move_uci = pv[0].uci()
                                 best_move_san = board.san(pv[0])
+
+                            # Compute gap between best and 2nd-best move
+                            # for puzzle quality filtering
+                            if len(multi_info) >= 2:
+                                s1 = multi_info[0].get("score")
+                                s2 = multi_info[1].get("score")
+                                if s1 and s2:
+                                    pov1 = s1.pov(board.turn)
+                                    pov2 = s2.pov(board.turn)
+                                    cp1 = 10000 if pov1.is_mate() and (pov1.mate() or 0) > 0 else (-10000 if pov1.is_mate() else (pov1.score() or 0))
+                                    cp2 = 10000 if pov2.is_mate() and (pov2.mate() or 0) > 0 else (-10000 if pov2.is_mate() else (pov2.score() or 0))
+                                    best_second_gap_cp = cp1 - cp2
 
                         board.push(move)
 
@@ -385,6 +399,7 @@ async def run_analysis_sync(
                                 phase=phase,
                                 move_quality=quality,
                                 move_number=move_num,
+                                best_second_gap_cp=best_second_gap_cp,
                             )
                             if puzzle_data:
                                 puzzle_candidates.append(puzzle_data)

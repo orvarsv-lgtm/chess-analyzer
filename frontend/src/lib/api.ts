@@ -796,6 +796,20 @@ export interface AnonGameAnalysis {
     win_prob_after?: number | null;
     accuracy?: number | null;
   }[];
+  puzzle_candidates?: {
+    puzzle_key: string;
+    fen: string;
+    side_to_move: string;
+    best_move_san: string;
+    best_move_uci?: string | null;
+    played_move_san: string;
+    eval_loss_cp: number;
+    phase: string;
+    puzzle_type: string;
+    difficulty: string;
+    move_number: number;
+    themes: string[];
+  }[];
 }
 
 export interface AnonAnalysisResults {

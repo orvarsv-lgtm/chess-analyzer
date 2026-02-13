@@ -72,6 +72,21 @@ class MoveEvalOut(BaseModel):
     accuracy: Optional[float] = None
 
 
+class PuzzleCandidateOut(BaseModel):
+    puzzle_key: str
+    fen: str
+    side_to_move: str
+    best_move_san: str
+    best_move_uci: Optional[str] = None
+    played_move_san: str
+    eval_loss_cp: int
+    phase: str
+    puzzle_type: str
+    difficulty: str
+    move_number: int
+    themes: list[str]
+
+
 class GameAnalysisOut(BaseModel):
     game_index: int
     white: str
@@ -95,6 +110,7 @@ class GameAnalysisOut(BaseModel):
     brilliant_moves: int = 0
     missed_wins: int = 0
     moves: list[MoveEvalOut]
+    puzzle_candidates: list[PuzzleCandidateOut] = []
 
 
 class AnonAnalysisResponse(BaseModel):
@@ -124,6 +140,21 @@ class ClaimMoveIn(BaseModel):
     accuracy: Optional[float] = None
 
 
+class ClaimPuzzleCandidateIn(BaseModel):
+    puzzle_key: str
+    fen: str
+    side_to_move: str
+    best_move_san: str
+    best_move_uci: Optional[str] = None
+    played_move_san: str
+    eval_loss_cp: int
+    phase: str
+    puzzle_type: str
+    difficulty: str
+    move_number: int
+    themes: list[str] = []
+
+
 class ClaimGameIn(BaseModel):
     game_index: int
     white: str
@@ -147,6 +178,7 @@ class ClaimGameIn(BaseModel):
     brilliant_moves: int = 0
     missed_wins: int = 0
     moves: list[ClaimMoveIn]
+    puzzle_candidates: list[ClaimPuzzleCandidateIn] = []
 
 
 class ClaimResultsRequest(BaseModel):
@@ -409,54 +441,32 @@ async def claim_anonymous_results(
             )
             db.add(move_row)
 
-        # ── Generate puzzles from blunders & mistakes ──
-        for m in g.moves:
-            if m.move_quality not in ("Blunder", "Mistake") or not m.fen_before:
-                continue
-
-            puzzle_key = hashlib.md5(
-                f"{m.fen_before}|{m.san}".encode()
-            ).hexdigest()
-
-            # Determine difficulty from centipawn loss
-            if m.cp_loss >= 300:
-                difficulty = "platinum"
-            elif m.cp_loss >= 200:
-                difficulty = "gold"
-            elif m.cp_loss >= 100:
-                difficulty = "silver"
-            else:
-                difficulty = "bronze"
-
-            # Determine side to move from FEN (the player who blundered)
-            fen_parts = m.fen_before.split()
-            side_to_move = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
-
-            puzzle_type = "blunder" if m.move_quality == "Blunder" else "mistake"
-
-            puzzle_row = Puzzle(
-                puzzle_key=puzzle_key,
-                source_game_id=game_row.id,
-                source_user_id=user_id,
-                fen=m.fen_before,
-                side_to_move=side_to_move,
-                best_move_san=m.best_move_san or "?",
-                best_move_uci=m.best_move_uci,
-                played_move_san=m.san,
-                eval_loss_cp=m.cp_loss,
-                phase=m.phase or "middlegame",
-                puzzle_type=puzzle_type,
-                difficulty=difficulty,
-                move_number=m.move_number,
-                themes=[puzzle_type, m.phase or "middlegame"],
-            )
-
+        # ── Save pre-generated puzzle candidates ──
+        for pc in g.puzzle_candidates:
             # Skip duplicates silently
             existing_puzzle = await db.execute(
-                select(Puzzle).where(Puzzle.puzzle_key == puzzle_key)
+                select(Puzzle).where(Puzzle.puzzle_key == pc.puzzle_key)
             )
-            if not existing_puzzle.scalar_one_or_none():
-                db.add(puzzle_row)
+            if existing_puzzle.scalar_one_or_none():
+                continue
+
+            puzzle_row = Puzzle(
+                puzzle_key=pc.puzzle_key,
+                source_game_id=game_row.id,
+                source_user_id=user_id,
+                fen=pc.fen,
+                side_to_move=pc.side_to_move,
+                best_move_san=pc.best_move_san,
+                best_move_uci=pc.best_move_uci,
+                played_move_san=pc.played_move_san,
+                eval_loss_cp=pc.eval_loss_cp,
+                phase=pc.phase,
+                puzzle_type=pc.puzzle_type,
+                difficulty=pc.difficulty,
+                move_number=pc.move_number,
+                themes=pc.themes,
+            )
+            db.add(puzzle_row)
 
         existing_ids.add(game_hash)
         imported += 1
@@ -671,6 +681,7 @@ async def _analyze_game(
     prev_mate_in = None
     castled_white = False
     castled_black = False
+    puzzle_candidates: list[dict] = []
 
     for move in pgn_game.mainline_moves():
         move_num += 1
@@ -690,17 +701,32 @@ async def _analyze_game(
         best_move_san = None
         best_move_uci = None
         best_move_obj = None
+        best_second_gap_cp = None
         is_only_legal = (board.legal_moves.count() == 1)
 
         if is_player_move:
-            pre_info = await engine.analyse(
-                board, chess.engine.Limit(depth=depth), info=chess.engine.INFO_ALL
+            multi_info = await engine.analyse(
+                board, chess.engine.Limit(depth=depth),
+                multipv=2, info=chess.engine.INFO_ALL
             )
+            pre_info = multi_info[0] if multi_info else {}
             pv = pre_info.get("pv")
             if pv and len(pv) > 0:
                 best_move_obj = pv[0]
                 best_move_uci = pv[0].uci()
                 best_move_san = board.san(pv[0])
+
+            # Compute gap between best and 2nd-best move
+            # for puzzle quality filtering
+            if len(multi_info) >= 2:
+                s1 = multi_info[0].get("score")
+                s2 = multi_info[1].get("score")
+                if s1 and s2:
+                    pov1 = s1.pov(board.turn)
+                    pov2 = s2.pov(board.turn)
+                    cp1 = 10000 if pov1.is_mate() and (pov1.mate() or 0) > 0 else (-10000 if pov1.is_mate() else (pov1.score() or 0))
+                    cp2 = 10000 if pov2.is_mate() and (pov2.mate() or 0) > 0 else (-10000 if pov2.is_mate() else (pov2.score() or 0))
+                    best_second_gap_cp = cp1 - cp2
 
         board.push(move)
 
@@ -794,6 +820,21 @@ async def _analyze_game(
             elif quality == "Blunder":
                 blunders += 1
 
+            # Collect puzzle candidates (filtered by quality)
+            puzzle_data = generate_puzzle_data(
+                fen_before=fen_before,
+                san=san,
+                best_move_san=best_move_san,
+                best_move_uci=best_move_uci,
+                cp_loss=cp_loss,
+                phase=phase,
+                move_quality=quality,
+                move_number=move_num,
+                best_second_gap_cp=best_second_gap_cp,
+            )
+            if puzzle_data:
+                puzzle_candidates.append(puzzle_data)
+
         move_evals.append(MoveEvalOut(
             move_number=move_num,
             color=mv_color,
@@ -842,6 +883,7 @@ async def _analyze_game(
         brilliant_moves=brilliant_moves_count,
         missed_wins=missed_wins_count,
         moves=move_evals,
+        puzzle_candidates=[PuzzleCandidateOut(**p) for p in puzzle_candidates],
     )
 
 
