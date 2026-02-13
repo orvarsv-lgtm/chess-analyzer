@@ -172,11 +172,23 @@ export default function TrainPage() {
     }
   }
 
-  function onSquareClick(square: Square) {
+  function onSquareClick(square: Square, piece?: string) {
     if (!chessRef.current || puzzleState !== "solving") return;
 
     if (selectedSquare) {
       if (tryMove(selectedSquare, square)) return;
+    }
+
+    // Fallback selection path: react-chessboard always passes piece on square-click,
+    // even when onPieceClick doesn't fire in some interaction modes.
+    if (piece) {
+      const p = chessRef.current.get(square);
+      if (p && p.color === chessRef.current.turn()) {
+        setSelectedSquare(square);
+        const moves = chessRef.current.moves({ square, verbose: true });
+        setLegalMoves(moves.map((m) => m.to as Square));
+        return;
+      }
     }
 
     setSelectedSquare(null);
