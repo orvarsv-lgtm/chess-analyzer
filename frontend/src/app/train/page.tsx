@@ -200,10 +200,14 @@ function TrainPageInner() {
         // Community puzzles from all users
         puzzles = await puzzlesAPI.global({ limit: 20 });
       } else {
-        // User's own puzzles (spaced repetition first)
+        // User's own puzzles (spaced repetition first, then own, then global fallback)
         puzzles = await puzzlesAPI.reviewQueue(10);
         if (!puzzles || puzzles.length === 0) {
           puzzles = await puzzlesAPI.list({ limit: 10 });
+        }
+        // If still no puzzles from user's games, fall back to global pool
+        if (!puzzles || puzzles.length === 0) {
+          puzzles = await puzzlesAPI.global({ limit: 10 });
         }
       }
 
@@ -805,14 +809,14 @@ function TrainPageInner() {
                     {/* Blunder Preventer */}
                     <Card
                       className="p-4 cursor-pointer transition-colors hover:border-red-500/50 border-red-600/20"
-                      onClick={() => startSession("my")}
+                      onClick={() => startSession("global")}
                     >
                       <div className="flex items-center gap-2 mb-2">
                         <Shield className="h-4 w-4 text-red-400" />
                         <span className="font-semibold text-sm">Blunder Preventer</span>
                       </div>
                       <p className="text-xs text-gray-500 line-clamp-2">
-                        Can you find the safe move? Avoid the blunders from your games.
+                        Can you find the safe move? Avoid blunders from games across the community.
                       </p>
                       <p className="text-xs mt-2 text-red-400 flex items-center gap-1">
                         Practice <ArrowRight className="h-3 w-3" />

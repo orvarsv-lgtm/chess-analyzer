@@ -371,7 +371,6 @@ async def get_daily_warmup(
         weak_q = (
             select(Puzzle)
             .where(
-                Puzzle.source_user_id == user.id,
                 Puzzle.phase.in_(weak_phases),
                 Puzzle.id.notin_(select(solved_sq)),
                 Puzzle.id.notin_(seen_ids) if seen_ids else True,
@@ -482,6 +481,55 @@ async def get_advantage_positions(
         if len(positions) >= limit:
             break
 
+    # ── Global fallback: if user has fewer than `limit` positions, fill from global pool ──
+    remaining = limit - len(positions)
+    if remaining > 0:
+        seen_game_ids = seen_games
+        global_q = (
+            select(MoveEvaluation)
+            .join(Game, Game.id == MoveEvaluation.game_id)
+            .where(
+                Game.user_id != user.id,
+                Game.result.in_(["loss", "draw"]),
+                MoveEvaluation.move_quality.in_(["Blunder", "Mistake"]),
+                MoveEvaluation.cp_loss >= 200,
+                MoveEvaluation.fen_before.isnot(None),
+            )
+            .order_by(func.random())
+            .limit(remaining * 3)
+        )
+        global_res = await db.execute(global_q)
+        global_moves = global_res.scalars().all()
+
+        for m in global_moves:
+            if m.game_id in seen_game_ids:
+                continue
+            game_q2 = await db.execute(select(Game.color).where(Game.id == m.game_id))
+            game_color2 = game_q2.scalar_one_or_none()
+            if not game_color2:
+                continue
+            eb2 = m.eval_before or 0
+            adv = eb2 if game_color2 == "white" else -eb2
+            if adv < 200:
+                continue
+            seen_game_ids.add(m.game_id)
+            positions.append({
+                "id": m.id,
+                "game_id": m.game_id,
+                "fen": m.fen_before,
+                "side_to_move": game_color2,
+                "best_move_san": m.best_move_san or m.san,
+                "best_move_uci": m.best_move_uci,
+                "played_move_san": m.san,
+                "cp_loss": m.cp_loss,
+                "eval_before": m.eval_before,
+                "phase": m.phase,
+                "move_number": m.move_number,
+                "advantage_cp": adv,
+            })
+            if len(positions) >= limit:
+                break
+
     return {"positions": positions, "total": len(positions)}
 
 
@@ -509,7 +557,7 @@ async def get_intuition_challenge(
     Each challenge is 4 consecutive moves from a game, one of which is a blunder.
     The user must identify which move is the blunder.
     """
-    # Find blunder moves from the user's games
+    # Find blunder moves — first from user's games, then globally if needed
     blunder_q = (
         select(MoveEvaluation)
         .join(Game, Game.id == MoveEvaluation.game_id)
@@ -522,7 +570,23 @@ async def get_intuition_challenge(
         .limit(count * 2)  # fetch extra to handle failures
     )
     result = await db.execute(blunder_q)
-    blunders = result.scalars().all()
+    blunders = list(result.scalars().all())
+
+    # If not enough user blunders, supplement from global pool
+    if len(blunders) < count * 2:
+        global_blunder_q = (
+            select(MoveEvaluation)
+            .join(Game, Game.id == MoveEvaluation.game_id)
+            .where(
+                Game.user_id != user.id,
+                MoveEvaluation.move_quality == "Blunder",
+                MoveEvaluation.fen_before.isnot(None),
+            )
+            .order_by(func.random())
+            .limit((count * 2) - len(blunders))
+        )
+        global_res = await db.execute(global_blunder_q)
+        blunders.extend(global_res.scalars().all())
 
     challenges: list[dict] = []
     seen_games: set[int] = set()
