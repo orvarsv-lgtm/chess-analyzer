@@ -17,13 +17,16 @@ import {
   Zap,
   CheckCircle2,
   AlertCircle,
+  MessageSquare,
 } from "lucide-react";
 import {
   gamesAPI,
   analysisAPI,
+  coachAPI,
   type GameSummary,
   type GamesListResponse,
   type AnalysisProgressEvent,
+  type CoachReview,
   APIError,
 } from "@/lib/api";
 import {
@@ -69,6 +72,15 @@ export default function GamesPage() {
 
   // ─── Analysis state ──────────────────────────────────
   const [analyzingIds, setAnalyzingIds] = useState<Set<number>>(new Set());
+
+  // ─── AI review state ─────────────────────────────────
+  const [reviewingIds, setReviewingIds] = useState<Set<number>>(new Set());
+  const [aiReviewModal, setAiReviewModal] = useState<{
+    open: boolean;
+    gameLabel: string;
+    review: CoachReview | null;
+    error: string | null;
+  }>({ open: false, gameLabel: "", review: null, error: null });
 
   // ─── Analyse All state ───────────────────────────────
   const [showAnalyseAll, setShowAnalyseAll] = useState(false);
@@ -165,6 +177,34 @@ export default function GamesPage() {
         return next;
       });
       fetchGames();
+    }
+  }
+
+  async function handleAIReview(game: GameSummary) {
+    if (!game.has_analysis) return;
+
+    setReviewingIds((prev) => new Set(prev).add(game.id));
+    setAiReviewModal({
+      open: true,
+      gameLabel: gameLabel(game),
+      review: null,
+      error: null,
+    });
+
+    try {
+      const review = await coachAPI.review(game.id);
+      setAiReviewModal((prev) => ({ ...prev, review }));
+    } catch (err) {
+      setAiReviewModal((prev) => ({
+        ...prev,
+        error: err instanceof Error ? err.message : "AI review failed",
+      }));
+    } finally {
+      setReviewingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(game.id);
+        return next;
+      });
     }
   }
 
@@ -331,7 +371,9 @@ export default function GamesPage() {
                 key={game.id}
                 game={game}
                 analyzing={analyzingIds.has(game.id)}
+                reviewing={reviewingIds.has(game.id)}
                 onAnalyze={() => handleAnalyze(game.id)}
+                onAIReview={() => handleAIReview(game)}
                 isSelected={selectedId === game.id}
                 onSelect={() => setSelectedId(game.id)}
               />
@@ -356,7 +398,13 @@ export default function GamesPage() {
           {/* Right: selected game summary (desktop) */}
           <div className="hidden lg:block lg:w-[320px]">
             {selectedGame ? (
-              <GameSummaryPanel game={selectedGame} analyzing={analyzingIds.has(selectedGame.id)} onAnalyze={() => handleAnalyze(selectedGame.id)} />
+              <GameSummaryPanel
+                game={selectedGame}
+                analyzing={analyzingIds.has(selectedGame.id)}
+                reviewing={reviewingIds.has(selectedGame.id)}
+                onAnalyze={() => handleAnalyze(selectedGame.id)}
+                onAIReview={() => handleAIReview(selectedGame)}
+              />
             ) : (
               <Card className="p-8 text-center">
                 <p className="text-gray-500 text-sm">
@@ -555,6 +603,58 @@ export default function GamesPage() {
           </Card>
         </div>
       )}
+
+      {/* ─── AI Review modal ─── */}
+      {aiReviewModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-2xl relative animate-fade-in">
+            <button
+              onClick={() =>
+                setAiReviewModal({ open: false, gameLabel: "", review: null, error: null })
+              }
+              className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="p-6 space-y-4">
+              <h2 className="text-lg font-semibold">AI Game Review</h2>
+              <p className="text-sm text-gray-500">{aiReviewModal.gameLabel}</p>
+
+              {!aiReviewModal.review && !aiReviewModal.error && (
+                <div className="flex items-center gap-2 text-sm text-gray-400 py-3">
+                  <Spinner className="h-4 w-4 text-brand-500" />
+                  AI coach is analyzing this game...
+                </div>
+              )}
+
+              {aiReviewModal.error && (
+                <div className="px-4 py-3 rounded-lg text-sm bg-red-900/30 text-red-400 border border-red-800/50">
+                  {aiReviewModal.error}
+                </div>
+              )}
+
+              {aiReviewModal.review && (
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar pr-1">
+                  {aiReviewModal.review.sections.map((section, i) => (
+                    <div key={i}>
+                      <h4 className="text-sm font-semibold text-brand-300 mb-1">{section.title}</h4>
+                      <p className="text-sm text-gray-300 whitespace-pre-line leading-relaxed">
+                        {section.content}
+                      </p>
+                    </div>
+                  ))}
+                  {aiReviewModal.review.reviews_limit && (
+                    <p className="text-xs text-gray-600 pt-2 border-t border-surface-3">
+                      {aiReviewModal.review.reviews_used}/{aiReviewModal.review.reviews_limit} free reviews used
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
@@ -564,13 +664,17 @@ export default function GamesPage() {
 function GameRow({
   game,
   analyzing,
+  reviewing,
   onAnalyze,
+  onAIReview,
   isSelected,
   onSelect,
 }: {
   game: GameSummary;
   analyzing: boolean;
+  reviewing: boolean;
   onAnalyze: () => void;
+  onAIReview: () => void;
   isSelected: boolean;
   onSelect: () => void;
 }) {
@@ -625,10 +729,26 @@ function GameRow({
 
         {/* Analysis status */}
         {game.has_analysis ? (
-          <Badge variant="info">
-            <BarChart3 className="h-3 w-3 mr-1" />
-            Reviewed
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="info">
+              <BarChart3 className="h-3 w-3 mr-1" />
+              Reviewed
+            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onAIReview();
+              }}
+              loading={reviewing}
+              disabled={reviewing}
+            >
+              <MessageSquare className="h-3 w-3" />
+              AI Review
+            </Button>
+          </div>
         ) : (
           <Button
             variant="ghost"
@@ -655,11 +775,15 @@ function GameRow({
 function GameSummaryPanel({
   game,
   analyzing,
+  reviewing,
   onAnalyze,
+  onAIReview,
 }: {
   game: GameSummary;
   analyzing: boolean;
+  reviewing: boolean;
   onAnalyze: () => void;
+  onAIReview: () => void;
 }) {
   const date = new Date(game.date);
   const dateStr = date.toLocaleDateString("en-US", {
@@ -729,11 +853,22 @@ function GameSummaryPanel({
 
       <div className="p-5 pt-0">
         {game.has_analysis ? (
-          <Link href={`/games/${game.id}`}>
-            <Button className="w-full">
-              Review Game <ChevronRight className="h-4 w-4" />
+          <div className="space-y-2">
+            <Link href={`/games/${game.id}`}>
+              <Button className="w-full">
+                Review Game <ChevronRight className="h-4 w-4" />
+              </Button>
+            </Link>
+            <Button
+              className="w-full"
+              variant="secondary"
+              onClick={onAIReview}
+              loading={reviewing}
+              disabled={reviewing}
+            >
+              <MessageSquare className="h-4 w-4" /> Analyze with AI
             </Button>
-          </Link>
+          </div>
         ) : (
           <Button
             className="w-full"

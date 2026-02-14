@@ -8,6 +8,10 @@ import { Sidebar } from "@/components/sidebar";
 export const metadata: Metadata = {
   title: "Chess Analyzer",
   description: "Analyze your chess games. Find your weaknesses. Get better.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

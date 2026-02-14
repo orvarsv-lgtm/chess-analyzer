@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { clsx } from "clsx";
@@ -43,14 +44,18 @@ export function Sidebar() {
       {/* ─── Desktop sidebar ─── */}
       <aside className="hidden md:flex w-[220px] flex-col border-r border-surface-3 bg-surface-1">
         {/* Logo */}
-        <div className="flex items-center gap-2 px-5 py-6">
-          <div className="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">
-            ♔
-          </div>
+        <Link href="/" className="flex items-center gap-2.5 px-5 py-5">
+          <Image
+            src="/logo.png"
+            alt="Chess Analyzer"
+            width={36}
+            height={36}
+            className="rounded-lg"
+          />
           <span className="text-lg font-semibold tracking-tight">
             Chess Analyzer
           </span>
-        </div>
+        </Link>
 
         {/* Navigation */}
         <nav className="flex-1 px-3 space-y-1">

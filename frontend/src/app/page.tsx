@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Link from "next/link";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import {
   Swords,
@@ -231,9 +232,13 @@ export default function HomePage() {
     <div className="max-w-3xl mx-auto px-6 py-12 animate-fade-in">
       {/* Hero */}
       <div className="text-center space-y-4 mb-10">
-        <div className="mx-auto h-16 w-16 rounded-2xl bg-brand-600 flex items-center justify-center text-white text-3xl font-bold">
-          ♔
-        </div>
+        <Image
+          src="/logo.png"
+          alt="Chess Analyzer"
+          width={64}
+          height={64}
+          className="mx-auto rounded-2xl"
+        />
         <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
           Chess Analyzer
         </h1>
@@ -782,8 +787,8 @@ function LoggedInDashboard({
         <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}>
         <Card className="p-5 bg-gradient-to-br from-surface-0 to-surface-1 border-surface-3">
           <div className="flex items-center gap-2 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-brand-600/20 flex items-center justify-center">
-              <span className="text-brand-400 font-bold text-sm">♔</span>
+            <div className="h-8 w-8 rounded-lg bg-brand-600/20 flex items-center justify-center overflow-hidden">
+              <Image src="/logo.png" alt="" width={24} height={24} />
             </div>
             <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</span>
           </div>

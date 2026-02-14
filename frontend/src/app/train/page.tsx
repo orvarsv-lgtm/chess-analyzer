@@ -91,6 +91,7 @@ function TrainPageInner() {
   const [intuitionIdx, setIntuitionIdx] = useState(0);
   const [intuitionPicked, setIntuitionPicked] = useState<number | null>(null);
   const [intuitionScore, setIntuitionScore] = useState(0);
+  const [intuitionPreviewIdx, setIntuitionPreviewIdx] = useState(0);
 
   // ─── Opening Drill ──────────────────────────────────
   type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; children: OpeningTreeNode[] };
@@ -427,6 +428,7 @@ function TrainPageInner() {
     setIntuitionIdx(0);
     setIntuitionPicked(null);
     setIntuitionScore(0);
+    setIntuitionPreviewIdx(0);
     try {
       const data = await puzzlesAPI.intuitionChallenge(5);
       setIntuitionChallenges(data);
@@ -1468,9 +1470,23 @@ function TrainPageInner() {
   if (view === "intuition") {
     const challenge = intuitionChallenges?.challenges[intuitionIdx];
     const isLast = intuitionIdx >= (intuitionChallenges?.total ?? 0) - 1;
+    const previewMaxIdx = Math.max(0, (challenge?.options.length ?? 1) - 1);
+    const previewIdx = Math.min(intuitionPreviewIdx, previewMaxIdx);
+    const previewOption = challenge?.options[previewIdx];
+
+    let previewFen = challenge?.options[0]?.fen_before;
+    if (previewFen && previewOption?.san) {
+      try {
+        const previewChess = new Chess(previewFen);
+        previewChess.move(previewOption.san);
+        previewFen = previewChess.fen();
+      } catch {
+        // Keep original FEN if SAN parsing fails
+      }
+    }
 
     return (
-      <div className="max-w-3xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+      <div className="max-w-4xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -1514,24 +1530,45 @@ function TrainPageInner() {
             <p className="text-sm text-gray-400 text-center">
               Challenge {intuitionIdx + 1} of {intuitionChallenges.total} — Which move is the blunder?
             </p>
-            {/* Show a small board for context */}
+            {/* Preview board */}
             {challenge.options[0]?.fen_before && (
               <div className="flex justify-center">
-                <div className="w-[280px]">
+                <div className="w-[420px] max-w-full">
                   <Chessboard
-                    position={challenge.options[0].fen_before}
+                    position={previewFen}
                     boardOrientation={challenge.color === "black" ? "black" : "white"}
-                    boardWidth={280}
+                    boardWidth={420}
                     arePiecesDraggable={false}
                     customBoardStyle={{
                       borderRadius: "8px",
-                      boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
+                      boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
                     }}
                     customDarkSquareStyle={{ backgroundColor: "#779952" }}
                     customLightSquareStyle={{ backgroundColor: "#edeed1" }}
                   />
+                  <div className="mt-3 flex items-center justify-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIntuitionPreviewIdx((i) => Math.max(0, i - 1))}
+                      disabled={previewIdx <= 0}
+                    >
+                      Previous
+                    </Button>
+                    <p className="text-xs text-gray-400 text-center min-w-[180px]">
+                      Preview {previewIdx + 1}/{challenge.options.length}: {previewOption?.san ?? "-"}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIntuitionPreviewIdx((i) => Math.min(previewMaxIdx, i + 1))}
+                      disabled={previewIdx >= previewMaxIdx}
+                    >
+                      Next
+                    </Button>
+                  </div>
                   <p className="text-xs text-gray-500 text-center mt-2">
-                    Position before the sequence — {challenge.color}&apos;s moves
+                    Use preview controls to move through candidate sequence
                   </p>
                 </div>
               </div>
@@ -1555,6 +1592,7 @@ function TrainPageInner() {
                     className={`p-5 cursor-pointer transition-all ${borderClass} ${!picked ? "hover:scale-[1.02]" : ""}`}
                     onClick={() => {
                       if (picked) return;
+                      setIntuitionPreviewIdx(i);
                       setIntuitionPicked(i);
                       if (isBlunder) setIntuitionScore((s) => s + 1);
                     }}
@@ -1580,9 +1618,11 @@ function TrainPageInner() {
                   onClick={() => {
                     if (isLast) {
                       setIntuitionIdx((i) => i + 1); // triggers "complete" screen
+                      setIntuitionPreviewIdx(0);
                     } else {
                       setIntuitionIdx((i) => i + 1);
                       setIntuitionPicked(null);
+                      setIntuitionPreviewIdx(0);
                     }
                   }}
                   size="lg"
