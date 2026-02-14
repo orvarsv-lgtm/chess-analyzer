@@ -25,6 +25,7 @@ from app.analysis_core import (
     count_developed_minors,
     queens_on_board,
     generate_puzzle_data,
+    compute_solution_line,
     avg,
     parse_clock_comment,
     classify_blunder_subtype,
@@ -444,6 +445,11 @@ async def run_analysis_sync(
                                 eval_before_cp=prev_score_cp,
                             )
                             if puzzle_data:
+                                # Compute multi-move solution line
+                                sol_line = await compute_solution_line(
+                                    fen_before, engine, depth=depth, max_moves=6
+                                )
+                                puzzle_data["solution_line"] = sol_line
                                 puzzle_candidates.append(puzzle_data)
 
                         move_evals.append({

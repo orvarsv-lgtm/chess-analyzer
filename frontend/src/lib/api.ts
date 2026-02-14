@@ -467,6 +467,7 @@ export interface PuzzleItem {
   puzzle_type?: string;
   difficulty: string;
   explanation?: string | null;
+  solution_line?: string[];
   themes: string[];
 }
 

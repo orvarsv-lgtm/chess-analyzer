@@ -34,6 +34,7 @@ class PuzzleOut(BaseModel):
     puzzle_type: str
     difficulty: str
     explanation: Optional[str]
+    solution_line: list[str] = []
     themes: list[str] = []
 
     class Config:
@@ -106,6 +107,7 @@ async def list_puzzles(
             puzzle_type=p.puzzle_type,
             difficulty=p.difficulty,
             explanation=p.explanation,
+            solution_line=p.solution_line or [],
             themes=p.themes or [],
         )
         for p in puzzles
@@ -156,6 +158,7 @@ async def global_puzzles(
             puzzle_type=p.puzzle_type,
             difficulty=p.difficulty,
             explanation=p.explanation,
+            solution_line=p.solution_line or [],
             themes=p.themes or [],
         )
         for p in puzzles
@@ -208,6 +211,7 @@ async def get_review_queue(
             puzzle_type=p.puzzle_type,
             difficulty=p.difficulty,
             explanation=p.explanation,
+            solution_line=p.solution_line or [],
             themes=p.themes or [],
         )
         for p in puzzles

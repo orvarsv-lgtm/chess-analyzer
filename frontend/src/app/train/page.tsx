@@ -117,6 +117,10 @@ function TrainPageInner() {
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
 
+  // ─── Multi-move sequence state ───────────────────────
+  const [seqIdx, setSeqIdx] = useState(0); // current index in solution_line (0, 2, 4 = user moves)
+  const [isOpponentMoving, setIsOpponentMoving] = useState(false);
+
   // ─── Stats ───────────────────────────────────────────
   const [streak, setStreak] = useState(0);
   const [solvedToday, setSolvedToday] = useState(0);
@@ -142,8 +146,17 @@ function TrainPageInner() {
       setTimedOut(false);
       setSelectedSquare(null);
       setLegalMoves([]);
+      setSeqIdx(0);
+      setIsOpponentMoving(false);
     }
   }, [currentPuzzle]);
+
+  // Derived: how many user moves are in this puzzle's solution
+  const solutionLine = currentPuzzle?.solution_line ?? [];
+  const totalUserMoves = solutionLine.length > 0
+    ? Math.ceil(solutionLine.length / 2)
+    : 1; // single-move fallback
+  const currentUserMoveNum = Math.floor(seqIdx / 2) + 1;
 
   // ─── Timer tick ──────────────────────────────────
   useEffect(() => {
@@ -335,7 +348,7 @@ function TrainPageInner() {
 
   // ─── Handle move ─────────────────────────────────────
   function tryMove(sourceSquare: Square, targetSquare: Square): boolean {
-    if (!chessRef.current || !currentPuzzle || puzzleState !== "solving") return false;
+    if (!chessRef.current || !currentPuzzle || puzzleState !== "solving" || isOpponentMoving) return false;
 
     const move = chessRef.current.move({
       from: sourceSquare,
@@ -350,10 +363,83 @@ function TrainPageInner() {
     setLegalMoves([]);
     playMove();
 
-    const bestMoveSan = currentPuzzle.best_move_san;
-    const isCorrect = move.san === bestMoveSan;
+    const line = currentPuzzle.solution_line;
+    const hasLine = line && line.length > 1;
 
-    if (isCorrect) {
+    // Determine which move the user should play
+    let expectedUci: string;
+    if (hasLine) {
+      expectedUci = line[seqIdx];
+    } else {
+      // Legacy single-move: fall back to best_move_uci or compare SAN
+      expectedUci = currentPuzzle.best_move_uci || "";
+    }
+
+    // Compare: UCI match or SAN match (for backwards compat)
+    const moveUci = move.from + move.to + (move.promotion ? move.promotion : "");
+    const isCorrect = expectedUci
+      ? moveUci === expectedUci
+      : move.san === currentPuzzle.best_move_san;
+
+    if (!isCorrect) {
+      // Wrong move — puzzle failed
+      setPuzzleState("incorrect");
+      setStreak(0);
+      setSolvedToday((s) => s + 1);
+      playIncorrect();
+      reportAttempt(false);
+      return true;
+    }
+
+    // Correct move — check if there are more moves in the sequence
+    const nextIdx = seqIdx + 1;
+
+    if (hasLine && nextIdx < line.length) {
+      // There's an opponent reply — play it automatically after a delay
+      setIsOpponentMoving(true);
+      setSeqIdx(nextIdx);
+
+      setTimeout(() => {
+        if (!chessRef.current) return;
+        const opponentUci = line[nextIdx];
+        const from = opponentUci.slice(0, 2) as Square;
+        const to = opponentUci.slice(2, 4) as Square;
+        const promo = opponentUci.length > 4 ? opponentUci[4] : undefined;
+
+        const opMove = chessRef.current.move({
+          from,
+          to,
+          promotion: promo as "q" | "r" | "b" | "n" | undefined,
+        });
+
+        if (opMove) {
+          setBoardFen(chessRef.current.fen());
+          playMove();
+        }
+
+        const afterOpponentIdx = nextIdx + 1;
+
+        if (afterOpponentIdx >= line.length) {
+          // Opponent's reply was the last move — puzzle complete!
+          setPuzzleState("correct");
+          setStreak((s) => {
+            const newStreak = s + 1;
+            if (newStreak > 0 && newStreak % 5 === 0) playStreak();
+            else playCorrect();
+            return newStreak;
+          });
+          setSolvedToday((s) => s + 1);
+          setCorrectToday((s) => s + 1);
+          reportAttempt(true);
+        } else {
+          // More user moves needed
+          setSeqIdx(afterOpponentIdx);
+        }
+
+        setIsOpponentMoving(false);
+      }, 500);
+    } else {
+      // No more moves — puzzle complete!
       setPuzzleState("correct");
       setStreak((s) => {
         const newStreak = s + 1;
@@ -364,12 +450,6 @@ function TrainPageInner() {
       setSolvedToday((s) => s + 1);
       setCorrectToday((s) => s + 1);
       reportAttempt(true);
-    } else {
-      setPuzzleState("incorrect");
-      setStreak(0);
-      setSolvedToday((s) => s + 1);
-      playIncorrect();
-      reportAttempt(false);
     }
 
     return true;
@@ -524,6 +604,8 @@ function TrainPageInner() {
       setTimedOut(false);
       setSelectedSquare(null);
       setLegalMoves([]);
+      setSeqIdx(0);
+      setIsOpponentMoving(false);
     } catch {}
   }
 
@@ -1101,7 +1183,7 @@ function TrainPageInner() {
               ? `Puzzles from game #${gameIdParam}`
               : puzzleSource === "global"
               ? "Community puzzles from all users"
-              : "Find the best move."}
+              : "Solve the position."}
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => setView("hub")}>
@@ -1155,7 +1237,7 @@ function TrainPageInner() {
                 onPieceDrop={onPieceDrop}
                 boardOrientation={boardOrientation}
                 boardWidth={560}
-                arePiecesDraggable={puzzleState === "solving"}
+                arePiecesDraggable={puzzleState === "solving" && !isOpponentMoving}
                 customSquareStyles={squareStyles}
                 customBoardStyle={{
                   borderRadius: "8px",
@@ -1205,7 +1287,9 @@ function TrainPageInner() {
                         <p className="text-sm text-red-400/80">
                           Best move was{" "}
                           <span className="font-mono font-bold">
-                            {currentPuzzle.best_move_san}
+                            {solutionLine.length > 0 && seqIdx < solutionLine.length
+                              ? solutionLine[seqIdx].slice(0,2) + "-" + solutionLine[seqIdx].slice(2,4)
+                              : currentPuzzle.best_move_san}
                           </span>
                         </p>
                       </>
@@ -1233,10 +1317,15 @@ function TrainPageInner() {
             {/* Prompt */}
             <div className="mt-4 text-center">
               <p className="text-sm text-gray-400">
-                {boardOrientation === "white"
+                {totalUserMoves > 1
+                  ? `Find move ${currentUserMoveNum} of ${totalUserMoves}`
+                  : boardOrientation === "white"
                   ? "Find the best move for White"
                   : "Find the best move for Black"}
               </p>
+              {isOpponentMoving && (
+                <p className="text-xs text-yellow-400 mt-1 animate-pulse">Opponent is playing…</p>
+              )}
             </div>
           </div>
 

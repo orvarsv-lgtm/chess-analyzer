@@ -349,6 +349,7 @@ def generate_puzzle_data(
     move_number: int,
     best_second_gap_cp: int | None = None,
     eval_before_cp: int | None = None,
+    solution_line: list[str] | None = None,
 ) -> dict | None:
     """
     Generate puzzle data from a blunder/mistake/missed-win move.
@@ -419,8 +420,51 @@ def generate_puzzle_data(
         "puzzle_type": puzzle_type,
         "difficulty": difficulty,
         "move_number": move_number,
+        "solution_line": solution_line or [],
         "themes": [puzzle_type, phase or "middlegame"],
     }
+
+
+async def compute_solution_line(
+    fen: str,
+    engine: "chess.engine.UciProtocol",
+    depth: int = 12,
+    max_moves: int = 6,
+) -> list[str]:
+    """
+    Compute a multi-move solution line from a puzzle position using Stockfish.
+    Returns a list of UCI move strings: [userMove, opponentReply, userMove2, ...].
+    The line alternates: puzzle solver's move, then opponent's forced reply, etc.
+    Stops when the position becomes clearly won/lost or max_moves reached.
+    """
+    board = chess.Board(fen)
+    line: list[str] = []
+
+    for i in range(max_moves):
+        if board.is_game_over():
+            break
+
+        info = await engine.analyse(board, chess.engine.Limit(depth=depth))
+        pv = info.get("pv")
+        if not pv or len(pv) == 0:
+            break
+
+        best = pv[0]
+        line.append(best.uci())
+        board.push(best)
+
+        # After opponent's reply (odd indices), check if position is decisive
+        if i > 0 and i % 2 == 1:
+            score = info.get("score")
+            if score:
+                pov = score.pov(board.turn)
+                if pov.is_mate():
+                    break
+                cp = pov.score()
+                if cp is not None and abs(cp) > 500:
+                    break
+
+    return line
 
 
 # ═══════════════════════════════════════════════════════════

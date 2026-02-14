@@ -239,6 +239,7 @@ class Puzzle(Base):
     difficulty = Column(String, nullable=False)  # 'bronze' | 'silver' | 'gold' | 'platinum'
     move_number = Column(Integer, nullable=True)
     explanation = Column(Text, nullable=True)
+    solution_line = Column(JSONB, default=list)  # Multi-move sequence [uci1, uci2, ...]
     themes = Column(JSONB, default=list)  # Tactical themes array
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
