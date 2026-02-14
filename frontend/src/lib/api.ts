@@ -233,9 +233,9 @@ export interface PuzzleHistoryAttempt {
   attempted_at: string | null;
   puzzle: {
     fen: string;
-    difficulty: string;
     phase: string;
     puzzle_type: string;
+    themes?: string[];
   } | null;
 }
 
@@ -262,7 +262,6 @@ export interface DailyWarmupPuzzle {
   eval_loss_cp: number;
   phase: string;
   puzzle_type: string;
-  difficulty: string;
   themes: string[];
   source: "review" | "weakness" | "random";
 }
@@ -465,7 +464,6 @@ export interface PuzzleItem {
   eval_loss_cp: number;
   phase?: string;
   puzzle_type?: string;
-  difficulty: string;
   explanation?: string | null;
   solution_line?: string[];
   themes: string[];
@@ -742,14 +740,14 @@ export const analysisAPI = {
 
 export const puzzlesAPI = {
   list(params?: {
-    difficulty?: string;
+    tactic?: string;
     phase?: string;
     puzzle_type?: string;
     limit?: number;
     game_id?: number;
   }): Promise<PuzzleItem[]> {
     const q = new URLSearchParams();
-    if (params?.difficulty) q.set("difficulty", params.difficulty);
+    if (params?.tactic) q.set("tactic", params.tactic);
     if (params?.phase) q.set("phase", params.phase);
     if (params?.puzzle_type) q.set("puzzle_type", params.puzzle_type);
     if (params?.limit) q.set("limit", String(params.limit));
@@ -758,13 +756,13 @@ export const puzzlesAPI = {
   },
 
   global(params?: {
-    difficulty?: string;
+    tactic?: string;
     phase?: string;
     puzzle_type?: string;
     limit?: number;
   }): Promise<PuzzleItem[]> {
     const q = new URLSearchParams();
-    if (params?.difficulty) q.set("difficulty", params.difficulty);
+    if (params?.tactic) q.set("tactic", params.tactic);
     if (params?.phase) q.set("phase", params.phase);
     if (params?.puzzle_type) q.set("puzzle_type", params.puzzle_type);
     if (params?.limit) q.set("limit", String(params.limit));
@@ -1159,7 +1157,6 @@ export interface AnonGameAnalysis {
     eval_loss_cp: number;
     phase: string;
     puzzle_type: string;
-    difficulty: string;
     move_number: number;
     themes: string[];
   }[];

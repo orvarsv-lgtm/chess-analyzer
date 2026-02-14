@@ -87,7 +87,6 @@ class PuzzleCandidateOut(BaseModel):
     eval_loss_cp: int
     phase: str
     puzzle_type: str
-    difficulty: str
     move_number: int
     themes: list[str]
 
@@ -102,7 +101,6 @@ class ClaimPuzzleCandidateIn(BaseModel):
     eval_loss_cp: int
     phase: str
     puzzle_type: str
-    difficulty: str
     move_number: int
     themes: list[str]
 
@@ -171,7 +169,6 @@ class ClaimMoveIn(BaseModel):
     eval_loss_cp: int
     phase: str
     puzzle_type: str
-    difficulty: str
     move_number: int
     themes: list[str] = []
 
@@ -489,7 +486,7 @@ async def claim_anonymous_results(
                 eval_loss_cp=pc.eval_loss_cp,
                 phase=pc.phase,
                 puzzle_type=pc.puzzle_type,
-                difficulty=pc.difficulty,
+                difficulty="standard",
                 move_number=pc.move_number,
                 themes=pc.themes,
             )

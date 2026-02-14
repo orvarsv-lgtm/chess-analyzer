@@ -56,6 +56,7 @@ function TrainPageInner() {
   const searchParams = useSearchParams();
   const gameIdParam = searchParams.get("game_id");
   const timedParam = searchParams.get("mode") === "timed";
+  const tacticParam = searchParams.get("tactic");
 
   // ─── Timed mode ───────────────────────────────────
   const TIMED_LIMIT = 10;
@@ -94,19 +95,19 @@ function TrainPageInner() {
   const [loading, setLoading] = useState(false);
 
   // ─── Puzzle Options / Filters ────────────────────────
-  const [filterDifficulty, setFilterDifficulty] = useState<string>("");
+  const [filterTactic, setFilterTactic] = useState<string>("");
   const [filterPhase, setFilterPhase] = useState<string>("");
   const [filterType, setFilterType] = useState<string>("");
   const [showOptions, setShowOptions] = useState(false);
-  const hasFilters = filterDifficulty || filterPhase || filterType;
+  const hasFilters = filterTactic || filterPhase || filterType;
 
   const puzzleFilters = useMemo(() => {
-    const f: { difficulty?: string; phase?: string; puzzle_type?: string } = {};
-    if (filterDifficulty) f.difficulty = filterDifficulty;
+    const f: { tactic?: string; phase?: string; puzzle_type?: string } = {};
+    if (filterTactic) f.tactic = filterTactic;
     if (filterPhase) f.phase = filterPhase;
     if (filterType) f.puzzle_type = filterType;
     return f;
-  }, [filterDifficulty, filterPhase, filterType]);
+  }, [filterTactic, filterPhase, filterType]);
 
   // ─── Solving state ───────────────────────────────────
   const [puzzleState, setPuzzleState] = useState<PuzzleState>("solving");
@@ -217,7 +218,7 @@ function TrainPageInner() {
   }, []);
 
   // ─── Load puzzles ────────────────────────────────────
-  const loadPuzzles = useCallback(async (source?: PuzzleSource, filters?: { difficulty?: string; phase?: string; puzzle_type?: string }) => {
+  const loadPuzzles = useCallback(async (source?: PuzzleSource, filters?: { tactic?: string; phase?: string; puzzle_type?: string }) => {
     const src = source ?? puzzleSource;
     const f = filters ?? puzzleFilters;
     setLoading(true);
@@ -268,17 +269,33 @@ function TrainPageInner() {
     }
   }, [timedParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function weaknessToFilters(w: Weakness): { difficulty?: string; phase?: string; puzzle_type?: string } {
+  // Auto-start session if tactic param in URL (from coach report CTA)
+  useEffect(() => {
+    if (tacticParam && session) {
+      setFilterTactic(tacticParam);
+      loadPuzzles("global", { tactic: tacticParam });
+      setView("session");
+    }
+  }, [tacticParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function weaknessToFilters(w: Weakness): { tactic?: string; phase?: string; puzzle_type?: string } {
     const area = w.area.toLowerCase();
     if (area === "opening") return { phase: "opening" };
     if (area === "middlegame") return { phase: "middlegame" };
     if (area === "endgame") return { phase: "endgame" };
     if (area === "blunder pattern") return { puzzle_type: "blunder" };
     if (area === "converting advantages") return { puzzle_type: "missed_win" };
+    // Tactic-specific weaknesses
+    if (area.includes("fork")) return { tactic: "fork" };
+    if (area.includes("pin")) return { tactic: "pin" };
+    if (area.includes("skewer")) return { tactic: "skewer" };
+    if (area.includes("king")) return { tactic: "king_activity" };
+    if (area.includes("back rank") || area.includes("back-rank")) return { tactic: "back_rank" };
+    if (area.includes("discovery") || area.includes("discovered")) return { tactic: "discovered_attack" };
     return {};
   }
 
-  function startSession(source?: PuzzleSource, timed?: boolean, overrideFilters?: { difficulty?: string; phase?: string; puzzle_type?: string }) {
+  function startSession(source?: PuzzleSource, timed?: boolean, overrideFilters?: { tactic?: string; phase?: string; puzzle_type?: string }) {
     const src = source ?? puzzleSource;
     if (timed !== undefined) setIsTimed(timed);
     setPuzzleSource(src);
@@ -303,7 +320,6 @@ function TrainPageInner() {
       eval_loss_cp: p.eval_loss_cp,
       phase: p.phase,
       puzzle_type: p.puzzle_type,
-      difficulty: p.difficulty,
       explanation: null,
       themes: p.themes,
     }));
@@ -329,7 +345,6 @@ function TrainPageInner() {
       eval_loss_cp: p.cp_loss,
       phase: p.phase,
       puzzle_type: "advantage",
-      difficulty: p.advantage_cp > 500 ? "gold" : "silver",
       explanation: null,
       themes: ["advantage_capitalization"],
     }));
@@ -721,12 +736,11 @@ function TrainPageInner() {
                                 {a.puzzle?.puzzle_type ?? "Puzzle"} • {a.puzzle?.phase ?? ""}
                               </span>
                               <div className="flex items-center gap-2 text-xs text-gray-500">
-                                <Badge variant={
-                                  a.puzzle?.difficulty === "platinum" || a.puzzle?.difficulty === "gold" ? "warning" :
-                                  a.puzzle?.difficulty === "silver" ? "default" : "success"
-                                }>
-                                  {a.puzzle?.difficulty}
-                                </Badge>
+                                {a.puzzle?.themes?.filter((t: string) => !["opening", "middlegame", "endgame", "blunder", "mistake", "missed_win"].includes(t)).slice(0, 2).map((t: string) => (
+                                  <Badge key={t} variant="default">
+                                    {t.replace(/_/g, " ")}
+                                  </Badge>
+                                ))}
                                 {a.time_taken && <span>{a.time_taken}s</span>}
                               </div>
                             </div>
@@ -827,19 +841,27 @@ function TrainPageInner() {
                 className="overflow-hidden"
               >
                 <div className="px-4 pb-4 grid gap-3 sm:grid-cols-3">
-                  {/* Difficulty */}
+                  {/* Tactic */}
                   <div>
-                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Difficulty</label>
+                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Tactic</label>
                     <select
-                      value={filterDifficulty}
-                      onChange={(e) => setFilterDifficulty(e.target.value)}
+                      value={filterTactic}
+                      onChange={(e) => setFilterTactic(e.target.value)}
                       className="w-full rounded-lg bg-surface-2 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
                     >
                       <option value="">All</option>
-                      <option value="bronze">Bronze</option>
-                      <option value="silver">Silver</option>
-                      <option value="gold">Gold</option>
-                      <option value="platinum">Platinum</option>
+                      <option value="fork">Fork</option>
+                      <option value="pin">Pin</option>
+                      <option value="skewer">Skewer</option>
+                      <option value="discovered_attack">Discovered Attack</option>
+                      <option value="back_rank">Back Rank</option>
+                      <option value="sacrifice">Sacrifice</option>
+                      <option value="promotion">Promotion</option>
+                      <option value="checkmate_pattern">Checkmate Pattern</option>
+                      <option value="king_activity">King Play</option>
+                      <option value="deflection">Deflection</option>
+                      <option value="winning_capture">Winning Capture</option>
+                      <option value="positional">Positional</option>
                     </select>
                   </div>
                   {/* Game Phase */}
@@ -874,7 +896,7 @@ function TrainPageInner() {
                 {hasFilters && (
                   <div className="px-4 pb-4">
                     <button
-                      onClick={() => { setFilterDifficulty(""); setFilterPhase(""); setFilterType(""); }}
+                      onClick={() => { setFilterTactic(""); setFilterPhase(""); setFilterType(""); }}
                       className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
                     >
                       Clear all filters
@@ -1369,27 +1391,15 @@ function TrainPageInner() {
                   Puzzle Info
                 </h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Difficulty</span>
-                    <Badge
-                      variant={
-                        currentPuzzle.difficulty === "hard"
-                          ? "danger"
-                          : currentPuzzle.difficulty === "medium"
-                          ? "warning"
-                          : "success"
-                      }
-                    >
-                      {currentPuzzle.difficulty}
-                    </Badge>
-                  </div>
                   {currentPuzzle.themes?.length > 0 && (
                     <div className="flex justify-between items-start">
-                      <span className="text-gray-500">Themes</span>
+                      <span className="text-gray-500">Tactics</span>
                       <div className="flex flex-wrap gap-1 justify-end">
-                        {currentPuzzle.themes.map((t) => (
+                        {currentPuzzle.themes
+                          .filter((t) => !["opening", "middlegame", "endgame", "blunder", "mistake", "missed_win"].includes(t))
+                          .map((t) => (
                           <Badge key={t} variant="default">
-                            {t}
+                            {t.replace(/_/g, " ")}
                           </Badge>
                         ))}
                       </div>

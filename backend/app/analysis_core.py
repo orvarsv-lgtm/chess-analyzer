@@ -386,16 +386,6 @@ def generate_puzzle_data(
 
     puzzle_key = hashlib.md5(f"{fen_before}|{san}".encode()).hexdigest()
 
-    # Difficulty based on cp_loss
-    if cp_loss >= 300:
-        difficulty = "platinum"
-    elif cp_loss >= 200:
-        difficulty = "gold"
-    elif cp_loss >= 100:
-        difficulty = "silver"
-    else:
-        difficulty = "bronze"
-
     # Side to move from FEN
     fen_parts = fen_before.split()
     side_to_move = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
@@ -408,6 +398,18 @@ def generate_puzzle_data(
     else:
         puzzle_type = "mistake"
 
+    # Detect tactical themes
+    tactic_tags = detect_puzzle_tactics(
+        fen_before,
+        best_move_uci,
+        solution_line,
+    ) if best_move_uci else [puzzle_type, phase or "middlegame"]
+
+    # Always include phase as a theme
+    p = phase or "middlegame"
+    if p not in tactic_tags:
+        tactic_tags.append(p)
+
     return {
         "puzzle_key": puzzle_key,
         "fen": fen_before,
@@ -418,10 +420,10 @@ def generate_puzzle_data(
         "eval_loss_cp": cp_loss,
         "phase": phase or "middlegame",
         "puzzle_type": puzzle_type,
-        "difficulty": difficulty,
+        "difficulty": "standard",
         "move_number": move_number,
         "solution_line": solution_line or [],
-        "themes": [puzzle_type, phase or "middlegame"],
+        "themes": tactic_tags,
     }
 
 
@@ -600,35 +602,383 @@ PIECE_VALUES_MAP = {
     chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
 }
 
+PIECE_NAMES_MAP = {
+    chess.PAWN: "pawn", chess.KNIGHT: "knight", chess.BISHOP: "bishop",
+    chess.ROOK: "rook", chess.QUEEN: "queen", chess.KING: "king",
+}
+
+# ═══════════════════════════════════════════════════════════
+# Tactical Pattern Detection Helpers
+# ═══════════════════════════════════════════════════════════
+
+def _detect_fork(board: chess.Board, move: chess.Move) -> bool:
+    """Check if a move creates a fork (piece attacks 2+ higher-value targets)."""
+    board_after = board.copy()
+    board_after.push(move)
+    attacker = board.piece_at(move.from_square)
+    if not attacker:
+        return False
+    attacker_val = PIECE_VALUES_MAP.get(attacker.piece_type, 0)
+    opponent = not board.turn
+    attacked_targets = 0
+    for sq in board_after.attacks(move.to_square):
+        target = board_after.piece_at(sq)
+        if target and target.color == opponent:
+            target_val = PIECE_VALUES_MAP.get(target.piece_type, 0)
+            if target_val > attacker_val or target.piece_type == chess.KING:
+                attacked_targets += 1
+    return attacked_targets >= 2
+
+
+def _detect_pin(board: chess.Board, move: chess.Move) -> bool:
+    """Check if a move creates or exploits a pin on a ray (file/rank/diagonal)."""
+    board_after = board.copy()
+    board_after.push(move)
+    opponent = not board.turn
+    # Check if any opponent piece is now pinned to their king
+    opp_king_sq = board_after.king(opponent)
+    if opp_king_sq is None:
+        return False
+    for sq in chess.SQUARES:
+        piece = board_after.piece_at(sq)
+        if piece and piece.color == opponent and sq != opp_king_sq:
+            if board_after.is_pinned(opponent, sq):
+                # Verify that this pin involves our moved piece
+                pin_dir = board_after.pin(opponent, sq)
+                if pin_dir and move.to_square in pin_dir:
+                    return True
+    return False
+
+
+def _detect_skewer(board: chess.Board, move: chess.Move) -> bool:
+    """Check if a move creates a skewer (attacks high-value piece with lower behind it)."""
+    board_after = board.copy()
+    board_after.push(move)
+    attacker = board.piece_at(move.from_square)
+    if not attacker:
+        return False
+    # Skewers happen on rays — only bishops, rooks, queens can skewer
+    if attacker.piece_type not in (chess.BISHOP, chess.ROOK, chess.QUEEN):
+        return False
+    opponent = not board.turn
+    to_sq = move.to_square
+    to_rank, to_file = chess.square_rank(to_sq), chess.square_file(to_sq)
+
+    # Check each ray direction from the moved piece
+    ray_dirs = []
+    if attacker.piece_type in (chess.ROOK, chess.QUEEN):
+        ray_dirs += [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    if attacker.piece_type in (chess.BISHOP, chess.QUEEN):
+        ray_dirs += [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+    for dr, df in ray_dirs:
+        pieces_on_ray = []
+        r, f = to_rank + dr, to_file + df
+        while 0 <= r <= 7 and 0 <= f <= 7:
+            sq = chess.square(f, r)
+            p = board_after.piece_at(sq)
+            if p:
+                if p.color == opponent:
+                    pieces_on_ray.append(p)
+                break  # blocked by any piece
+            r += dr
+            f += df
+        # Continue past first piece if it can move
+        if len(pieces_on_ray) == 1:
+            r2, f2 = r + dr, f + df
+            while 0 <= r2 <= 7 and 0 <= f2 <= 7:
+                sq2 = chess.square(f2, r2)
+                p2 = board_after.piece_at(sq2)
+                if p2:
+                    if p2.color == opponent:
+                        pieces_on_ray.append(p2)
+                    break
+                r2 += dr
+                f2 += df
+        if len(pieces_on_ray) >= 2:
+            v1 = PIECE_VALUES_MAP.get(pieces_on_ray[0].piece_type, 0)
+            v2 = PIECE_VALUES_MAP.get(pieces_on_ray[1].piece_type, 0)
+            # Skewer: front piece is more valuable (or is king)
+            if pieces_on_ray[0].piece_type == chess.KING or v1 > v2:
+                return True
+    return False
+
+
+def _detect_discovered_attack(board: chess.Board, move: chess.Move) -> bool:
+    """Check if moving a piece reveals an attack from another piece behind it."""
+    board_after = board.copy()
+    board_after.push(move)
+    player = board.turn
+    opponent = not player
+    from_sq = move.from_square
+    # Check if removing the piece from from_sq opened a line for our sliding pieces
+    for sq in chess.SQUARES:
+        piece = board.piece_at(sq)
+        if not piece or piece.color != player or sq == move.from_square:
+            continue
+        if piece.piece_type not in (chess.BISHOP, chess.ROOK, chess.QUEEN):
+            continue
+        # Did this piece gain new attacks by the move?
+        attacks_before = board.attacks(sq)
+        attacks_after = board_after.attacks(sq)
+        new_attacks = attacks_after & ~attacks_before
+        for atk_sq in new_attacks:
+            target = board_after.piece_at(atk_sq)
+            if target and target.color == opponent and PIECE_VALUES_MAP.get(target.piece_type, 0) >= 3:
+                return True
+    return False
+
+
+def _detect_back_rank(board: chess.Board, move: chess.Move) -> bool:
+    """Check if a move delivers or threatens back-rank mate."""
+    board_after = board.copy()
+    board_after.push(move)
+    if board_after.is_checkmate():
+        opponent = not board.turn
+        king_sq = board_after.king(opponent)
+        if king_sq is not None:
+            king_rank = chess.square_rank(king_sq)
+            if (opponent == chess.WHITE and king_rank == 0) or (opponent == chess.BLACK and king_rank == 7):
+                return True
+    # Also check if it creates a back-rank mate threat
+    if board_after.is_check():
+        opponent = not board.turn
+        king_sq = board_after.king(opponent)
+        if king_sq is not None:
+            king_rank = chess.square_rank(king_sq)
+            if (opponent == chess.WHITE and king_rank == 0) or (opponent == chess.BLACK and king_rank == 7):
+                return True
+    return False
+
+
+def _is_pawn_promotion_tactic(board: chess.Board, move: chess.Move) -> bool:
+    """Check if the move involves pawn promotion or a key promotion push."""
+    if move.promotion:
+        return True
+    piece = board.piece_at(move.from_square)
+    if piece and piece.piece_type == chess.PAWN:
+        to_rank = chess.square_rank(move.to_square)
+        # Pawn reaching 7th rank (about to promote)
+        if (piece.color == chess.WHITE and to_rank == 6) or (piece.color == chess.BLACK and to_rank == 1):
+            return True
+    return False
+
+
+def _detect_mate_threat(board: chess.Board, move: chess.Move) -> int | None:
+    """Check if a move delivers mate or mate-in-N (up to 3). Returns N or None."""
+    board_after = board.copy()
+    board_after.push(move)
+    if board_after.is_checkmate():
+        return 1
+    # Check mate in 2-3 by examining if all opponent responses lead to forced mate
+    # (Simplified: just check for mate-in-1 and obvious check sequences)
+    if board_after.is_check():
+        # After opponent's only legal responses, can we mate?
+        for response in board_after.legal_moves:
+            b2 = board_after.copy()
+            b2.push(response)
+            for our_move in b2.legal_moves:
+                b3 = b2.copy()
+                b3.push(our_move)
+                if b3.is_checkmate():
+                    return 2
+    return None
+
+
+def _detect_deflection(board: chess.Board, move: chess.Move) -> bool:
+    """Check if a move forces a defender away from a critical square."""
+    board_after = board.copy()
+    board_after.push(move)
+    # If the move is a capture or attack on a piece that was defending something
+    captured = board.piece_at(move.to_square)
+    if not captured:
+        return False
+    opponent = not board.turn
+    player = board.turn
+    # What was the captured piece defending?
+    for sq in board.attacks(move.to_square):
+        other = board.piece_at(sq)
+        if other and other.color == opponent and PIECE_VALUES_MAP.get(other.piece_type, 0) >= 3:
+            # Was the captured piece a defender of this square?
+            defenders_before = len(board.attackers(opponent, sq))
+            defenders_after = len(board_after.attackers(opponent, sq))
+            if defenders_after < defenders_before:
+                attackers_after = len(board_after.attackers(player, sq))
+                if attackers_after > defenders_after:
+                    return True
+    return False
+
+
+# ═══════════════════════════════════════════════════════════
+# Tactic Detection Engine — for puzzles
+# ═══════════════════════════════════════════════════════════
+
+def detect_puzzle_tactics(
+    fen: str,
+    best_move_uci: str,
+    solution_line: list[str] | None = None,
+) -> list[str]:
+    """
+    Analyze a puzzle position and its solution to detect tactical themes.
+    Returns a list of tactic tags like ['fork', 'knight', 'middlegame'].
+    """
+    try:
+        board = chess.Board(fen)
+        move = chess.Move.from_uci(best_move_uci)
+    except Exception:
+        return []
+
+    if move not in board.legal_moves:
+        return []
+
+    tags: list[str] = []
+    moving_piece = board.piece_at(move.from_square)
+
+    # ── Core tactical patterns ──
+    if _detect_fork(board, move):
+        tags.append("fork")
+    if _detect_pin(board, move):
+        tags.append("pin")
+    if _detect_skewer(board, move):
+        tags.append("skewer")
+    if _detect_discovered_attack(board, move):
+        tags.append("discovered_attack")
+    if _detect_back_rank(board, move):
+        tags.append("back_rank")
+    if _detect_deflection(board, move):
+        tags.append("deflection")
+    if _is_pawn_promotion_tactic(board, move):
+        tags.append("promotion")
+
+    # ── Mate patterns ──
+    mate_n = _detect_mate_threat(board, move)
+    if mate_n == 1:
+        tags.append("mate_in_1")
+    elif mate_n is not None:
+        tags.append("checkmate_pattern")
+
+    # ── Captures ──
+    captured = board.piece_at(move.to_square)
+    board_after = board.copy()
+    board_after.push(move)
+
+    if captured:
+        cap_val = PIECE_VALUES_MAP.get(captured.piece_type, 0)
+        mov_val = PIECE_VALUES_MAP.get(moving_piece.piece_type, 0) if moving_piece else 0
+        if cap_val > mov_val:
+            tags.append("winning_capture")
+        if _is_sacrifice(board, move):
+            tags.append("sacrifice")
+    elif _is_sacrifice(board, move):
+        tags.append("sacrifice")
+
+    # ── Check patterns ──
+    if board_after.is_check() and "mate_in_1" not in tags and "back_rank" not in tags:
+        tags.append("check")
+
+    # ── King activity (endgame king play) ──
+    if moving_piece and moving_piece.piece_type == chess.KING:
+        total_pieces = len(board.piece_map())
+        if total_pieces <= 12:
+            tags.append("king_activity")
+
+    # ── Piece tags (what piece is involved) ──
+    if moving_piece:
+        piece_name = PIECE_NAMES_MAP.get(moving_piece.piece_type)
+        if piece_name and piece_name not in tags:
+            tags.append(piece_name)
+
+    # ── Analyze solution line for multi-move tactics ──
+    if solution_line and len(solution_line) >= 3:
+        try:
+            b = chess.Board(fen)
+            for i, uci in enumerate(solution_line[:4]):
+                m = chess.Move.from_uci(uci)
+                if m in b.legal_moves:
+                    if i % 2 == 0:  # Our moves
+                        if _detect_fork(b, m) and "fork" not in tags:
+                            tags.append("fork")
+                        if b.piece_at(m.to_square) and "combination" not in tags:
+                            tags.append("combination")
+                    b.push(m)
+                else:
+                    break
+            if b.is_checkmate() and "checkmate_pattern" not in tags and "mate_in_1" not in tags:
+                tags.append("checkmate_pattern")
+        except Exception:
+            pass
+
+    # If no specific tactic found, mark as positional
+    if not any(t in tags for t in [
+        "fork", "pin", "skewer", "discovered_attack", "back_rank", "deflection",
+        "promotion", "mate_in_1", "checkmate_pattern", "sacrifice", "winning_capture",
+        "check", "king_activity", "combination",
+    ]):
+        tags.append("positional")
+
+    return tags
+
+
+# ═══════════════════════════════════════════════════════════
+# Blunder Subtype Classification (Redesigned)
+# ═══════════════════════════════════════════════════════════
 
 def classify_blunder_subtype(
     board_before: chess.Board,
     move: chess.Move,
     best_move: chess.Move | None,
     phase: str,
-) -> str | None:
+) -> str:
     """
-    Classify a blunder into a subtype:
-    - hanging_piece: player left a piece en prise or moved to an attacked square
-    - missed_tactic: best move was a fork, pin, skewer, or winning capture
-    - king_safety: move weakened own king (pawn shield, moved near open file)
-    - endgame_technique: blunder in an endgame position
+    Classify a blunder into a subtype based on what happened and what was missed.
 
-    Returns subtype string or None if unclassifiable.
+    Subtypes (expanded from 4 to 10):
+    - hanging_piece: left a piece undefended or moved to an attacked square
+    - missed_fork: best move was a fork the player didn't see
+    - missed_pin: best move exploited or created a pin
+    - missed_skewer: best move was a skewer
+    - missed_discovery: best move created a discovered attack
+    - back_rank: blunder related to back-rank weakness
+    - king_safety: weakened own king position
+    - endgame_technique: genuine endgame principle error (king activity, opposition, pawn play)
+    - missed_mate: missed a checkmate or mate-in-N
+    - positional: none of the above — a positional or strategic error
     """
-    if phase == "endgame":
-        return "endgame_technique"
-
-    # Check if the played move left a piece hanging
-    board_after = board_before.copy()
-    board_after.push(move)
-
-    # Hanging piece: after the move, check if any of the player's pieces
-    # are attacked by the opponent but not adequately defended
     player_color = board_before.turn
     opponent_color = not player_color
 
-    # Check the piece that just moved — is it now hanging?
+    # ── 1. Check what the BEST move would have achieved ──
+    if best_move and best_move in board_before.legal_moves:
+        # Missed checkmate?
+        mate_n = _detect_mate_threat(board_before, best_move)
+        if mate_n is not None:
+            return "missed_mate"
+
+        # Missed fork?
+        if _detect_fork(board_before, best_move):
+            return "missed_fork"
+
+        # Missed pin?
+        if _detect_pin(board_before, best_move):
+            return "missed_pin"
+
+        # Missed skewer?
+        if _detect_skewer(board_before, best_move):
+            return "missed_skewer"
+
+        # Missed discovered attack?
+        if _detect_discovered_attack(board_before, best_move):
+            return "missed_discovery"
+
+        # Missed back-rank threat?
+        if _detect_back_rank(board_before, best_move):
+            return "back_rank"
+
+    # ── 2. Check what the PLAYED move caused ──
+    board_after = board_before.copy()
+    board_after.push(move)
+
+    # Did the player hang a piece?
     moving_piece = board_before.piece_at(move.from_square)
     if moving_piece:
         attackers = len(board_after.attackers(opponent_color, move.to_square))
@@ -637,37 +987,28 @@ def classify_blunder_subtype(
         if attackers > defenders and piece_val >= 3:
             return "hanging_piece"
 
-    # Check if any other piece is now hanging due to vacating the from_square
+    # Did the move expose another piece?
     for sq in chess.SQUARES:
         p = board_after.piece_at(sq)
         if p and p.color == player_color and sq != move.to_square:
-            atk = len(board_after.attackers(opponent_color, sq))
-            dfs = len(board_after.attackers(player_color, sq))
+            atk_after = len(board_after.attackers(opponent_color, sq))
+            def_after = len(board_after.attackers(player_color, sq))
+            # Was this piece safe before?
+            atk_before = len(board_before.attackers(opponent_color, sq))
+            def_before = len(board_before.attackers(player_color, sq))
             val = PIECE_VALUES_MAP.get(p.piece_type, 0)
-            if atk > dfs and val >= 3:
+            if val >= 3 and atk_after > def_after and atk_before <= def_before:
                 return "hanging_piece"
 
-    # Missed tactic: check if the best move was a capture, check, or fork
-    if best_move:
-        # Best move is a capture of a high-value piece
-        captured = board_before.piece_at(best_move.to_square)
-        if captured and PIECE_VALUES_MAP.get(captured.piece_type, 0) >= 3:
-            return "missed_tactic"
-
-        # Best move gives check
-        board_test = board_before.copy()
-        board_test.push(best_move)
-        if board_test.is_check():
-            return "missed_tactic"
-
-    # King safety: move involves king's pawn shield or king moved to open file
+    # ── 3. King safety checks (all phases) ──
     if moving_piece and moving_piece.piece_type == chess.KING:
-        # King moved (not castling) — potentially unsafe
         if not board_before.is_castling(move):
-            return "king_safety"
+            # King walked into danger or left safety
+            if phase != "endgame":
+                return "king_safety"
 
-    # Pawn move that weakens king's shield
-    if moving_piece and moving_piece.piece_type == chess.PAWN:
+    # Pawn move weakening king shelter (opening/middlegame)
+    if phase != "endgame" and moving_piece and moving_piece.piece_type == chess.PAWN:
         king_sq = board_before.king(player_color)
         if king_sq is not None:
             king_file = chess.square_file(king_sq)
@@ -675,5 +1016,42 @@ def classify_blunder_subtype(
             if abs(king_file - pawn_file) <= 1:
                 return "king_safety"
 
-    # Default: missed tactic (most common blunder cause)
-    return "missed_tactic"
+    # ── 4. Back-rank vulnerability (opponent can now exploit) ──
+    # Check if after our move, opponent has a back-rank threat
+    for opp_move in board_after.legal_moves:
+        if _detect_back_rank(board_after, opp_move):
+            return "back_rank"
+        break  # Only check a few to avoid being too slow
+    # More thorough: check if opponent's response is check on back rank
+    if board_after.is_check():
+        king_sq = board_after.king(player_color)
+        if king_sq is not None:
+            king_rank = chess.square_rank(king_sq)
+            if (player_color == chess.WHITE and king_rank == 0) or \
+               (player_color == chess.BLACK and king_rank == 7):
+                return "back_rank"
+
+    # ── 5. Endgame-specific errors (only genuine endgame patterns) ──
+    if phase == "endgame":
+        total_pieces = len(board_before.piece_map())
+        # King not centralized when it should be
+        if moving_piece and moving_piece.piece_type != chess.KING and total_pieces <= 10:
+            king_sq = board_before.king(player_color)
+            if king_sq is not None:
+                kr, kf = chess.square_rank(king_sq), chess.square_file(king_sq)
+                if kr in (0, 7) or kf in (0, 7):
+                    # King stuck on edge while not playing with it — endgame technique
+                    return "endgame_technique"
+
+        # Pawn endgame errors (opposition, passed pawns)
+        if total_pieces <= 8:
+            return "endgame_technique"
+
+    # ── 6. Missed winning capture ──
+    if best_move:
+        captured = board_before.piece_at(best_move.to_square)
+        if captured and PIECE_VALUES_MAP.get(captured.piece_type, 0) >= 3:
+            return "missed_capture"
+
+    # ── Default: positional error (NOT missed_tactic) ──
+    return "positional"

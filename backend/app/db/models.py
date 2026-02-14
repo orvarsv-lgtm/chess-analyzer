@@ -236,7 +236,7 @@ class Puzzle(Base):
     eval_loss_cp = Column(Integer, nullable=False)
     phase = Column(String, nullable=False)
     puzzle_type = Column(String, nullable=False)
-    difficulty = Column(String, nullable=False)  # 'bronze' | 'silver' | 'gold' | 'platinum'
+    difficulty = Column(String, nullable=True, default="standard")  # deprecated — kept for compat
     move_number = Column(Integer, nullable=True)
     explanation = Column(Text, nullable=True)
     solution_line = Column(JSONB, default=list)  # Multi-move sequence [uci1, uci2, ...]
@@ -248,7 +248,7 @@ class Puzzle(Base):
 
     __table_args__ = (
         Index("ix_puzzles_type", "puzzle_type"),
-        Index("ix_puzzles_difficulty", "difficulty"),
+        Index("ix_puzzles_phase", "phase"),
         Index("ix_puzzles_themes", "themes", postgresql_using="gin"),
     )
 

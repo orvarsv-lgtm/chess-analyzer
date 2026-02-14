@@ -32,7 +32,6 @@ class PuzzleOut(BaseModel):
     eval_loss_cp: int
     phase: str
     puzzle_type: str
-    difficulty: str
     explanation: Optional[str]
     solution_line: list[str] = []
     themes: list[str] = []
@@ -60,7 +59,7 @@ class AttemptResponse(BaseModel):
 
 @router.get("", response_model=list[PuzzleOut])
 async def list_puzzles(
-    difficulty: Optional[str] = None,
+    tactic: Optional[str] = None,
     phase: Optional[str] = None,
     puzzle_type: Optional[str] = None,
     game_id: Optional[int] = None,
@@ -84,8 +83,9 @@ async def list_puzzles(
     if game_id:
         query = query.where(Puzzle.source_game_id == game_id)
 
-    if difficulty:
-        query = query.where(Puzzle.difficulty == difficulty)
+    if tactic:
+        # Filter by tactic tag in JSONB themes array
+        query = query.where(Puzzle.themes.contains([tactic]))
     if phase:
         query = query.where(Puzzle.phase == phase)
     if puzzle_type:
@@ -105,7 +105,6 @@ async def list_puzzles(
             eval_loss_cp=p.eval_loss_cp,
             phase=p.phase,
             puzzle_type=p.puzzle_type,
-            difficulty=p.difficulty,
             explanation=p.explanation,
             solution_line=p.solution_line or [],
             themes=p.themes or [],
@@ -116,7 +115,7 @@ async def list_puzzles(
 
 @router.get("/global", response_model=list[PuzzleOut])
 async def global_puzzles(
-    difficulty: Optional[str] = None,
+    tactic: Optional[str] = None,
     phase: Optional[str] = None,
     puzzle_type: Optional[str] = None,
     limit: int = Query(20, ge=1, le=100),
@@ -134,8 +133,8 @@ async def global_puzzles(
 
     query = select(Puzzle).where(Puzzle.id.notin_(select(attempted_sq)))
 
-    if difficulty:
-        query = query.where(Puzzle.difficulty == difficulty)
+    if tactic:
+        query = query.where(Puzzle.themes.contains([tactic]))
     if phase:
         query = query.where(Puzzle.phase == phase)
     if puzzle_type:
@@ -156,7 +155,6 @@ async def global_puzzles(
             eval_loss_cp=p.eval_loss_cp,
             phase=p.phase,
             puzzle_type=p.puzzle_type,
-            difficulty=p.difficulty,
             explanation=p.explanation,
             solution_line=p.solution_line or [],
             themes=p.themes or [],
@@ -209,7 +207,6 @@ async def get_review_queue(
             eval_loss_cp=p.eval_loss_cp,
             phase=p.phase,
             puzzle_type=p.puzzle_type,
-            difficulty=p.difficulty,
             explanation=p.explanation,
             solution_line=p.solution_line or [],
             themes=p.themes or [],
@@ -329,7 +326,6 @@ async def get_daily_warmup(
             "eval_loss_cp": p.eval_loss_cp,
             "phase": p.phase,
             "puzzle_type": p.puzzle_type,
-            "difficulty": p.difficulty,
             "themes": p.themes or [],
             "source": source,
         }
@@ -763,9 +759,9 @@ async def get_puzzle_history(
                 "attempted_at": a.attempted_at.isoformat() if a.attempted_at else None,
                 "puzzle": {
                     "fen": a.puzzle.fen,
-                    "difficulty": a.puzzle.difficulty,
                     "phase": a.puzzle.phase,
                     "puzzle_type": a.puzzle.puzzle_type,
+                    "themes": a.puzzle.themes or [],
                 } if a.puzzle else None,
             }
             for a in attempts
