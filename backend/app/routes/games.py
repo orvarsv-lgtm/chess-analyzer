@@ -299,6 +299,88 @@ async def import_pgn_file(
     return {"imported": imported, "platform": platform, "filename": file.filename}
 
 
+@router.post("/auto-sync")
+async def auto_sync(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Auto-fetch new games from all linked platforms (Lichess / Chess.com).
+    Called silently on app load. Only fetches the most recent 30 games per
+    platform so it stays fast. Skips duplicates via _import_pgn_games.
+    Returns total new games imported.
+    """
+    total_imported = 0
+    platforms_synced: list[str] = []
+
+    # Snapshot user attrs before any commits
+    lichess_name = user.lichess_username
+    chesscom_name = user.chesscom_username
+
+    # ── Lichess ────────────────────────────────────────
+    if lichess_name:
+        try:
+            url = f"https://lichess.org/api/games/user/{lichess_name}"
+            params = {
+                "max": 30,
+                "pgnInBody": "true",
+                "clocks": "true",
+                "evals": "false",
+                "opening": "true",
+            }
+            headers = {"Accept": "application/x-chess-pgn"}
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(url, params=params, headers=headers)
+            if resp.status_code == 200 and resp.text.strip():
+                count = await _import_pgn_games(db, user, resp.text, "lichess")
+                total_imported += count
+                platforms_synced.append("lichess")
+        except Exception:
+            pass  # fail silently — auto-sync should never break the app
+
+    # ── Chess.com ──────────────────────────────────────
+    if chesscom_name:
+        try:
+            base_url = f"https://api.chess.com/pub/player/{chesscom_name.lower()}"
+            req_headers = {
+                "User-Agent": "ChessAnalyzer/2.0 (chess analysis platform)",
+                "Accept": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=30) as client:
+                archives_resp = await client.get(
+                    f"{base_url}/games/archives", headers=req_headers
+                )
+                if archives_resp.status_code == 200:
+                    archives = archives_resp.json().get("archives", [])
+                    all_pgn_parts: list[str] = []
+                    fetched = 0
+                    for archive_url in reversed(archives):
+                        if fetched >= 30:
+                            break
+                        month_resp = await client.get(archive_url, headers=req_headers)
+                        if month_resp.status_code != 200:
+                            continue
+                        for g in reversed(month_resp.json().get("games", [])):
+                            if fetched >= 30:
+                                break
+                            pgn = g.get("pgn", "")
+                            if pgn:
+                                all_pgn_parts.append(pgn)
+                                fetched += 1
+                    if all_pgn_parts:
+                        combined = "\n\n".join(all_pgn_parts)
+                        count = await _import_pgn_games(db, user, combined, "chess.com")
+                        total_imported += count
+                        platforms_synced.append("chess.com")
+        except Exception:
+            pass  # fail silently
+
+    return {
+        "imported": total_imported,
+        "platforms_synced": platforms_synced,
+    }
+
+
 @router.get("/{game_id}")
 async def get_game(
     game_id: int,

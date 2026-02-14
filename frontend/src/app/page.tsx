@@ -24,6 +24,7 @@ import {
 import {
   insightsAPI,
   puzzlesAPI,
+  gamesAPI,
   startAnonymousAnalysis,
   claimAnonymousResults,
   type InsightsOverview,
@@ -60,6 +61,7 @@ export default function HomePage() {
   const [studyPlan, setStudyPlan] = useState<StudyPlanResponse | null>(null);
   const [warmup, setWarmup] = useState<DailyWarmupResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ imported: number } | null>(null);
 
   // ─── Anonymous analysis state ───────────────────────
   const [platform, setPlatform] = useState<"lichess" | "chess.com" | "pgn">("lichess");
@@ -137,6 +139,25 @@ export default function HomePage() {
     }
   }, [session, step]);
 
+  // ─── Auto-sync new games on page load ───────────────
+  useEffect(() => {
+    if (!session || step !== "input") return;
+    // Only sync once per browser session to avoid hammering APIs
+    const key = "last_auto_sync";
+    const last = sessionStorage.getItem(key);
+    const now = Date.now();
+    if (last && now - Number(last) < 5 * 60 * 1000) return; // skip if synced < 5 min ago
+    sessionStorage.setItem(key, String(now));
+
+    gamesAPI.autoSync().then((res) => {
+      if (res.imported > 0) {
+        setSyncResult({ imported: res.imported });
+        // Auto-dismiss after 6 seconds
+        setTimeout(() => setSyncResult(null), 6000);
+      }
+    }).catch(() => {}); // silent fail
+  }, [session, step]);
+
   // ─── Start analysis ─────────────────────────────────
   const handleAnalyze = useCallback(async () => {
     setError("");
@@ -202,7 +223,7 @@ export default function HomePage() {
 
   // ─── If signed in and no analysis in progress, show dashboard ──
   if (session && step === "input" && !results) {
-    return <LoggedInDashboard overview={overview} recentGames={recentGames} weaknesses={weaknesses} studyRecs={studyRecs} skillProfile={skillProfile} studyPlan={studyPlan} warmup={warmup} loading={dashboardLoading} />;
+    return <LoggedInDashboard overview={overview} recentGames={recentGames} weaknesses={weaknesses} studyRecs={studyRecs} skillProfile={skillProfile} studyPlan={studyPlan} warmup={warmup} loading={dashboardLoading} syncResult={syncResult} onDismissSync={() => setSyncResult(null)} />;
   }
 
   // ─── Render based on step ───────────────────────────
@@ -672,6 +693,8 @@ function LoggedInDashboard({
   studyPlan,
   warmup,
   loading,
+  syncResult,
+  onDismissSync,
 }: {
   overview: InsightsOverview | null;
   recentGames: RecentGame[];
@@ -681,6 +704,8 @@ function LoggedInDashboard({
   studyPlan: StudyPlanResponse | null;
   warmup: DailyWarmupResponse | null;
   loading?: boolean;
+  syncResult?: { imported: number } | null;
+  onDismissSync?: () => void;
 }) {
   const topWeakness = weaknesses[0] ?? null;
   const [showAnalyzeSlider, setShowAnalyzeSlider] = useState(false);
@@ -715,6 +740,22 @@ function LoggedInDashboard({
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10 animate-fade-in">
+      {/* Auto-sync toast */}
+      {syncResult && syncResult.imported > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          className="mb-4 flex items-center justify-between rounded-lg bg-emerald-900/40 border border-emerald-700/30 px-4 py-3"
+        >
+          <div className="flex items-center gap-2 text-sm text-emerald-300">
+            <CheckCircle className="h-4 w-4" />
+            <span>Auto-synced <strong>{syncResult.imported}</strong> new game{syncResult.imported > 1 ? "s" : ""} from your linked accounts</span>
+          </div>
+          <button onClick={onDismissSync} className="text-emerald-500 hover:text-emerald-300 text-xs ml-4">✕</button>
+        </motion.div>
+      )}
+
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>

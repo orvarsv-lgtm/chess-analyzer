@@ -668,6 +668,11 @@ export const gamesAPI = {
       body: JSON.stringify({ pgn_text: pgnText, platform }),
     });
   },
+
+  /** Auto-sync new games from all linked platforms (Lichess/Chess.com). */
+  autoSync(): Promise<{ imported: number; platforms_synced: string[] }> {
+    return fetchAPI("/games/auto-sync", { method: "POST" });
+  },
 };
 
 // ─── Analysis ───────────────────────────────────────────

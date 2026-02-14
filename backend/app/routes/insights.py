@@ -1704,17 +1704,17 @@ async def get_chess_identity(
     if worst_phase and phase_cpls[worst_phase] > avg_cpl * 1.15:
         kryptonite = {
             "area": worst_phase.capitalize(),
-            "message": f"Your {worst_phase} accuracy ({round(phase_cpls[worst_phase], 1)} CPL) is your Achilles heel.",
+            "message": f"Your {worst_phase} is your Achilles heel. It's significantly weaker than your other phases and costing you games you should be winning.",
         }
     elif collapses >= 3:
         kryptonite = {
             "area": "Converting Advantages",
-            "message": f"You collapsed from winning positions {collapses} times. Won games are slipping away.",
+            "message": f"You collapsed from winning positions {collapses} times. The wins are there — you just need to learn how to close them out.",
         }
     elif blunder_rate > 3:
         kryptonite = {
             "area": "Blunders",
-            "message": f"At {round(blunder_rate, 1)} blunders per 100 moves, critical errors are holding you back.",
+            "message": "You're making too many critical errors. These aren't small inaccuracies — they're game-ending mistakes that are holding you back.",
         }
 
     # ── One thing to change ──
@@ -1754,12 +1754,12 @@ async def get_chess_identity(
             why_you.append(f"But your combined error rate of {round(error_rate, 1)} per 100 moves reveals the other side: you play sharp, complex chess that creates both brilliancies and blunders.")
         why_you.append("This combination — high best moves with higher-than-average errors — is the signature of a tactical fighter.")
     elif pid == "the_fortress":
-        why_you.append(f"Your blunder rate of {round(blunder_rate, 1)} per 100 moves is remarkably low. You simply don't give your opponents free points.")
-        why_you.append(f"Your average CPL of {round(avg_cpl, 1)} shows clean, accurate chess that wears opponents down.")
+        why_you.append(f"Your blunder rate is remarkably low — just {round(blunder_rate, 1)} per 100 moves. You simply don't give your opponents free points.")
+        why_you.append("Your accuracy is consistently clean. You play the kind of solid, precise chess that wears opponents down over time.")
         if collapses == 0:
             why_you.append("You've never collapsed from a winning position. When you're ahead, you stay ahead.")
     elif pid == "the_grinder":
-        why_you.append(f"Your endgame accuracy ({round(endgame_cpl, 1)} CPL) is significantly better than your opening ({round(opening_cpl, 1)}) and middlegame ({round(middlegame_cpl, 1)}).")
+        why_you.append("Your endgame accuracy is significantly better than your opening and middlegame. When pieces come off the board, you're in your element.")
         why_you.append("You convert advantages in simplified positions where other players stumble. The endgame is your home.")
     elif pid == "the_speedster":
         why_you.append(f"You perform best in {best_tc_category} — fast time controls bring out your best chess.")
@@ -1767,25 +1767,24 @@ async def get_chess_identity(
             why_you.append(f"Your time-pressure blunder ratio is just {round(tp_blunder_ratio * 100, 1)}%. While others panic with seconds left, you stay sharp.")
     elif pid == "the_scientist":
         why_you.append(f"Your best-move rate of {round(best_rate, 1)}% is exceptionally high. You treat each position with methodical precision.")
-        why_you.append(f"Your CPL consistency (stddev: {round(cpl_stddev, 1)}) shows you rarely have wild swings — you play at a steady, high level.")
+        why_you.append("Your game-to-game consistency is impressive — you rarely have wild swings. You play at a steady, high level match after match.")
     elif pid == "the_assassin":
         upset_pct = round(upsets / max(total_games, 1) * 100, 1)
         why_you.append(f"You've beaten higher-rated opponents {upsets} times ({upset_pct}% of games). You don't just compete against stronger players — you beat them.")
         why_you.append("Most players wilt against higher-rated opposition. You elevate.")
     elif pid == "the_chameleon":
-        why_you.append(f"Your skill balance is remarkably even (±{round(skill_balance, 1)} spread). No phase is dramatically weaker than another.")
-        phase_range_val = max(opening_cpl, middlegame_cpl, endgame_cpl) - min(opening_cpl, middlegame_cpl, endgame_cpl)
-        why_you.append(f"Your phase CPL range is only {round(phase_range_val, 1)} — meaning you play consistently whether it's move 5 or move 50.")
+        why_you.append("Your skill balance is remarkably even. No phase is dramatically weaker than another — you're dangerous everywhere.")
+        why_you.append("You play with similar accuracy whether it's move 5 or move 50. That kind of balance is rare and hard to play against.")
     elif pid == "the_berserker":
         why_you.append(f"Only {draw_rate}% of your games end in draws. Your record of {wins}W / {draws}D / {losses}L tells the story — every game is a fight to the death.")
         if cpl_stddev > 20:
-            why_you.append(f"Your game-to-game variance (CPL stddev: {round(cpl_stddev, 1)}) is high. Some games are brilliant, some are explosive — but they're never boring.")
+            why_you.append("Your game-to-game variance is high. Some games are brilliant, some are explosive — but they're never boring. You play chess like a contact sport.")
     elif pid == "the_professor":
-        why_you.append(f"Your opening CPL of {round(opening_cpl, 1)} is significantly lower than your middlegame ({round(middlegame_cpl, 1)}) and endgame ({round(endgame_cpl, 1)}).")
-        why_you.append("You start games with a preparation edge that gives you a reliable advantage before the real fight begins.")
+        why_you.append("Your opening accuracy is significantly stronger than your middlegame and endgame. You start games with a preparation edge that other players at your level simply don't have.")
+        why_you.append("You enter the middlegame with a reliable advantage before the real fight begins — that's a massive asset.")
     elif pid == "the_survivor":
         why_you.append(f"Your blunder rate of just {round(blunder_rate, 1)} per 100 moves shows exceptional composure. You rarely make the worst move.")
-        why_you.append(f"Combined with a CPL consistency of {round(cpl_stddev, 1)}, your opponents can never count on you to crack.")
+        why_you.append("Your consistency is rock solid — your opponents can never count on you to crack. You're the kind of player who grinds people down just by not making mistakes.")
     elif pid == "the_adventurer":
         why_you.append(f"Your recent games show a {trend} trend. With {total_games} games analyzed, your chess identity is still forming.")
         why_you.append("The patterns are there but still emerging. Every game adds new data to the picture of who you are as a player.")
@@ -1800,27 +1799,27 @@ async def get_chess_identity(
 
     # Opening
     if opening_cpl < 30:
-        story_parts.append(f"Your games typically start well. With an opening accuracy of {round(opening_cpl, 1)} CPL, you come out of the opening in good shape more often than not.")
+        story_parts.append("Your openings are a real strength. You come out of the first 15 moves in good shape more often than not, which means you're rarely playing catch-up.")
     elif opening_cpl < 50:
-        story_parts.append(f"Your openings are solid if unspectacular — {round(opening_cpl, 1)} CPL means you're not giving away the game early, but there's room to build a bigger edge from the start.")
+        story_parts.append("Your openings are solid — you're not giving away the game early. But there's room to build a bigger edge from the start. A little preparation would go a long way.")
     else:
-        story_parts.append(f"Your games often start with an uphill climb. At {round(opening_cpl, 1)} CPL in the opening, you're frequently playing catch-up from move 1.")
+        story_parts.append("Your games often start on the back foot. You're frequently conceding ground in the first 15 moves, which means the rest of the game is spent trying to recover.")
 
     # Middlegame
     if middlegame_cpl < opening_cpl and middlegame_cpl < endgame_cpl:
-        story_parts.append(f"The middlegame is where you come alive — your {round(middlegame_cpl, 1)} CPL is your strongest phase, where your calculation and pattern recognition peak.")
+        story_parts.append("The middlegame is where you come alive. When the position gets complex, your calculation and pattern recognition kick in — it's clearly your strongest phase.")
     elif middlegame_cpl > avg_cpl * 1.2:
-        story_parts.append(f"The middlegame is where things get complicated for you. At {round(middlegame_cpl, 1)} CPL, the complexity of the position tends to overwhelm your calculation ability.")
+        story_parts.append("The middlegame is where things get complicated for you. When positions get complex, the number of possibilities tends to overwhelm your calculation. This is where most of your accuracy drops.")
     else:
-        story_parts.append(f"In the middlegame, you hold your own with {round(middlegame_cpl, 1)} CPL — neither your best nor worst phase.")
+        story_parts.append("In the middlegame, you hold your own. It's neither your strongest nor weakest phase — you navigate complex positions reasonably well.")
 
     # Endgame
     if endgame_cpl < opening_cpl and endgame_cpl < middlegame_cpl:
-        story_parts.append(f"And when the pieces come off? That's when you're at your best. Your endgame accuracy of {round(endgame_cpl, 1)} CPL is your strongest phase — you convert advantages that other players would fumble.")
+        story_parts.append("And when the pieces come off? That's when you're at your best. You convert advantages that other players would fumble — the endgame is clearly your strongest phase.")
     elif endgame_cpl > avg_cpl * 1.3:
-        story_parts.append(f"But the endgame is where wins slip away. At {round(endgame_cpl, 1)} CPL, you're losing accuracy in simplified positions — and that means games you've already earned are escaping.")
+        story_parts.append("But the endgame is where wins slip away. When the position simplifies, you lose accuracy — and that means games you've already won at the board are escaping.")
     else:
-        story_parts.append(f"Your endgame play is respectable at {round(endgame_cpl, 1)} CPL — you can convert clear advantages, though the trickier endgames still give you trouble.")
+        story_parts.append("Your endgame play is respectable. You can convert clear advantages, though the trickier endgames still give you trouble.")
 
     # Decisive nature
     if draw_rate < 5:

@@ -363,24 +363,25 @@ function BackLink() {
 
 function SectionHeader({ icon: Icon, title }: { icon: typeof Target; title: string }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 pt-2">
       <Icon className="h-4 w-4 text-gray-500" />
       <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">{title}</h2>
+      <div className="flex-1 h-px bg-surface-3 ml-2" />
     </div>
   );
 }
 
 function HonestTruthCard({ truth }: { truth: HonestTruth }) {
   return (
-    <Card className="border-l-4 border-l-yellow-500/40">
-      <CardContent className="flex items-start gap-3 py-3">
+    <Card className="border-l-4 border-l-yellow-500/40 hover:border-l-yellow-500/60 transition-colors">
+      <CardContent className="flex items-start gap-3 py-3.5">
         <span className="text-lg mt-0.5 shrink-0">{truth.icon}</span>
         <div className="flex-1 min-w-0">
           <p className="text-sm text-gray-300 leading-relaxed">{truth.text}</p>
           {truth.cta_url && truth.cta_label && (
             <Link
               href={truth.cta_url}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-400 hover:text-brand-300 transition-colors mt-2"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-400 hover:text-brand-300 transition-colors mt-2.5 bg-brand-600/10 px-2.5 py-1 rounded-md"
             >
               {truth.cta_label} <ArrowRight className="h-3 w-3" />
             </Link>
@@ -398,19 +399,31 @@ function PhaseCard({ phase, tier }: { phase: PhaseReportItem; tier: string }) {
     weakest: "bg-red-900/40 text-red-400",
     neutral: "bg-surface-2 text-gray-400",
   };
+  // Convert CPL to a quality bar (lower CPL = better)
+  const quality = Math.max(0, Math.min(100, Math.round(100 - phase.cpl * 0.8)));
+  const barColor = phase.tag === "strongest" ? "bg-green-500" : phase.tag === "weakest" ? "bg-red-500" : "bg-brand-500";
 
   return (
-    <Card>
-      <CardContent className="space-y-2 py-3">
+    <Card className="overflow-hidden">
+      <CardContent className="space-y-3 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Icon className="h-4 w-4 text-gray-500" />
+            <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+              phase.tag === "strongest" ? "bg-green-900/30" : phase.tag === "weakest" ? "bg-red-900/30" : "bg-surface-2"
+            }`}>
+              <Icon className={`h-4 w-4 ${
+                phase.tag === "strongest" ? "text-green-400" : phase.tag === "weakest" ? "text-red-400" : "text-gray-400"
+              }`} />
+            </div>
             <span className="text-sm font-medium text-white">{phase.phase}</span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${tagColors[phase.tag] || tagColors.neutral}`}>
-              {phase.tag === "strongest" ? "Strongest" : phase.tag === "weakest" ? "Weakest" : "Solid"}
+              {phase.tag === "strongest" ? "Strongest" : phase.tag === "weakest" ? "Needs Work" : "Solid"}
             </span>
           </div>
-          <span className="text-xs text-gray-500">{phase.cpl.toFixed(1)} CPL</span>
+        </div>
+        {/* Quality bar */}
+        <div className="w-full bg-surface-2 rounded-full h-1.5">
+          <div className={`${barColor} h-1.5 rounded-full transition-all duration-500`} style={{ width: `${quality}%` }} />
         </div>
         <p className="text-sm text-gray-400 leading-relaxed">{phase.commentary}</p>
         {phase.cta_url && phase.cta_label && (
@@ -436,24 +449,26 @@ function TrainingActionCard({
   tierColor: string;
 }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden hover:border-surface-3/80 transition-colors">
       <CardContent className="space-y-3 py-4">
         <div className="flex items-start gap-3">
-          <span className="flex items-center justify-center h-6 w-6 rounded-full bg-brand-600/20 text-brand-400 text-xs font-bold shrink-0 mt-0.5">
+          <span className="flex items-center justify-center h-7 w-7 rounded-full bg-brand-600/20 text-brand-400 text-xs font-bold shrink-0 mt-0.5">
             {index + 1}
           </span>
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold text-white">{action.title}</h3>
-            <p className="text-sm text-gray-400 mt-1 leading-relaxed">{action.why}</p>
-            <p className="text-sm text-gray-300 mt-2 leading-relaxed">{action.how}</p>
+            <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">{action.why}</p>
+            <p className="text-sm text-gray-300 mt-2 leading-relaxed bg-surface-2/50 rounded-lg p-3">
+              💡 {action.how}
+            </p>
             {action.elo_note && (
-              <p className="text-xs text-gray-500 mt-2 italic">💡 {action.elo_note}</p>
+              <p className="text-xs text-gray-500 mt-2 italic">📈 {action.elo_note}</p>
             )}
           </div>
         </div>
         <Link
           href={action.cta_url}
-          className={`inline-flex items-center gap-2 text-sm font-medium ${tierColor} hover:opacity-80 transition-opacity ml-9`}
+          className={`inline-flex items-center gap-2 text-sm font-medium ${tierColor} hover:opacity-80 transition-opacity ml-10 bg-brand-600/10 px-3 py-1.5 rounded-lg`}
         >
           {action.cta_label} <ChevronRight className="h-3.5 w-3.5" />
         </Link>

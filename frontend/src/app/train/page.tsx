@@ -27,8 +27,9 @@ import {
   Eye,
   SlidersHorizontal,
   ChevronDown,
+  BookOpen,
 } from "lucide-react";
-import { puzzlesAPI, insightsAPI, type PuzzleItem, type Weakness, type PuzzleHistoryResponse, type DailyWarmupResponse, type AdvantagePositionsResponse, type IntuitionChallengeResponse } from "@/lib/api";
+import { puzzlesAPI, insightsAPI, openingsAPI, type PuzzleItem, type Weakness, type PuzzleHistoryResponse, type DailyWarmupResponse, type AdvantagePositionsResponse, type IntuitionChallengeResponse } from "@/lib/api";
 import { playMove, playCorrect, playIncorrect, playStreak, playWarmupComplete } from "@/lib/sounds";
 import {
   Button,
@@ -39,7 +40,7 @@ import {
   Spinner,
 } from "@/components/ui";
 
-type TrainView = "hub" | "session" | "intuition";
+type TrainView = "hub" | "session" | "intuition" | "opening-drill";
 type PuzzleState = "solving" | "correct" | "incorrect";
 type PuzzleSource = "my" | "global" | "game";
 
@@ -90,6 +91,18 @@ function TrainPageInner() {
   const [intuitionIdx, setIntuitionIdx] = useState(0);
   const [intuitionPicked, setIntuitionPicked] = useState<number | null>(null);
   const [intuitionScore, setIntuitionScore] = useState(0);
+
+  // ─── Opening Drill ──────────────────────────────────
+  type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; children: OpeningTreeNode[] };
+  const [openingTree, setOpeningTree] = useState<OpeningTreeNode[]>([]);
+  const [openingDrillColor, setOpeningDrillColor] = useState<"white" | "black">("white");
+  const [openingDrillGame] = useState(() => new Chess());
+  const [openingDrillFen, setOpeningDrillFen] = useState("start");
+  const [openingDrillMoves, setOpeningDrillMoves] = useState<string[]>([]);
+  const [openingDrillState, setOpeningDrillState] = useState<"playing" | "correct" | "wrong" | "done">("playing");
+  const [openingDrillHint, setOpeningDrillHint] = useState<string>("");
+  const [openingDrillScore, setOpeningDrillScore] = useState({ correct: 0, total: 0 });
+  const [openingDrillCurrentPath, setOpeningDrillCurrentPath] = useState<OpeningTreeNode[]>([]);
 
   // ─── Puzzle queue state ──────────────────────────────
   const [queue, setQueue] = useState<PuzzleItem[]>([]);
@@ -419,6 +432,108 @@ function TrainPageInner() {
       setIntuitionChallenges(data);
     } catch {
       setIntuitionChallenges({ challenges: [], total: 0 });
+    }
+  }
+
+  // ─── Opening Drill functions ─────────────────────────
+  async function startOpeningDrill(color: "white" | "black") {
+    setOpeningDrillColor(color);
+    setView("opening-drill");
+    setOpeningDrillState("playing");
+    setOpeningDrillScore({ correct: 0, total: 0 });
+    setOpeningDrillMoves([]);
+    setOpeningDrillHint("");
+    openingDrillGame.reset();
+    setOpeningDrillFen(openingDrillGame.fen());
+    setOpeningDrillCurrentPath([]);
+
+    try {
+      const data = await openingsAPI.tree({ color, max_depth: 12 });
+      const tree = (data.tree || []) as OpeningTreeNode[];
+      setOpeningTree(tree);
+      // If playing black, auto-play white's first move (most played)
+      if (color === "black" && tree.length > 0) {
+        const topMove = tree[0];
+        openingDrillGame.move(topMove.san);
+        setOpeningDrillFen(openingDrillGame.fen());
+        setOpeningDrillMoves([topMove.san]);
+        setOpeningDrillCurrentPath(topMove.children || []);
+      } else {
+        setOpeningDrillCurrentPath(tree);
+      }
+    } catch {
+      setOpeningTree([]);
+      setOpeningDrillCurrentPath([]);
+    }
+  }
+
+  function openingDrillTryMove(sourceSquare: Square, targetSquare: Square): boolean {
+    if (openingDrillState !== "playing") return false;
+
+    const moveCopy = new Chess(openingDrillGame.fen());
+    const move = moveCopy.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
+    if (!move) return false;
+
+    // Check if this move exists in the tree
+    const matchingNode = openingDrillCurrentPath.find((n) => n.san === move.san);
+
+    if (matchingNode) {
+      // Correct! Apply the move
+      openingDrillGame.move(move.san);
+      const newMoves = [...openingDrillMoves, move.san];
+      setOpeningDrillMoves(newMoves);
+      setOpeningDrillFen(openingDrillGame.fen());
+      setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+      setOpeningDrillHint("");
+      playCorrect();
+
+      // Now play the opponent's reply (if any)
+      if (matchingNode.children.length > 0) {
+        // Pick the most played reply
+        const reply = matchingNode.children[0];
+        setTimeout(() => {
+          openingDrillGame.move(reply.san);
+          setOpeningDrillFen(openingDrillGame.fen());
+          setOpeningDrillMoves((prev) => [...prev, reply.san]);
+          playMove();
+
+          // Check if there are more moves for the user
+          if (reply.children.length === 0) {
+            setOpeningDrillState("done");
+          } else {
+            setOpeningDrillCurrentPath(reply.children);
+          }
+        }, 500);
+      } else {
+        setOpeningDrillState("done");
+      }
+    } else {
+      // Wrong move
+      setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
+      playIncorrect();
+      const correctMoves = openingDrillCurrentPath.slice(0, 3).map((n) => n.san);
+      setOpeningDrillHint(`You usually play: ${correctMoves.join(", ")}`);
+      setOpeningDrillState("wrong");
+    }
+
+    return true;
+  }
+
+  function openingDrillRetry() {
+    openingDrillGame.reset();
+    setOpeningDrillFen(openingDrillGame.fen());
+    setOpeningDrillMoves([]);
+    setOpeningDrillState("playing");
+    setOpeningDrillHint("");
+
+    if (openingDrillColor === "black" && openingTree.length > 0) {
+      const topMove = openingTree[0];
+      openingDrillGame.move(topMove.san);
+      setOpeningDrillFen(openingDrillGame.fen());
+      setOpeningDrillMoves([topMove.san]);
+      setOpeningDrillCurrentPath(topMove.children || []);
+    } else {
+      setOpeningDrillCurrentPath(openingTree);
     }
   }
 
@@ -1110,22 +1225,235 @@ function TrainPageInner() {
                     </Card>
                   </div>
                 </div>
+
+                {/* ─── Opening Drill ─── */}
+                <div>
+                  <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+                    Opening Practice
+                  </h2>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-emerald-500/50 border-emerald-600/20"
+                      onClick={() => startOpeningDrill("white")}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <BookOpen className="h-4 w-4 text-emerald-400" />
+                        <span className="font-semibold text-sm">White Repertoire</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Test yourself on your most-played openings as White. Can you remember your own lines?
+                      </p>
+                      <p className="text-xs mt-2 text-emerald-400 flex items-center gap-1">
+                        Drill <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-sky-500/50 border-sky-600/20"
+                      onClick={() => startOpeningDrill("black")}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <BookOpen className="h-4 w-4 text-sky-400" />
+                        <span className="font-semibold text-sm">Black Repertoire</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Test yourself on your most-played openings as Black. Build muscle memory for your defenses.
+                      </p>
+                      <p className="text-xs mt-2 text-sky-400 flex items-center gap-1">
+                        Drill <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                  </div>
+                </div>
               </>
             )}
 
             {puzzleSource === "global" && (
-              <Card className="p-6 text-center">
-                <Globe className="h-10 w-10 text-brand-400 mx-auto mb-3" />
-                <h2 className="text-lg font-semibold mb-2">Community Puzzles</h2>
-                <p className="text-sm text-gray-500 mb-5">
-                  Solve puzzles generated from games across all users.
-                  Fresh positions you haven&apos;t seen before.
-                </p>
-                <Button onClick={() => startSession("global")} size="lg">
-                  <Globe className="h-5 w-5" />
-                  Start Global Session
-                </Button>
-              </Card>
+              <>
+                {/* Quick Start */}
+                <Card className="p-5 border-brand-600/30 bg-gradient-to-r from-brand-900/10 to-blue-900/10">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-brand-600/20 flex items-center justify-center">
+                        <Globe className="h-6 w-6 text-brand-400" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-semibold">Random Mix</h2>
+                        <p className="text-sm text-gray-400">
+                          A mixed set of puzzles from games across the community
+                        </p>
+                      </div>
+                    </div>
+                    <Button onClick={() => startSession("global")} size="lg">
+                      <Globe className="h-5 w-5" />
+                      Go
+                    </Button>
+                  </div>
+                </Card>
+
+                {/* By Game Phase */}
+                <div>
+                  <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+                    Train by Phase
+                  </h2>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-emerald-500/50 border-emerald-600/20"
+                      onClick={() => startSession("global", false, { phase: "opening" })}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <BookOpen className="h-4 w-4 text-emerald-400" />
+                        <span className="font-semibold text-sm">Opening</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Punish early mistakes. Recognize traps, gambits, and opening principles.
+                      </p>
+                      <p className="text-xs mt-2 text-emerald-400 flex items-center gap-1">
+                        Practice <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-blue-500/50 border-blue-600/20"
+                      onClick={() => startSession("global", false, { phase: "middlegame" })}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Zap className="h-4 w-4 text-blue-400" />
+                        <span className="font-semibold text-sm">Middlegame</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Navigate the chaos. Sharpen your calculation in complex positions.
+                      </p>
+                      <p className="text-xs mt-2 text-blue-400 flex items-center gap-1">
+                        Practice <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-purple-500/50 border-purple-600/20"
+                      onClick={() => startSession("global", false, { phase: "endgame" })}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Target className="h-4 w-4 text-purple-400" />
+                        <span className="font-semibold text-sm">Endgame</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Convert advantages. Learn to finish what you started.
+                      </p>
+                      <p className="text-xs mt-2 text-purple-400 flex items-center gap-1">
+                        Practice <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                  </div>
+                </div>
+
+                {/* By Tactic */}
+                <div>
+                  <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+                    Train by Tactic
+                  </h2>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      { tactic: "fork", label: "Forks", desc: "Attack two pieces at once. The bread and butter of tactics.", color: "amber" },
+                      { tactic: "pin", label: "Pins", desc: "Immobilize a piece. Exploit the line between their piece and their king.", color: "cyan" },
+                      { tactic: "skewer", label: "Skewers", desc: "Force the bigger piece to move and win what's behind it.", color: "orange" },
+                      { tactic: "discovered_attack", label: "Discovered Attacks", desc: "Move one piece, unleash another. Double threats that are hard to defend.", color: "rose" },
+                      { tactic: "back_rank", label: "Back Rank", desc: "Exploit a trapped king. One of the deadliest patterns in chess.", color: "red" },
+                      { tactic: "checkmate_pattern", label: "Checkmate Patterns", desc: "Spot the mating net. End the game in style.", color: "pink" },
+                    ].map(({ tactic, label, desc, color }) => (
+                      <Card
+                        key={tactic}
+                        className={`p-4 cursor-pointer transition-colors hover:border-${color}-500/50 border-${color}-600/20`}
+                        onClick={() => startSession("global", false, { tactic })}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <Flame className={`h-4 w-4 text-${color}-400`} />
+                          <span className="font-semibold text-sm">{label}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 line-clamp-2">{desc}</p>
+                        <p className={`text-xs mt-2 text-${color}-400 flex items-center gap-1`}>
+                          Practice <ArrowRight className="h-3 w-3" />
+                        </p>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Training Modes */}
+                <div>
+                  <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+                    Training Modes
+                  </h2>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {/* Advantage Capitalization */}
+                    {advantagePositions && advantagePositions.total > 0 && (
+                      <Card
+                        className="p-4 cursor-pointer transition-colors hover:border-amber-500/50 border-amber-600/20"
+                        onClick={startAdvantageSession}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <Trophy className="h-4 w-4 text-amber-400" />
+                          <span className="font-semibold text-sm">Capitalize Advantages</span>
+                        </div>
+                        <p className="text-xs text-gray-500 line-clamp-2">
+                          {advantagePositions.total} positions where you were winning but didn&apos;t convert. Practice finishing the job.
+                        </p>
+                        <p className="text-xs mt-2 text-amber-400 flex items-center gap-1">
+                          Practice <ArrowRight className="h-3 w-3" />
+                        </p>
+                      </Card>
+                    )}
+
+                    {/* Blunder Preventer */}
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-red-500/50 border-red-600/20"
+                      onClick={() => startSession("global", false, { puzzle_type: "blunder" })}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Shield className="h-4 w-4 text-red-400" />
+                        <span className="font-semibold text-sm">Blunder Preventer</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Train your instinct for danger. Spot the safe move before disaster strikes.
+                      </p>
+                      <p className="text-xs mt-2 text-red-400 flex items-center gap-1">
+                        Practice <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+
+                    {/* Intuition Trainer */}
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-purple-500/50 border-purple-600/20"
+                      onClick={startIntuition}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Eye className="h-4 w-4 text-purple-400" />
+                        <span className="font-semibold text-sm">Intuition Trainer</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        Spot the blunder! Given 4 moves, can you tell which one was the mistake?
+                      </p>
+                      <p className="text-xs mt-2 text-purple-400 flex items-center gap-1">
+                        Play <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+
+                    {/* Timed Challenge */}
+                    <Card
+                      className="p-4 cursor-pointer transition-colors hover:border-yellow-500/50 border-yellow-600/20"
+                      onClick={() => startSession("global", true)}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Clock className="h-4 w-4 text-yellow-400" />
+                        <span className="font-semibold text-sm">Speed Drill</span>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        10 seconds per puzzle. Train your pattern recognition under pressure.
+                      </p>
+                      <p className="text-xs mt-2 text-yellow-400 flex items-center gap-1">
+                        Start <ArrowRight className="h-3 w-3" />
+                      </p>
+                    </Card>
+                  </div>
+                </div>
+              </>
             )}
           </>
         )}
@@ -1264,6 +1592,171 @@ function TrainPageInner() {
               </div>
             )}
           </>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Opening Drill view ──────────────────────────────
+  if (view === "opening-drill") {
+    const accuracy = openingDrillScore.total > 0 ? Math.round((openingDrillScore.correct / openingDrillScore.total) * 100) : null;
+
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <BookOpen className="h-6 w-6 text-emerald-400" /> Opening Drill
+            </h1>
+            <p className="text-gray-500 mt-1">
+              Play your {openingDrillColor === "white" ? "White" : "Black"} repertoire from memory
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {accuracy !== null && (
+              <Badge variant="default">
+                {openingDrillScore.correct}/{openingDrillScore.total} correct
+              </Badge>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setView("hub")}>
+              ← Back
+            </Button>
+          </div>
+        </div>
+
+        {openingTree.length === 0 ? (
+          <Card className="p-8 text-center">
+            <BookOpen className="h-12 w-12 text-emerald-400 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold mb-2">No opening data yet</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Import and analyze some games first. We&apos;ll build your repertoire from the openings you actually play.
+            </p>
+            <Button onClick={() => setView("hub")}>Back to Hub</Button>
+          </Card>
+        ) : (
+          <div className="flex flex-col lg:flex-row gap-6">
+            {/* Board */}
+            <div className="flex-1 max-w-[560px]">
+              <div className="relative">
+                <Chessboard
+                  position={openingDrillFen}
+                  onPieceDrop={(s, t) => openingDrillTryMove(s as Square, t as Square)}
+                  boardOrientation={openingDrillColor}
+                  boardWidth={560}
+                  arePiecesDraggable={openingDrillState === "playing"}
+                  customBoardStyle={{
+                    borderRadius: "8px",
+                    boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+                  }}
+                  customDarkSquareStyle={{ backgroundColor: "#779952" }}
+                  customLightSquareStyle={{ backgroundColor: "#edeed1" }}
+                />
+
+                {/* Feedback overlay */}
+                <AnimatePresence>
+                  {openingDrillState === "wrong" && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg"
+                    >
+                      <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-red-900/90">
+                        <XCircle className="h-12 w-12 text-red-400" />
+                        <p className="text-lg font-bold text-red-300">Not your usual move</p>
+                        {openingDrillHint && (
+                          <p className="text-sm text-red-400/80">{openingDrillHint}</p>
+                        )}
+                        <div className="flex gap-2 mt-2">
+                          <Button variant="secondary" size="sm" onClick={openingDrillRetry}>
+                            <RotateCcw className="h-4 w-4" /> Start Over
+                          </Button>
+                          <Button size="sm" onClick={() => setView("hub")}>
+                            Back to Hub
+                          </Button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                  {openingDrillState === "done" && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg"
+                    >
+                      <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-green-900/90">
+                        <CheckCircle className="h-12 w-12 text-green-400" />
+                        <p className="text-lg font-bold text-green-300">Line Complete!</p>
+                        <p className="text-sm text-green-400/80">
+                          {openingDrillScore.correct}/{openingDrillScore.total} moves correct
+                        </p>
+                        <div className="flex gap-2 mt-2">
+                          <Button variant="secondary" size="sm" onClick={openingDrillRetry}>
+                            <RotateCcw className="h-4 w-4" /> Again
+                          </Button>
+                          <Button size="sm" onClick={() => startOpeningDrill(openingDrillColor === "white" ? "black" : "white")}>
+                            Try {openingDrillColor === "white" ? "Black" : "White"}
+                          </Button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Move list */}
+              <div className="mt-4 flex flex-wrap gap-1 items-center justify-center">
+                {openingDrillMoves.map((m, i) => (
+                  <span key={i} className="text-sm text-gray-300">
+                    {i % 2 === 0 && <span className="text-gray-600 mr-1">{Math.floor(i / 2) + 1}.</span>}
+                    {m}{" "}
+                  </span>
+                ))}
+                {openingDrillState === "playing" && (
+                  <span className="text-sm text-brand-400 animate-pulse">Your move...</span>
+                )}
+              </div>
+            </div>
+
+            {/* Info panel */}
+            <div className="lg:w-[280px] space-y-4">
+              <Card>
+                <CardContent>
+                  <h3 className="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-3">
+                    How It Works
+                  </h3>
+                  <div className="space-y-2 text-sm text-gray-400">
+                    <p>Play the opening moves you usually play in your games.</p>
+                    <p>We built this from your actual game data — these are YOUR lines, not textbook moves.</p>
+                    <p>If you deviate from your usual repertoire, we&apos;ll show you what you normally play.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent>
+                  <h3 className="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-3">
+                    Session
+                  </h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Color</span>
+                      <span className="text-gray-300 capitalize">{openingDrillColor}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Moves played</span>
+                      <span className="text-gray-300">{openingDrillMoves.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Accuracy</span>
+                      <span className="text-gray-300">{accuracy !== null ? `${accuracy}%` : "—"}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         )}
       </div>
     );
