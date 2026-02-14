@@ -107,6 +107,7 @@ function TrainPageInner() {
   const [openingDrillCurrentPath, setOpeningDrillCurrentPath] = useState<OpeningTreeNode[]>([]);
   const [openingDrillExplanation, setOpeningDrillExplanation] = useState<string>("");
   const [openingDrillExplanationLoading, setOpeningDrillExplanationLoading] = useState(false);
+  const [openingDrillShowExplanation, setOpeningDrillShowExplanation] = useState(true);
   const [openingDrillSelectedSquare, setOpeningDrillSelectedSquare] = useState<Square | null>(null);
   const [openingDrillLegalMoves, setOpeningDrillLegalMoves] = useState<Square[]>([]);
 
@@ -2006,15 +2007,24 @@ function TrainPageInner() {
                     animate={{ opacity: 1, y: 0 }}
                     className="absolute bottom-0 left-0 right-0 bg-red-900/95 backdrop-blur-sm rounded-b-lg px-4 py-3 space-y-1"
                   >
-                    <p className="text-sm font-semibold text-red-300 flex items-center gap-2">
-                      <XCircle className="h-4 w-4" /> Find the best move: play {openingDrillBestMove}
-                    </p>
-                    {openingDrillExplanationLoading && (
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-red-300 flex items-center gap-2">
+                        <XCircle className="h-4 w-4" /> Find the best move: play {openingDrillBestMove}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setOpeningDrillShowExplanation((v) => !v)}
+                        className="text-xs font-medium text-red-200 hover:text-white transition-colors"
+                      >
+                        {openingDrillShowExplanation ? "Hide AI explanation" : "Show AI explanation"}
+                      </button>
+                    </div>
+                    {openingDrillShowExplanation && openingDrillExplanationLoading && (
                       <p className="text-xs text-red-400/60 flex items-center gap-1">
                         <Spinner className="h-3 w-3" /> Loading explanation...
                       </p>
                     )}
-                    {openingDrillExplanation && (
+                    {openingDrillShowExplanation && openingDrillExplanation && (
                       <p className="text-xs text-gray-300 leading-relaxed">
                         {openingDrillExplanation}
                       </p>
