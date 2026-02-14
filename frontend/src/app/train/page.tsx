@@ -268,11 +268,21 @@ function TrainPageInner() {
     }
   }, [timedParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function startSession(source?: PuzzleSource, timed?: boolean) {
+  function weaknessToFilters(w: Weakness): { difficulty?: string; phase?: string; puzzle_type?: string } {
+    const area = w.area.toLowerCase();
+    if (area === "opening") return { phase: "opening" };
+    if (area === "middlegame") return { phase: "middlegame" };
+    if (area === "endgame") return { phase: "endgame" };
+    if (area === "blunder pattern") return { puzzle_type: "blunder" };
+    if (area === "converting advantages") return { puzzle_type: "missed_win" };
+    return {};
+  }
+
+  function startSession(source?: PuzzleSource, timed?: boolean, overrideFilters?: { difficulty?: string; phase?: string; puzzle_type?: string }) {
     const src = source ?? puzzleSource;
     if (timed !== undefined) setIsTimed(timed);
     setPuzzleSource(src);
-    loadPuzzles(src, puzzleFilters);
+    loadPuzzles(src, overrideFilters ?? puzzleFilters);
     setView("session");
     setSolvedToday(0);
     setCorrectToday(0);
@@ -898,7 +908,7 @@ function TrainPageInner() {
                         <p className="text-sm text-gray-500">{weaknesses[0].message}</p>
                       </div>
                     </div>
-                    <Button onClick={() => startSession("my")} className="w-full mt-5" size="lg">
+                    <Button onClick={() => startSession("my", false, weaknessToFilters(weaknesses[0]))} className="w-full mt-5" size="lg">
                       <Dumbbell className="h-5 w-5" />
                       Start Training Session
                     </Button>
@@ -934,7 +944,7 @@ function TrainPageInner() {
                             className={`p-4 cursor-pointer transition-colors ${
                               isTimeMgmt ? "hover:border-yellow-500/50 border-yellow-600/20" : "hover:border-brand-600/50"
                             }`}
-                            onClick={() => startSession("my", isTimeMgmt)}
+                            onClick={() => startSession("my", isTimeMgmt, isTimeMgmt ? undefined : weaknessToFilters(w))}
                           >
                             <div className="flex items-center gap-2 mb-2">
                               {isTimeMgmt ? (
@@ -995,7 +1005,7 @@ function TrainPageInner() {
                     {/* Blunder Preventer */}
                     <Card
                       className="p-4 cursor-pointer transition-colors hover:border-red-500/50 border-red-600/20"
-                      onClick={() => startSession("global")}
+                      onClick={() => startSession("global", false, { puzzle_type: "blunder" })}
                     >
                       <div className="flex items-center gap-2 mb-2">
                         <Shield className="h-4 w-4 text-red-400" />
@@ -1103,6 +1113,28 @@ function TrainPageInner() {
             <p className="text-sm text-gray-400 text-center">
               Challenge {intuitionIdx + 1} of {intuitionChallenges.total} — Which move is the blunder?
             </p>
+            {/* Show a small board for context */}
+            {challenge.options[0]?.fen_before && (
+              <div className="flex justify-center">
+                <div className="w-[280px]">
+                  <Chessboard
+                    position={challenge.options[0].fen_before}
+                    boardOrientation={challenge.color === "black" ? "black" : "white"}
+                    boardWidth={280}
+                    arePiecesDraggable={false}
+                    customBoardStyle={{
+                      borderRadius: "8px",
+                      boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
+                    }}
+                    customDarkSquareStyle={{ backgroundColor: "#779952" }}
+                    customLightSquareStyle={{ backgroundColor: "#edeed1" }}
+                  />
+                  <p className="text-xs text-gray-500 text-center mt-2">
+                    Position before the sequence — {challenge.color}&apos;s moves
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               {challenge.options.map((opt, i) => {
                 const picked = intuitionPicked !== null;

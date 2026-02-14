@@ -442,48 +442,51 @@ async def get_advantage_positions(
     """
 
     # Find move evaluations from lost/drawn games where player had big advantage
-    # eval_before from the player's perspective: if white, eval_before > 200; if black, eval_before < -200
-    # Join with games to get result
+    # Only include the player's own moves (not opponent's)
+    # Require best_move_san so we have a real answer for the puzzle
     q = (
-        select(MoveEvaluation)
+        select(MoveEvaluation, Game.color)
         .join(Game, Game.id == MoveEvaluation.game_id)
         .where(
             Game.user_id == user.id,
             Game.result.in_(["loss", "draw"]),
             MoveEvaluation.move_quality.in_(["Blunder", "Mistake", "Inaccuracy"]),
+            MoveEvaluation.best_move_san.isnot(None),
+            MoveEvaluation.fen_before.isnot(None),
         )
         .order_by(MoveEvaluation.cp_loss.desc())
-        .limit(limit * 3)  # fetch more to filter
+        .limit(limit * 5)  # fetch more to filter
     )
     result = await db.execute(q)
-    moves = result.scalars().all()
+    rows = result.all()
 
     positions: list[dict] = []
     seen_games: set[int] = set()
 
-    for m in moves:
+    for m, game_color in rows:
         if m.game_id in seen_games:
+            continue
+        # Only include the player's own moves
+        if m.color != game_color:
             continue
         # Check if position was winning for the player
         eb = m.eval_before or 0
-        # Get the game's color to determine if eval was favorable
-        game_q = await db.execute(select(Game.color).where(Game.id == m.game_id))
-        game_color = game_q.scalar_one_or_none()
-        if not game_color:
-            continue
-
         # Positive eval = good for white; if player is black, flip
         player_advantage = eb if game_color == "white" else -eb
         if player_advantage < 200:
             continue
+
+        # Derive side_to_move from FEN (who moves in this position)
+        fen_parts = (m.fen_before or "").split()
+        fen_side = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
 
         seen_games.add(m.game_id)
         positions.append({
             "id": m.id,
             "game_id": m.game_id,
             "fen": m.fen_before,
-            "side_to_move": game_color,
-            "best_move_san": m.best_move_san or m.san,
+            "side_to_move": fen_side,
+            "best_move_san": m.best_move_san,
             "best_move_uci": m.best_move_uci,
             "played_move_san": m.san,
             "cp_loss": m.cp_loss,
@@ -500,7 +503,7 @@ async def get_advantage_positions(
     if remaining > 0:
         seen_game_ids = seen_games
         global_q = (
-            select(MoveEvaluation)
+            select(MoveEvaluation, Game.color)
             .join(Game, Game.id == MoveEvaluation.game_id)
             .where(
                 Game.user_id != user.id,
@@ -508,31 +511,35 @@ async def get_advantage_positions(
                 MoveEvaluation.move_quality.in_(["Blunder", "Mistake"]),
                 MoveEvaluation.cp_loss >= 200,
                 MoveEvaluation.fen_before.isnot(None),
+                MoveEvaluation.best_move_san.isnot(None),
             )
             .order_by(func.random())
-            .limit(remaining * 3)
+            .limit(remaining * 5)
         )
         global_res = await db.execute(global_q)
-        global_moves = global_res.scalars().all()
+        global_rows = global_res.all()
 
-        for m in global_moves:
+        for m, game_color2 in global_rows:
             if m.game_id in seen_game_ids:
                 continue
-            game_q2 = await db.execute(select(Game.color).where(Game.id == m.game_id))
-            game_color2 = game_q2.scalar_one_or_none()
-            if not game_color2:
+            # Only include the player's own moves
+            if m.color != game_color2:
                 continue
             eb2 = m.eval_before or 0
             adv = eb2 if game_color2 == "white" else -eb2
             if adv < 200:
                 continue
+
+            fen_parts = (m.fen_before or "").split()
+            fen_side = "white" if len(fen_parts) > 1 and fen_parts[1] == "w" else "black"
+
             seen_game_ids.add(m.game_id)
             positions.append({
                 "id": m.id,
                 "game_id": m.game_id,
                 "fen": m.fen_before,
-                "side_to_move": game_color2,
-                "best_move_san": m.best_move_san or m.san,
+                "side_to_move": fen_side,
+                "best_move_san": m.best_move_san,
                 "best_move_uci": m.best_move_uci,
                 "played_move_san": m.san,
                 "cp_loss": m.cp_loss,
@@ -613,9 +620,10 @@ async def get_intuition_challenge(
         seen_games.add(blunder.game_id)
 
         bm_num = blunder.move_number
-        # Get 3 surrounding moves (2 before, 1 after, or adjust)
-        window_start = max(1, bm_num - 2)
-        window_end = bm_num + 1
+        # Get surrounding same-color moves (wider window since same-color moves
+        # are every other half-move). We need 4 options total.
+        window_start = max(1, bm_num - 8)
+        window_end = bm_num + 8
 
         moves_q = (
             select(MoveEvaluation)
@@ -624,17 +632,34 @@ async def get_intuition_challenge(
                 MoveEvaluation.move_number >= window_start,
                 MoveEvaluation.move_number <= window_end,
                 MoveEvaluation.color == blunder.color,
+                MoveEvaluation.fen_before.isnot(None),
             )
             .order_by(MoveEvaluation.move_number.asc())
         )
         moves_res = await db.execute(moves_q)
-        window_moves = moves_res.scalars().all()
+        window_moves = list(moves_res.scalars().all())
 
-        if len(window_moves) < 3:
+        if len(window_moves) < 4:
             continue
 
-        # Take exactly 4 (or whatever we have, up to 4)
-        options = window_moves[:4]
+        # Build exactly 4 options: always include the blunder + 3 others
+        blunder_in_window = [m for m in window_moves if m.move_number == bm_num]
+        others = [m for m in window_moves if m.move_number != bm_num]
+
+        if not blunder_in_window:
+            continue
+
+        # Pick 3 non-blunder moves closest to the blunder
+        others.sort(key=lambda m: abs(m.move_number - bm_num))
+        picked_others = others[:3]
+
+        if len(picked_others) < 3:
+            continue
+
+        options = picked_others + blunder_in_window
+        # Shuffle so blunder isn't always last
+        import random
+        random.shuffle(options)
 
         challenge = {
             "game_id": blunder.game_id,
