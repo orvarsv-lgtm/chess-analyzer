@@ -1732,6 +1732,292 @@ async def get_chess_identity(
     else:
         one_thing = "Keep playing and analyzing. Your chess is solid — incremental improvements in your weakest phase will unlock the next level."
 
+    # ══════════════════════════════════════════════════════
+    # ENHANCED REPORT: Why You, Chess Story, Tendencies,
+    # Phase Breakdown, Growth Path
+    # ══════════════════════════════════════════════════════
+
+    # ── "Why You Match This Persona" — personalized match reasons ──
+    why_you = []
+    pid = primary["id"]
+
+    if pid == "the_phoenix":
+        comeback_pct = round(comeback_wins / max(total_games, 1) * 100, 1)
+        why_you.append(f"You've won {comeback_wins} games from losing positions — that's {comeback_pct}% of your games. Most players have near-zero comebacks. You have a pattern of refusing to lose.")
+        if collapses > 0 and comeback_wins > collapses:
+            why_you.append(f"Your comeback-to-collapse ratio is {comeback_wins}:{collapses}. When positions get messy, you're more likely to be the one who survives.")
+        if draw_rate < 10:
+            why_you.append(f"You only draw {draw_rate}% of your games. You fight to the end — and that fighting spirit is what makes comebacks possible.")
+    elif pid == "the_tactician":
+        why_you.append(f"Your best-move rate of {round(best_rate, 1)}% shows strong tactical vision — you find the right move frequently.")
+        if error_rate > 3:
+            why_you.append(f"But your combined error rate of {round(error_rate, 1)} per 100 moves reveals the other side: you play sharp, complex chess that creates both brilliancies and blunders.")
+        why_you.append("This combination — high best moves with higher-than-average errors — is the signature of a tactical fighter.")
+    elif pid == "the_fortress":
+        why_you.append(f"Your blunder rate of {round(blunder_rate, 1)} per 100 moves is remarkably low. You simply don't give your opponents free points.")
+        why_you.append(f"Your average CPL of {round(avg_cpl, 1)} shows clean, accurate chess that wears opponents down.")
+        if collapses == 0:
+            why_you.append("You've never collapsed from a winning position. When you're ahead, you stay ahead.")
+    elif pid == "the_grinder":
+        why_you.append(f"Your endgame accuracy ({round(endgame_cpl, 1)} CPL) is significantly better than your opening ({round(opening_cpl, 1)}) and middlegame ({round(middlegame_cpl, 1)}).")
+        why_you.append("You convert advantages in simplified positions where other players stumble. The endgame is your home.")
+    elif pid == "the_speedster":
+        why_you.append(f"You perform best in {best_tc_category} — fast time controls bring out your best chess.")
+        if tp_blunder_ratio is not None:
+            why_you.append(f"Your time-pressure blunder ratio is just {round(tp_blunder_ratio * 100, 1)}%. While others panic with seconds left, you stay sharp.")
+    elif pid == "the_scientist":
+        why_you.append(f"Your best-move rate of {round(best_rate, 1)}% is exceptionally high. You treat each position with methodical precision.")
+        why_you.append(f"Your CPL consistency (stddev: {round(cpl_stddev, 1)}) shows you rarely have wild swings — you play at a steady, high level.")
+    elif pid == "the_assassin":
+        upset_pct = round(upsets / max(total_games, 1) * 100, 1)
+        why_you.append(f"You've beaten higher-rated opponents {upsets} times ({upset_pct}% of games). You don't just compete against stronger players — you beat them.")
+        why_you.append("Most players wilt against higher-rated opposition. You elevate.")
+    elif pid == "the_chameleon":
+        why_you.append(f"Your skill balance is remarkably even (±{round(skill_balance, 1)} spread). No phase is dramatically weaker than another.")
+        phase_range_val = max(opening_cpl, middlegame_cpl, endgame_cpl) - min(opening_cpl, middlegame_cpl, endgame_cpl)
+        why_you.append(f"Your phase CPL range is only {round(phase_range_val, 1)} — meaning you play consistently whether it's move 5 or move 50.")
+    elif pid == "the_berserker":
+        why_you.append(f"Only {draw_rate}% of your games end in draws. Your record of {wins}W / {draws}D / {losses}L tells the story — every game is a fight to the death.")
+        if cpl_stddev > 20:
+            why_you.append(f"Your game-to-game variance (CPL stddev: {round(cpl_stddev, 1)}) is high. Some games are brilliant, some are explosive — but they're never boring.")
+    elif pid == "the_professor":
+        why_you.append(f"Your opening CPL of {round(opening_cpl, 1)} is significantly lower than your middlegame ({round(middlegame_cpl, 1)}) and endgame ({round(endgame_cpl, 1)}).")
+        why_you.append("You start games with a preparation edge that gives you a reliable advantage before the real fight begins.")
+    elif pid == "the_survivor":
+        why_you.append(f"Your blunder rate of just {round(blunder_rate, 1)} per 100 moves shows exceptional composure. You rarely make the worst move.")
+        why_you.append(f"Combined with a CPL consistency of {round(cpl_stddev, 1)}, your opponents can never count on you to crack.")
+    elif pid == "the_adventurer":
+        why_you.append(f"Your recent games show a {trend} trend. With {total_games} games analyzed, your chess identity is still forming.")
+        why_you.append("The patterns are there but still emerging. Every game adds new data to the picture of who you are as a player.")
+
+    # Always add at least one general stat-based reason
+    if not why_you:
+        why_you.append(f"Based on {analyzed_count} analyzed games, your metrics point clearly toward the {primary['name']} archetype.")
+
+    # ── "Your Chess Story" — narrative paragraph weaving stats together ──
+    # Build a personalized multi-sentence narrative
+    story_parts = []
+
+    # Opening
+    if opening_cpl < 30:
+        story_parts.append(f"Your games typically start well. With an opening accuracy of {round(opening_cpl, 1)} CPL, you come out of the opening in good shape more often than not.")
+    elif opening_cpl < 50:
+        story_parts.append(f"Your openings are solid if unspectacular — {round(opening_cpl, 1)} CPL means you're not giving away the game early, but there's room to build a bigger edge from the start.")
+    else:
+        story_parts.append(f"Your games often start with an uphill climb. At {round(opening_cpl, 1)} CPL in the opening, you're frequently playing catch-up from move 1.")
+
+    # Middlegame
+    if middlegame_cpl < opening_cpl and middlegame_cpl < endgame_cpl:
+        story_parts.append(f"The middlegame is where you come alive — your {round(middlegame_cpl, 1)} CPL is your strongest phase, where your calculation and pattern recognition peak.")
+    elif middlegame_cpl > avg_cpl * 1.2:
+        story_parts.append(f"The middlegame is where things get complicated for you. At {round(middlegame_cpl, 1)} CPL, the complexity of the position tends to overwhelm your calculation ability.")
+    else:
+        story_parts.append(f"In the middlegame, you hold your own with {round(middlegame_cpl, 1)} CPL — neither your best nor worst phase.")
+
+    # Endgame
+    if endgame_cpl < opening_cpl and endgame_cpl < middlegame_cpl:
+        story_parts.append(f"And when the pieces come off? That's when you're at your best. Your endgame accuracy of {round(endgame_cpl, 1)} CPL is your strongest phase — you convert advantages that other players would fumble.")
+    elif endgame_cpl > avg_cpl * 1.3:
+        story_parts.append(f"But the endgame is where wins slip away. At {round(endgame_cpl, 1)} CPL, you're losing accuracy in simplified positions — and that means games you've already earned are escaping.")
+    else:
+        story_parts.append(f"Your endgame play is respectable at {round(endgame_cpl, 1)} CPL — you can convert clear advantages, though the trickier endgames still give you trouble.")
+
+    # Decisive nature
+    if draw_rate < 5:
+        story_parts.append(f"What's striking is how decisive your games are: only {draws} draws out of {total_games} games. You play to win or go down fighting — there's no in-between.")
+    elif draw_rate < 15:
+        story_parts.append(f"With a draw rate of {draw_rate}%, your games are more decisive than average — you tend to push for a result rather than settle.")
+
+    # Comebacks / resilience
+    if comeback_wins >= 5:
+        story_parts.append(f"Perhaps most remarkably, you've won {comeback_wins} games from clearly losing positions (down 2+ pawns). This isn't luck — it's a pattern. You create chaos when you're behind, and your opponents break under the pressure.")
+    elif comeback_wins >= 2:
+        story_parts.append(f"You've also shown resilience, pulling off {comeback_wins} comeback wins from losing positions.")
+
+    # Collapses
+    if collapses >= 5:
+        story_parts.append(f"On the flip side, you've also collapsed from winning positions {collapses} times. The ability to fight back is there — but the ability to close out won games still needs work.")
+    elif collapses >= 2:
+        story_parts.append(f"You've lost {collapses} games from winning positions, suggesting that converting advantages is an area to watch.")
+
+    # Upsets
+    if upsets >= 5:
+        story_parts.append(f"Against higher-rated opponents, you're a genuine threat — {upsets} giant kills show you rise to the challenge when facing stronger players.")
+
+    chess_story = " ".join(story_parts)
+
+    # ── "Behavioral Tendencies" — patterns derived from metrics ──
+    tendencies = []
+
+    if draw_rate < 5:
+        tendencies.append({
+            "label": "All or Nothing",
+            "icon": "⚔️",
+            "description": f"Only {draw_rate}% draws — you play for a decisive result every game.",
+        })
+    elif draw_rate < 10:
+        tendencies.append({
+            "label": "Decisive",
+            "icon": "🎯",
+            "description": f"Low draw rate ({draw_rate}%) — you push for results rather than accepting equality.",
+        })
+
+    if comeback_wins >= 3:
+        tendencies.append({
+            "label": "Never Says Die",
+            "icon": "🔥",
+            "description": f"{comeback_wins} comeback wins — you refuse to accept a lost position.",
+        })
+
+    if blunder_rate > 3:
+        tendencies.append({
+            "label": "Volatile",
+            "icon": "🎢",
+            "description": f"{round(blunder_rate, 1)} blunders per 100 moves — you play exciting but error-prone chess.",
+        })
+    elif blunder_rate < 1:
+        tendencies.append({
+            "label": "Rock Solid",
+            "icon": "🪨",
+            "description": f"Only {round(blunder_rate, 1)} blunders per 100 moves — your opponents can't count on you to crack.",
+        })
+
+    if cpl_stddev > 25:
+        tendencies.append({
+            "label": "Streaky",
+            "icon": "📊",
+            "description": f"Your game quality varies significantly (±{round(cpl_stddev, 1)} CPL). Brilliant one game, shaky the next.",
+        })
+    elif cpl_stddev < 10:
+        tendencies.append({
+            "label": "Metronome",
+            "icon": "⏱️",
+            "description": f"Extremely consistent play (±{round(cpl_stddev, 1)} CPL variance). You deliver the same level every game.",
+        })
+
+    if upsets >= 3:
+        tendencies.append({
+            "label": "Giant Killer",
+            "icon": "🗡️",
+            "description": f"{upsets} wins vs higher-rated — you play up, not down.",
+        })
+
+    if best_rate > 45:
+        tendencies.append({
+            "label": "Engine-Like",
+            "icon": "🤖",
+            "description": f"{round(best_rate, 1)}% best moves — you find the top move with exceptional frequency.",
+        })
+
+    if collapses >= 3 and collapses > comeback_wins:
+        tendencies.append({
+            "label": "Closer Problem",
+            "icon": "📉",
+            "description": f"Collapsed {collapses} times from winning — the finish line is your biggest obstacle.",
+        })
+
+    # ── Phase breakdown with personalized commentary ──
+    phase_breakdown = []
+    for phase_name, cpl_val in [("Opening", opening_cpl), ("Middlegame", middlegame_cpl), ("Endgame", endgame_cpl)]:
+        score_val = cpl_to_score(cpl_val)
+        is_best = phase_name.lower() == best_phase
+        is_worst = phase_name.lower() == worst_phase
+
+        if is_best:
+            tag = "strongest"
+            commentary = f"This is where you're at your best. {round(cpl_val, 1)} CPL means you play this phase with real authority."
+        elif is_worst and cpl_val > avg_cpl * 1.2:
+            tag = "weakest"
+            commentary = f"Your biggest vulnerability. At {round(cpl_val, 1)} CPL, this phase is dragging your overall performance down significantly."
+        elif is_worst:
+            tag = "weakest"
+            commentary = f"Relatively weaker than your other phases at {round(cpl_val, 1)} CPL, but not critical."
+        else:
+            tag = "neutral"
+            commentary = f"Solid performance at {round(cpl_val, 1)} CPL — neither a standout strength nor a weakness."
+
+        phase_breakdown.append({
+            "phase": phase_name,
+            "cpl": round(cpl_val, 1),
+            "score": score_val,
+            "tag": tag,
+            "commentary": commentary,
+        })
+
+    # ── Growth path — what leveling up looks like for this persona ──
+    growth_steps = []
+
+    # Always address the worst phase
+    if worst_phase == "endgame" and endgame_cpl > avg_cpl * 1.15:
+        growth_steps.append({
+            "priority": "high",
+            "title": "Shore Up Your Endgame",
+            "description": f"Your {worst_phase} CPL of {round(endgame_cpl, 1)} is {round(endgame_cpl - avg_cpl, 1)} points worse than your average. Study basic endgame patterns: King and Pawn, Rook endings, and opposition. Even modest improvement here will directly convert to rating points.",
+        })
+    elif worst_phase == "opening" and opening_cpl > avg_cpl * 1.15:
+        growth_steps.append({
+            "priority": "high",
+            "title": "Deepen Your Opening Preparation",
+            "description": f"Your opening CPL of {round(opening_cpl, 1)} means you're starting games at a disadvantage. Pick 1-2 openings per color and learn them to move 12-15. You'll enter middlegames with confidence instead of scrambling.",
+        })
+    elif worst_phase == "middlegame" and middlegame_cpl > avg_cpl * 1.15:
+        growth_steps.append({
+            "priority": "high",
+            "title": "Sharpen Your Middlegame Calculation",
+            "description": f"Your middlegame CPL of {round(middlegame_cpl, 1)} suggests you struggle with complex positions. Daily tactical training (15-20 min) will build the pattern recognition you need.",
+        })
+
+    # Blunder-specific advice
+    if blunder_rate > 2.5:
+        growth_steps.append({
+            "priority": "high",
+            "title": "Reduce Critical Errors",
+            "description": f"At {round(blunder_rate, 1)} blunders per 100 moves ({total_blunders} total), you're handing your opponents free points. Before each move, do a 3-second safety check: can anything be taken? Is my king safe? This single habit could cut your blunder rate in half.",
+        })
+
+    # Conversion advice
+    if collapses >= 3:
+        growth_steps.append({
+            "priority": "medium",
+            "title": "Convert Won Games",
+            "description": f"You've collapsed from winning positions {collapses} times. When you're ahead, slow down — spend extra time calculating your opponent's best reply. Practice winning endgames to build the confidence to close out games.",
+        })
+
+    # Consistency advice
+    if cpl_stddev > 25:
+        growth_steps.append({
+            "priority": "medium",
+            "title": "Play More Consistently",
+            "description": f"Your CPL swings (±{round(cpl_stddev, 1)}) suggest your form varies wildly. Your best games are already strong — the goal is making your average game look like your good games. Pre-game routines and avoiding tilt will help.",
+        })
+
+    # Persona-specific growth
+    if pid == "the_phoenix":
+        growth_steps.append({
+            "priority": "medium",
+            "title": "Make Comebacks Unnecessary",
+            "description": "Your comeback ability is rare and valuable — but the best version of you doesn't need it as often. Reducing early errors means you'll spend more games pressing your advantage instead of fighting from behind.",
+        })
+    elif pid == "the_berserker":
+        growth_steps.append({
+            "priority": "medium",
+            "title": "Add a Drawing Gear",
+            "description": "Your aggressive instinct is a weapon, but learning to hold equal positions and force draws in bad ones will add points. A berserker who can also play defense is terrifying.",
+        })
+    elif pid == "the_chameleon":
+        growth_steps.append({
+            "priority": "medium",
+            "title": "Develop a Weapon",
+            "description": "Your balance is your strength, but elite players combine balance with one devastating skill. Pick the phase or style that excites you most and push it to the next level.",
+        })
+
+    # Always end with a positive forward-looking step
+    growth_steps.append({
+        "priority": "low",
+        "title": "Keep Analyzing Every Game",
+        "description": f"You've analyzed {analyzed_count} out of {total_games} games. Every analysis adds data to sharpen your identity and reveals patterns invisible to the naked eye. Make post-game analysis a habit — it's the single most effective way to improve.",
+    })
+
     # ── Skill axes for the radar in the identity card ──
     axes = [
         {"axis": "Opening", "score": opening_score},
@@ -1763,6 +2049,13 @@ async def get_chess_identity(
         "signature_stats": signature_stats[:6],
         "kryptonite": kryptonite,
         "one_thing": one_thing,
+        # Enhanced report sections
+        "why_you": why_you,
+        "chess_story": chess_story,
+        "tendencies": tendencies[:6],
+        "phase_breakdown": phase_breakdown,
+        "growth_path": growth_steps[:5],
+        # Skill shape
         "skill_axes": axes,
         "overall_score": overall_score,
         "analyzed_games": analyzed_count,

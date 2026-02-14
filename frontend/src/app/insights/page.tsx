@@ -938,178 +938,325 @@ function CollapsibleInsight({
 
 function IdentityCard({ identity }: { identity: ChessIdentity }) {
   const persona = identity.persona!;
-  const [expanded, setExpanded] = useState(false);
 
   return (
     <Card className="overflow-hidden">
-      {/* Hero banner with persona */}
+      {/* ═══ Hero Banner ═══ */}
       <div
-        className="relative p-6 pb-4"
+        className="relative p-6 pb-5"
         style={{
-          background: `linear-gradient(135deg, ${persona.color}15 0%, transparent 60%)`,
-          borderBottom: `1px solid ${persona.color}30`,
+          background: `linear-gradient(135deg, ${persona.color}18 0%, ${persona.color}06 50%, transparent 80%)`,
         }}
       >
         <div className="flex items-start gap-4">
           <div
-            className="flex items-center justify-center h-16 w-16 rounded-2xl text-4xl flex-shrink-0"
-            style={{ backgroundColor: `${persona.color}20` }}
+            className="flex items-center justify-center h-20 w-20 rounded-2xl text-5xl flex-shrink-0 shadow-lg"
+            style={{ backgroundColor: `${persona.color}20`, boxShadow: `0 4px 20px ${persona.color}15` }}
           >
             {persona.emoji}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
               <Crown className="h-4 w-4" style={{ color: persona.color }} />
-              <span className="text-xs font-medium uppercase tracking-wider text-gray-500">
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Your Chess Identity
               </span>
             </div>
-            <h2 className="text-2xl font-bold" style={{ color: persona.color }}>
+            <h2 className="text-3xl font-bold tracking-tight" style={{ color: persona.color }}>
               {persona.name}
             </h2>
-            <p className="text-sm text-gray-400 italic mt-0.5">
+            <p className="text-base text-gray-400 italic mt-1">
               &ldquo;{persona.tagline}&rdquo;
             </p>
-            <p className="text-xs text-gray-500 mt-1.5 flex items-center gap-1">
-              <User className="h-3 w-3" />
-              Plays like <span className="font-semibold text-gray-300">{persona.gm_comparison}</span>
-            </p>
+            <div className="flex items-center gap-3 mt-2">
+              <p className="text-sm text-gray-500 flex items-center gap-1.5">
+                <User className="h-3.5 w-3.5" />
+                Plays like <span className="font-semibold text-gray-300">{persona.gm_comparison}</span>
+              </p>
+              {identity.secondary_persona && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-2/80 text-xs font-medium border border-surface-3">
+                  <span>{identity.secondary_persona.emoji}</span>
+                  Also: {identity.secondary_persona.name}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-
-        {/* Secondary persona badge */}
-        {identity.secondary_persona && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-xs text-gray-500">Also:</span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-2/80 text-xs font-medium">
-              <span>{identity.secondary_persona.emoji}</span>
-              {identity.secondary_persona.name}
-            </span>
-          </div>
-        )}
       </div>
 
-      {/* Expandable details */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-6 py-3 text-left hover:bg-surface-2/30 transition-colors"
-      >
-        <span className="text-sm font-medium text-gray-400">
-          {expanded ? "Hide details" : "See your full profile"}
-        </span>
-        <ChevronDown
-          className={`h-4 w-4 text-gray-500 transition-transform ${expanded ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      {expanded && (
-        <div className="px-6 pb-6 space-y-5 animate-fade-in">
-          {/* Description */}
-          <p className="text-sm text-gray-300 leading-relaxed">
+      <div className="px-6 pb-7 space-y-6">
+        {/* ═══ What This Means (persona description) ═══ */}
+        <div className="pt-2">
+          <SectionHeader icon="📋" title="What This Means" color={persona.color} />
+          <p className="text-sm text-gray-300 leading-relaxed mt-3">
             {persona.description}
           </p>
+        </div>
 
-          {/* Signature Stats */}
-          {identity.signature_stats && identity.signature_stats.length > 0 && (
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-3">
-                Signature Stats
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {identity.signature_stats.map((stat, i) => (
-                  <div
-                    key={i}
-                    className="p-3 bg-surface-2/50 rounded-lg"
-                  >
-                    <p className="text-xs text-gray-500">{stat.label}</p>
-                    <p className="text-lg font-bold mt-0.5">{stat.value}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{stat.detail}</p>
+        {/* ═══ Why You — personalized match reasons ═══ */}
+        {identity.why_you && identity.why_you.length > 0 && (
+          <div>
+            <SectionHeader icon="🔍" title="Why You're The Phoenix" overrideTitle={`Why You're ${persona.name}`} color={persona.color} />
+            <div className="mt-3 space-y-2.5">
+              {identity.why_you.map((reason, i) => (
+                <div key={i} className="flex items-start gap-3 text-sm">
+                  <span
+                    className="mt-1.5 h-2 w-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: persona.color }}
+                  />
+                  <p className="text-gray-300 leading-relaxed">{reason}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ Your Chess Story — narrative paragraph ═══ */}
+        {identity.chess_story && (
+          <div
+            className="p-5 rounded-xl border"
+            style={{
+              backgroundColor: `${persona.color}06`,
+              borderColor: `${persona.color}18`,
+            }}
+          >
+            <SectionHeader icon="📖" title="Your Chess Story" color={persona.color} />
+            <p className="text-sm text-gray-300 leading-relaxed mt-3">
+              {identity.chess_story}
+            </p>
+          </div>
+        )}
+
+        {/* ═══ Behavioral Tendencies ═══ */}
+        {identity.tendencies && identity.tendencies.length > 0 && (
+          <div>
+            <SectionHeader icon="🧬" title="Your Tendencies" color={persona.color} />
+            <div className="mt-3 grid sm:grid-cols-2 gap-3">
+              {identity.tendencies.map((t, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-3 p-3.5 bg-surface-2/50 rounded-lg border border-surface-3/50"
+                >
+                  <span className="text-xl flex-shrink-0">{t.icon}</span>
+                  <div>
+                    <p className="text-sm font-semibold">{t.label}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{t.description}</p>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Kryptonite */}
-          {identity.kryptonite && (
-            <div className="p-4 bg-red-900/10 border border-red-800/20 rounded-lg">
-              <div className="flex items-center gap-2 mb-1.5">
-                <AlertTriangle className="h-4 w-4 text-red-400" />
-                <span className="text-sm font-semibold text-red-400">
-                  Your Kryptonite: {identity.kryptonite.area}
-                </span>
-              </div>
-              <p className="text-sm text-gray-400">{identity.kryptonite.message}</p>
+        {/* ═══ Signature Stats ═══ */}
+        {identity.signature_stats && identity.signature_stats.length > 0 && (
+          <div>
+            <SectionHeader icon="📊" title="Signature Stats" color={persona.color} />
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {identity.signature_stats.map((stat, i) => (
+                <div
+                  key={i}
+                  className="p-3.5 bg-surface-2/40 rounded-lg border border-surface-3/30"
+                >
+                  <p className="text-xs text-gray-500 font-medium">{stat.label}</p>
+                  <p className="text-xl font-bold mt-1">{stat.value}</p>
+                  <p className="text-xs text-gray-500 mt-1">{stat.detail}</p>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* One Thing To Change */}
-          {identity.one_thing && (
-            <div
-              className="p-4 rounded-lg border"
-              style={{
-                backgroundColor: `${persona.color}08`,
-                borderColor: `${persona.color}25`,
-              }}
-            >
-              <div className="flex items-center gap-2 mb-1.5">
-                <Target className="h-4 w-4" style={{ color: persona.color }} />
-                <span className="text-sm font-semibold" style={{ color: persona.color }}>
-                  The One Thing To Change
-                </span>
-              </div>
-              <p className="text-sm text-gray-300 leading-relaxed">
-                {identity.one_thing}
-              </p>
-            </div>
-          )}
-
-          {/* Mini skill radar */}
-          {identity.skill_axes && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Skill Shape
-                </p>
-                <span className="text-sm text-gray-500">
-                  Overall: <span className="font-bold" style={{ color: persona.color }}>{identity.overall_score}</span>/100
-                </span>
-              </div>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart data={identity.skill_axes} cx="50%" cy="50%" outerRadius="70%">
-                    <PolarGrid stroke="#333" />
-                    <PolarAngleAxis
-                      dataKey="axis"
-                      tick={{ fill: "#9ca3af", fontSize: 11, fontWeight: 500 }}
+        {/* ═══ Phase Breakdown ═══ */}
+        {identity.phase_breakdown && identity.phase_breakdown.length > 0 && (
+          <div>
+            <SectionHeader icon="🎯" title="Phase Breakdown" color={persona.color} />
+            <div className="mt-3 space-y-3">
+              {identity.phase_breakdown.map((phase, i) => (
+                <div
+                  key={i}
+                  className={`p-4 rounded-lg border ${
+                    phase.tag === "strongest"
+                      ? "bg-green-900/8 border-green-800/20"
+                      : phase.tag === "weakest"
+                      ? "bg-red-900/8 border-red-800/20"
+                      : "bg-surface-2/30 border-surface-3/30"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">{phase.phase}</span>
+                      <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full ${
+                        phase.tag === "strongest"
+                          ? "bg-green-900/30 text-green-400"
+                          : phase.tag === "weakest"
+                          ? "bg-red-900/30 text-red-400"
+                          : "bg-surface-3/50 text-gray-500"
+                      }`}>
+                        {phase.tag}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="text-gray-500">{phase.cpl} CPL</span>
+                      <span className={`font-bold ${
+                        phase.score >= 75 ? "text-green-400" : phase.score >= 50 ? "text-yellow-400" : "text-red-400"
+                      }`}>
+                        {phase.score}/100
+                      </span>
+                    </div>
+                  </div>
+                  {/* Score bar */}
+                  <div className="h-1.5 bg-surface-3/50 rounded-full mb-2">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${
+                        phase.tag === "strongest" ? "bg-green-500" : phase.tag === "weakest" ? "bg-red-500" : "bg-gray-500"
+                      }`}
+                      style={{ width: `${phase.score}%` }}
                     />
-                    <PolarRadiusAxis
-                      angle={30}
-                      domain={[0, 100]}
-                      tick={false}
-                      axisLine={false}
-                    />
-                    <Radar
-                      name="Skill"
-                      dataKey="score"
-                      stroke={persona.color}
-                      fill={persona.color}
-                      fillOpacity={0.15}
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: persona.color }}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </div>
+                  </div>
+                  <p className="text-xs text-gray-400 leading-relaxed">{phase.commentary}</p>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          <p className="text-xs text-gray-600 text-center">
-            Based on {identity.analyzed_games} analyzed games out of {identity.total_games} total
+        {/* ═══ Skill Shape Radar ═══ */}
+        {identity.skill_axes && (
+          <div>
+            <div className="flex items-center justify-between">
+              <SectionHeader icon="🕸️" title="Skill Shape" color={persona.color} />
+              <span className="text-sm text-gray-500">
+                Overall: <span className="text-lg font-bold" style={{ color: persona.color }}>{identity.overall_score}</span>/100
+              </span>
+            </div>
+            <div className="h-64 mt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={identity.skill_axes} cx="50%" cy="50%" outerRadius="72%">
+                  <PolarGrid stroke="#333" />
+                  <PolarAngleAxis
+                    dataKey="axis"
+                    tick={{ fill: "#9ca3af", fontSize: 11, fontWeight: 500 }}
+                  />
+                  <PolarRadiusAxis
+                    angle={30}
+                    domain={[0, 100]}
+                    tick={false}
+                    axisLine={false}
+                  />
+                  <Radar
+                    name="Skill"
+                    dataKey="score"
+                    stroke={persona.color}
+                    fill={persona.color}
+                    fillOpacity={0.15}
+                    strokeWidth={2}
+                    dot={{ r: 4, fill: persona.color }}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ Kryptonite ═══ */}
+        {identity.kryptonite && (
+          <div className="p-4 bg-red-900/10 border border-red-800/25 rounded-xl">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="h-4 w-4 text-red-400" />
+              <span className="text-sm font-bold text-red-400">
+                Your Kryptonite: {identity.kryptonite.area}
+              </span>
+            </div>
+            <p className="text-sm text-gray-300 leading-relaxed">{identity.kryptonite.message}</p>
+          </div>
+        )}
+
+        {/* ═══ The One Thing To Change ═══ */}
+        {identity.one_thing && (
+          <div
+            className="p-4 rounded-xl border"
+            style={{
+              backgroundColor: `${persona.color}0a`,
+              borderColor: `${persona.color}25`,
+            }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Target className="h-4 w-4" style={{ color: persona.color }} />
+              <span className="text-sm font-bold" style={{ color: persona.color }}>
+                The One Thing To Change
+              </span>
+            </div>
+            <p className="text-sm text-gray-300 leading-relaxed">
+              {identity.one_thing}
+            </p>
+          </div>
+        )}
+
+        {/* ═══ Growth Path ═══ */}
+        {identity.growth_path && identity.growth_path.length > 0 && (
+          <div>
+            <SectionHeader icon="🚀" title="Your Growth Path" color={persona.color} />
+            <div className="mt-3 space-y-3">
+              {identity.growth_path.map((step, i) => (
+                <div
+                  key={i}
+                  className="p-4 bg-surface-2/30 rounded-lg border border-surface-3/30"
+                >
+                  <div className="flex items-center gap-2.5 mb-1.5">
+                    <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${
+                      step.priority === "high" ? "bg-red-400" : step.priority === "medium" ? "bg-yellow-400" : "bg-green-400"
+                    }`} />
+                    <span className="text-sm font-semibold">{step.title}</span>
+                    <span className={`text-[10px] uppercase tracking-wider font-medium px-1.5 py-0.5 rounded ${
+                      step.priority === "high"
+                        ? "bg-red-900/20 text-red-400"
+                        : step.priority === "medium"
+                        ? "bg-yellow-900/20 text-yellow-400"
+                        : "bg-green-900/20 text-green-400"
+                    }`}>
+                      {step.priority}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 leading-relaxed ml-5">{step.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ Footer ═══ */}
+        <div className="pt-2 border-t border-surface-3/30 text-center">
+          <p className="text-xs text-gray-600">
+            Based on deep analysis of {identity.analyzed_games} games out of {identity.total_games} total.
+            This report is fully deterministic — no AI, no randomness, just your data.
           </p>
         </div>
-      )}
+      </div>
     </Card>
+  );
+}
+
+// ─── Section Header ─────────────────────────────────────
+
+function SectionHeader({
+  icon,
+  title,
+  overrideTitle,
+  color,
+}: {
+  icon: string;
+  title: string;
+  overrideTitle?: string;
+  color: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-base">{icon}</span>
+      <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color }}>
+        {overrideTitle || title}
+      </h3>
+    </div>
   );
 }
 

@@ -511,6 +511,26 @@ export interface Kryptonite {
   message: string;
 }
 
+export interface ChessTendency {
+  label: string;
+  icon: string;
+  description: string;
+}
+
+export interface PhaseBreakdownItem {
+  phase: string;
+  cpl: number;
+  score: number;
+  tag: "strongest" | "weakest" | "neutral";
+  commentary: string;
+}
+
+export interface GrowthStep {
+  priority: "high" | "medium" | "low";
+  title: string;
+  description: string;
+}
+
 export interface ChessIdentity {
   has_data: boolean;
   message?: string;
@@ -519,6 +539,11 @@ export interface ChessIdentity {
   signature_stats?: SignatureStat[];
   kryptonite?: Kryptonite | null;
   one_thing?: string | null;
+  why_you?: string[];
+  chess_story?: string;
+  tendencies?: ChessTendency[];
+  phase_breakdown?: PhaseBreakdownItem[];
+  growth_path?: GrowthStep[];
   skill_axes?: SkillAxis[];
   overall_score?: number;
   analyzed_games?: number;
