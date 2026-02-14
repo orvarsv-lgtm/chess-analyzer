@@ -1064,7 +1064,7 @@ export const openingsAPI = {
     return fetchAPI(`/openings/tree?${searchParams}`);
   },
 
-  validateMove(fen: string, san: string): Promise<{
+  validateMove(fen: string, san: string, maxCpLoss = 50): Promise<{
     viable: boolean;
     cp_loss: number;
     best_move_san: string;
@@ -1073,7 +1073,7 @@ export const openingsAPI = {
   }> {
     return fetchAPI(`/openings/validate-move`, {
       method: "POST",
-      body: JSON.stringify({ fen, san }),
+      body: JSON.stringify({ fen, san, max_cp_loss: maxCpLoss }),
     });
   },
 

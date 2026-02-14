@@ -105,6 +105,7 @@ function TrainPageInner() {
   const [openingDrillScore, setOpeningDrillScore] = useState({ correct: 0, total: 0, lines: 0 });
   const [openingDrillBestMove, setOpeningDrillBestMove] = useState<string>("");
   const [openingDrillCurrentPath, setOpeningDrillCurrentPath] = useState<OpeningTreeNode[]>([]);
+  const [openingDrillCplThreshold, setOpeningDrillCplThreshold] = useState(50);
   const [openingDrillExplanation, setOpeningDrillExplanation] = useState<string>("");
   const [openingDrillExplanationLoading, setOpeningDrillExplanationLoading] = useState(false);
   const [openingDrillShowExplanation, setOpeningDrillShowExplanation] = useState(true);
@@ -671,8 +672,9 @@ function TrainPageInner() {
     // ── 1. Check if the move exists in the opening repertoire tree ──
     const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
 
-    // Accept from tree only if average CPL is known and ≤50 (or unknown = trust it)
-    const treeViable = matchingNode && (matchingNode.average_cpl == null || matchingNode.average_cpl <= 50);
+    // Accept from tree only when average CPL is known and within threshold.
+    // If unknown, fall back to Stockfish validation.
+    const treeViable = matchingNode && matchingNode.average_cpl != null && matchingNode.average_cpl <= openingDrillCplThreshold;
 
     if (matchingNode && treeViable) {
       // Move is in the repertoire and viable — accept it immediately
@@ -683,7 +685,7 @@ function TrainPageInner() {
       return true;
     }
 
-    // ── 2. Move NOT in tree or tree says CPL > 50 — validate with Stockfish ──
+    // ── 2. Move NOT in tree or above threshold — validate with Stockfish ──
     setOpeningDrillState("validating");
     // Show the move on the board optimistically
     openingDrillGame.move(moveSan);
@@ -692,13 +694,13 @@ function TrainPageInner() {
     setOpeningDrillMoves(newMoves);
 
     openingsAPI
-      .validateMove(fenBeforeMove, moveSan)
+      .validateMove(fenBeforeMove, moveSan, openingDrillCplThreshold)
       .then((result) => {
         if (result.viable) {
-          // Move is good (≤50 cp loss) — accept it
+          // Move is within selected threshold — accept it
           openingDrillAcceptAndContinue(moveSan, matchingNode);
         } else {
-          // Move loses too much (>50 cp) — wrong
+          // Move loses too much for current threshold — wrong
           // Undo the optimistic move
           openingDrillGame.undo();
           setOpeningDrillFen(openingDrillGame.fen());
@@ -2060,9 +2062,38 @@ function TrainPageInner() {
                     How It Works
                   </h3>
                   <div className="space-y-2 text-sm text-gray-400">
-                    <p>Play any <span className="text-emerald-400 font-medium">viable move</span> — anything under 50 centipawn loss is accepted.</p>
+                    <p>
+                      Play any <span className="text-emerald-400 font-medium">viable move</span> — anything under
+                      <span className="text-emerald-400 font-medium"> {openingDrillCplThreshold}</span> centipawn loss is accepted.
+                    </p>
                     <p>Your opponent responds with moves from your actual games, weighted by how often they occur.</p>
                     <p>If your move loses too much, Stockfish will explain why and you can try again.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent>
+                  <h3 className="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-3">
+                    CPL Tolerance
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Allowed CPL</span>
+                      <span className="text-gray-300 font-medium">{openingDrillCplThreshold}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={openingDrillCplThreshold}
+                      onChange={(e) => setOpeningDrillCplThreshold(Number(e.target.value))}
+                      className="w-full accent-brand-500"
+                    />
+                    <div className="rounded-md border border-gray-700 bg-gray-900/60 px-3 py-2 text-xs text-gray-400">
+                      fx: 0 - only best moves allowed · 100: inaccuracies allowed
+                    </div>
                   </div>
                 </CardContent>
               </Card>

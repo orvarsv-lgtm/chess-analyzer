@@ -17,7 +17,7 @@ import chess
 import chess.engine
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -503,13 +503,14 @@ def _parse_explorer_response(data: dict, fen: str, source: str) -> ExplorerRespo
 # Move validation via Stockfish
 # ═══════════════════════════════════════════════════════════
 
-CPL_THRESHOLD = 50  # moves losing ≤50 cp are considered viable
+CPL_THRESHOLD = 50  # default threshold; can be overridden per request (0-100)
 VALIDATE_DEPTH = 14
 
 
 class ValidateMoveRequest(BaseModel):
     fen: str
     san: str
+    max_cp_loss: int = Field(default=CPL_THRESHOLD, ge=0, le=100)
 
 
 class ValidateMoveResponse(BaseModel):
@@ -535,7 +536,7 @@ async def validate_move(
     user: User = Depends(require_user),
 ):
     """
-    Check whether a move is viable (≤50 cp loss) using Stockfish.
+    Check whether a move is viable (<= max_cp_loss cp loss) using Stockfish.
     Used by the opening drill to accept any reasonable move.
     """
     settings = get_settings()
@@ -580,7 +581,7 @@ async def validate_move(
         await engine.quit()
 
     cp_loss = max(0, eval_before - eval_after)
-    viable = cp_loss <= CPL_THRESHOLD
+    viable = cp_loss <= body.max_cp_loss
 
     return ValidateMoveResponse(
         viable=viable,
