@@ -54,6 +54,7 @@ export default function OpeningsPage() {
   // ─── Debounce, cache & responsive board ────────────
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const cacheRef = useRef<Map<string, ExplorerResponse>>(new Map());
+  const requestSeqRef = useRef(0);
   const boardContainerRef = useRef<HTMLDivElement>(null);
   const [boardWidth, setBoardWidth] = useState(400);
 
@@ -171,23 +172,34 @@ export default function OpeningsPage() {
   // ─── Fetch explorer data ─────────────────────────────
   const fetchExplorer = useCallback(async (currentFen: string) => {
     const cacheKey = `${source}:${currentFen}`;
+    const requestId = ++requestSeqRef.current;
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
-      setExplorer(cached);
+      // Only apply if this is still the latest request.
+      if (requestId === requestSeqRef.current) {
+        setExplorer(cached);
+      }
       return;
     }
-    setLoading(true);
+    if (requestId === requestSeqRef.current) {
+      setLoading(true);
+    }
     try {
       const data = await openingsAPI.explore({
         fen: currentFen,
         source: source === "personal" ? "lichess" : source,
       });
+      if (requestId !== requestSeqRef.current) return;
       setExplorer(data);
       if (data) cacheRef.current.set(cacheKey, data);
     } catch {
-      setExplorer(null);
+      if (requestId === requestSeqRef.current) {
+        setExplorer(null);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [source]);
 
