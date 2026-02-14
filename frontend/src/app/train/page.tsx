@@ -521,7 +521,7 @@ function TrainPageInner() {
 
   // Helper: accept a move, play opponent reply, then continue or auto-reset
   function openingDrillAcceptAndContinue(moveSan: string, matchingNode: OpeningTreeNode | undefined) {
-    setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+    setOpeningDrillScore((s) => ({ ...s, correct: s.correct + 1, total: s.total + 1 }));
     setOpeningDrillHint("");
     setOpeningDrillExplanation("");
     setOpeningDrillBestMove("");
