@@ -1018,10 +1018,11 @@ def classify_blunder_subtype(
 
     # ── 4. Back-rank vulnerability (opponent can now exploit) ──
     # Check if after our move, opponent has a back-rank threat
-    for opp_move in board_after.legal_moves:
+    for i, opp_move in enumerate(board_after.legal_moves):
         if _detect_back_rank(board_after, opp_move):
             return "back_rank"
-        break  # Only check a few to avoid being too slow
+        if i >= 4:  # Only check a few to avoid being too slow
+            break
     # More thorough: check if opponent's response is check on back rank
     if board_after.is_check():
         king_sq = board_after.king(player_color)

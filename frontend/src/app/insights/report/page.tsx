@@ -227,9 +227,10 @@ export default function CoachReportPage() {
           <Card className="border-l-4 border-l-red-500/40">
             <CardContent className="flex items-start gap-3">
               <span className="text-2xl mt-0.5">⚠️</span>
-              <div>
+              <div className="flex-1 min-w-0">
                 <p className="text-white font-medium text-sm">{report.kryptonite.area}</p>
                 <p className="text-gray-400 text-sm mt-1">{report.kryptonite.message}</p>
+                <KryptoniteCTA area={report.kryptonite.area} />
               </div>
             </CardContent>
           </Card>
@@ -276,7 +277,7 @@ export default function CoachReportPage() {
                 </div>
               ))}
               <Link
-                href="/train"
+                href="/train?mode=warmup"
                 className="flex items-center gap-2 text-sm font-medium text-brand-400 hover:text-brand-300 transition-colors mt-3 pt-2 border-t border-surface-3"
               >
                 Start Training <ArrowRight className="h-3.5 w-3.5" />
@@ -296,7 +297,7 @@ export default function CoachReportPage() {
             {report.one_thing}
           </p>
           <Link
-            href="/train"
+            href="/train?mode=warmup"
             className={`inline-flex items-center gap-2 mt-4 text-sm font-medium ${colors.text} hover:opacity-80 transition-opacity`}
           >
             Start Training <ArrowRight className="h-4 w-4" />
@@ -374,7 +375,17 @@ function HonestTruthCard({ truth }: { truth: HonestTruth }) {
     <Card className="border-l-4 border-l-yellow-500/40">
       <CardContent className="flex items-start gap-3 py-3">
         <span className="text-lg mt-0.5 shrink-0">{truth.icon}</span>
-        <p className="text-sm text-gray-300 leading-relaxed">{truth.text}</p>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-gray-300 leading-relaxed">{truth.text}</p>
+          {truth.cta_url && truth.cta_label && (
+            <Link
+              href={truth.cta_url}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-400 hover:text-brand-300 transition-colors mt-2"
+            >
+              {truth.cta_label} <ArrowRight className="h-3 w-3" />
+            </Link>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -402,6 +413,14 @@ function PhaseCard({ phase, tier }: { phase: PhaseReportItem; tier: string }) {
           <span className="text-xs text-gray-500">{phase.cpl.toFixed(1)} CPL</span>
         </div>
         <p className="text-sm text-gray-400 leading-relaxed">{phase.commentary}</p>
+        {phase.cta_url && phase.cta_label && (
+          <Link
+            href={phase.cta_url}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-400 hover:text-brand-300 transition-colors"
+          >
+            {phase.cta_label} <ArrowRight className="h-3 w-3" />
+          </Link>
+        )}
       </CardContent>
     </Card>
   );
@@ -458,5 +477,24 @@ function GrowthStepCard({ step }: { step: GrowthStep }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function KryptoniteCTA({ area }: { area: string }) {
+  const lower = area.toLowerCase();
+  let href = "/train?mode=warmup";
+  let label = "Practice Now";
+  if (lower.includes("opening")) { href = "/train?phase=opening"; label = "Train Opening"; }
+  else if (lower.includes("middlegame")) { href = "/train?phase=middlegame"; label = "Train Middlegame"; }
+  else if (lower.includes("endgame")) { href = "/train?phase=endgame"; label = "Train Endgame"; }
+  else if (lower.includes("converting") || lower.includes("advantage")) { href = "/train?mode=advantage"; label = "Practice Converting"; }
+  else if (lower.includes("blunder")) { href = "/train?mode=warmup"; label = "Blunder Prevention"; }
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-red-400 hover:text-red-300 transition-colors mt-2"
+    >
+      {label} <ArrowRight className="h-3 w-3" />
+    </Link>
   );
 }

@@ -57,6 +57,8 @@ function TrainPageInner() {
   const gameIdParam = searchParams.get("game_id");
   const timedParam = searchParams.get("mode") === "timed";
   const tacticParam = searchParams.get("tactic");
+  const phaseParam = searchParams.get("phase");
+  const modeParam = searchParams.get("mode");
 
   // ─── Timed mode ───────────────────────────────────
   const TIMED_LIMIT = 10;
@@ -269,14 +271,63 @@ function TrainPageInner() {
     }
   }, [timedParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start session if tactic param in URL (from coach report CTA)
+  // Auto-start from URL params (coach report CTAs)
   useEffect(() => {
-    if (tacticParam && session) {
-      setFilterTactic(tacticParam);
-      loadPuzzles("global", { tactic: tacticParam });
-      setView("session");
+    if (!session || gameIdParam || timedParam) return;
+
+    // ?mode=warmup → start daily warmup directly
+    if (modeParam === "warmup") {
+      puzzlesAPI.dailyWarmup().then((w) => {
+        if (w && w.puzzles.length > 0) {
+          setWarmup(w);
+          const items: PuzzleItem[] = w.puzzles.map((p) => ({
+            id: p.id, puzzle_key: `warmup-${p.id}`, fen: p.fen,
+            side_to_move: p.side_to_move, best_move_san: p.best_move_san,
+            best_move_uci: p.best_move_uci ?? undefined, eval_loss_cp: p.eval_loss_cp,
+            phase: p.phase, puzzle_type: p.puzzle_type, explanation: null, themes: p.themes,
+          }));
+          setQueue(items); setCurrentIdx(0); setView("session");
+          setSolvedToday(0); setCorrectToday(0); setStreak(0); setIsWarmupSession(true);
+        } else { loadPuzzles("my"); setView("session"); }
+      }).catch(() => { loadPuzzles("my"); setView("session"); });
+      return;
     }
-  }, [tacticParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ?mode=advantage → start advantage capitalization directly
+    if (modeParam === "advantage") {
+      puzzlesAPI.advantagePositions(10).then((a) => {
+        if (a && a.positions.length > 0) {
+          setAdvantagePositions(a);
+          const items: PuzzleItem[] = a.positions.map((p) => ({
+            id: p.id, puzzle_key: `advantage-${p.id}`, fen: p.fen,
+            side_to_move: p.side_to_move, best_move_san: p.best_move_san,
+            best_move_uci: p.best_move_uci ?? undefined, eval_loss_cp: p.cp_loss,
+            phase: p.phase, puzzle_type: "advantage", explanation: null,
+            themes: ["advantage_capitalization"],
+          }));
+          setQueue(items); setCurrentIdx(0); setView("session");
+          setSolvedToday(0); setCorrectToday(0); setStreak(0); setIsWarmupSession(false);
+        } else { loadPuzzles("my"); setView("session"); }
+      }).catch(() => { loadPuzzles("my"); setView("session"); });
+      return;
+    }
+
+    // ?mode=intuition → start intuition trainer directly
+    if (modeParam === "intuition") {
+      startIntuition();
+      return;
+    }
+
+    // ?tactic=fork or ?phase=endgame → start filtered puzzle session
+    if (tacticParam || phaseParam) {
+      const filters: { tactic?: string; phase?: string } = {};
+      if (tacticParam) { setFilterTactic(tacticParam); filters.tactic = tacticParam; }
+      if (phaseParam) { setFilterPhase(phaseParam); filters.phase = phaseParam; }
+      loadPuzzles("global", filters);
+      setView("session");
+      return;
+    }
+  }, [tacticParam, phaseParam, modeParam, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function weaknessToFilters(w: Weakness): { tactic?: string; phase?: string; puzzle_type?: string } {
     const area = w.area.toLowerCase();

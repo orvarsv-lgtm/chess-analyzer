@@ -79,6 +79,12 @@ async def backfill_puzzle_tactics():
                     {"themes": json.dumps(new_tags), "id": pid}
                 )
                 updated += 1
+            else:
+                # Keep deprecated field normalized for compatibility.
+                await db.execute(
+                    text("UPDATE puzzles SET difficulty = 'standard' WHERE id = :id"),
+                    {"id": pid}
+                )
 
         await db.commit()
         print(f"✅ Updated {updated} puzzles with new tactic tags")

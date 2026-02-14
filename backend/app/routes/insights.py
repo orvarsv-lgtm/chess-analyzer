@@ -2674,6 +2674,8 @@ async def get_coach_report(
         honest_truths.append({
             "icon": "📊",
             "text": f"You play like two different people. Your {best_phase} is genuinely strong, but your {worst_phase} is a completely different level. That gap is costing you games you should be winning.",
+            "cta_label": f"Train {worst_phase.title()}",
+            "cta_url": f"/train?phase={worst_phase}",
         })
 
     # Blunder piece
@@ -2681,13 +2683,24 @@ async def get_coach_report(
         honest_truths.append({
             "icon": "♟️",
             "text": f"You have a specific blind spot with your {top_piece}. A disproportionate number of your blunders involve this piece — it's not random, it's a pattern worth studying.",
+            "cta_label": "Practice Your Blunders",
+            "cta_url": "/train?mode=warmup",
         })
 
     # Blunder type
     if top_subtype and st_row and st_row.cnt >= 3:
+        # Map subtype to a tactic filter
+        _subtype_tactic_map = {
+            "missed_fork": "fork", "missed_pin": "pin", "missed_skewer": "skewer",
+            "missed_discovery": "discovered_attack", "back_rank": "back_rank",
+            "missed_mate": "checkmate_pattern", "king_safety": "king_activity",
+        }
+        truth_tactic = _subtype_tactic_map.get(top_subtype)
         honest_truths.append({
             "icon": "🔍",
             "text": f"Your number one blunder pattern is {subtype_labels.get(top_subtype, top_subtype.replace('_', ' '))}. This keeps showing up in your games — it's a trainable habit, not bad luck.",
+            "cta_label": f"Train {subtype_labels.get(top_subtype, 'This Pattern').rstrip('s').title()}s" if truth_tactic else "Practice Puzzles",
+            "cta_url": f"/train?tactic={truth_tactic}" if truth_tactic else "/train",
         })
 
     # Collapses
@@ -2695,6 +2708,8 @@ async def get_coach_report(
         honest_truths.append({
             "icon": "📉",
             "text": f"You've thrown away multiple won games. You're not losing because you're outplayed — you're losing positions you've already earned. This is the most fixable problem you have.",
+            "cta_label": "Practice Converting",
+            "cta_url": "/train?mode=advantage",
         })
 
     # Time pressure
@@ -2702,6 +2717,8 @@ async def get_coach_report(
         honest_truths.append({
             "icon": "⏰",
             "text": f"Most of your blunders happen in time trouble. You're not a bad calculator — you're a bad time manager. The clock is beating you, not your opponents.",
+            "cta_label": "Timed Puzzle Sprint",
+            "cta_url": "/train?mode=timed",
         })
 
     # Consistency
@@ -2709,6 +2726,8 @@ async def get_coach_report(
         honest_truths.append({
             "icon": "🎢",
             "text": f"Your accuracy swings wildly between games. On your good days, you're genuinely dangerous. On your bad days, you play far below your ability. Closing that gap IS your rating gain.",
+            "cta_label": "Daily Warmup",
+            "cta_url": "/train?mode=warmup",
         })
 
     # Limit to 3 most impactful
@@ -2794,6 +2813,8 @@ async def get_coach_report(
             "score": score_val,
             "tag": tag,
             "commentary": commentary,
+            "cta_label": f"Train {pb['phase']}" if tag == "weakest" else None,
+            "cta_url": f"/train?phase={phase_name}" if tag == "weakest" else None,
         })
 
     # ── 4. Training plan — actionable with CTA links, human voice ──
@@ -2808,14 +2829,14 @@ async def get_coach_report(
                 "why": "You're giving away pieces too often. At your level, just NOT hanging pieces would win you more games than anything else.",
                 "how": "Before every move in your games, count your opponent's attacks. Start with the Blunder Preventer trainer to build the habit.",
                 "cta_label": "Start Blunder Preventer",
-                "cta_url": "/train",
+                "cta_url": "/train?mode=warmup",
             })
         training_plan.append({
             "title": "5 Puzzles a Day — No More, No Less",
             "why": "Pattern recognition is how your brain learns chess. A few puzzles daily is better than a marathon once a week.",
             "how": "Do the Daily Warmup every day. Don't rush — if a puzzle takes 3 minutes, that's fine. The goal is accuracy, not speed.",
             "cta_label": "Start Daily Warmup",
-            "cta_url": "/train",
+            "cta_url": "/train?mode=warmup",
         })
         if worst_phase == "endgame":
             training_plan.append({
@@ -2823,7 +2844,7 @@ async def get_coach_report(
                 "why": "Your endgame is dragging down your results. You don't need theory — you need two rules.",
                 "how": "Rule 1: In the endgame, your King is a fighting piece — push it to the center. Rule 2: Passed pawns must be pushed. Practice endgame puzzles to internalize these.",
                 "cta_label": "Practice Endgames",
-                "cta_url": "/train",
+                "cta_url": "/train?phase=endgame",
             })
     elif tier == "intermediate":
         # Intermediates: targeted weakness training
@@ -2833,7 +2854,7 @@ async def get_coach_report(
                 "why": "Your endgame is your biggest weakness. You build good positions but can't finish them off.",
                 "how": "Use the 'Capitalize Advantages' trainer — it gives you positions from YOUR games where you were winning but failed to convert. Practice until you can win these consistently.",
                 "cta_label": "Capitalize Advantages",
-                "cta_url": "/train",
+                "cta_url": "/train?mode=advantage",
             })
         if blunder_rate > 2.5:
             piece_note = f" You have a specific blind spot with your {top_piece}." if top_piece and top_piece_pct > 30 else ""
@@ -2843,7 +2864,7 @@ async def get_coach_report(
                 "why": f"You're blundering too often for your level.{piece_note}{subtype_note}",
                 "how": "Do the Blunder Preventer daily. Then review your blunders from recent games — you'll start seeing the same patterns.",
                 "cta_label": "Blunder Preventer",
-                "cta_url": "/train",
+                "cta_url": "/train?mode=warmup",
             })
         # Add tactic-specific training if we have a top blunder subtype
         if top_subtype and top_subtype.startswith("missed_"):
@@ -2860,8 +2881,8 @@ async def get_coach_report(
                 "title": "Tactical Pattern Training",
                 "why": "Improving your ability to find the best move is pure rating points. Every percentage point in accuracy matters.",
                 "how": "Solve puzzles from your own mistakes first (they're the most relevant), then supplement with global puzzles. Aim for puzzles that take you 1-3 minutes.",
-                "cta_label": "Train From Your Mistakes",
-                "cta_url": "/train",
+                "cta_label": "Start Puzzle Session",
+                "cta_url": "/train?mode=warmup",
             })
     elif tier == "advanced":
         # Advanced: repertoire refinement, positional play, conversion
@@ -2879,14 +2900,14 @@ async def get_coach_report(
                 "why": "You've collapsed from winning positions multiple times. These are games you already won at the board — then gave back.",
                 "how": "The 'Capitalize Advantages' trainer gives you YOUR positions where you were winning. Practice finding the calm, safe continuation instead of the flashy one.",
                 "cta_label": "Capitalize Advantages",
-                "cta_url": "/train",
+                "cta_url": "/train?mode=advantage",
             })
         training_plan.append({
             "title": "Intuition Sharpening",
             "why": "At your level, rapid pattern recognition separates good play from great play. The faster you spot threats, the more time you save for critical decisions.",
             "how": "Do the Intuition Trainer: spot the blunder among 4 moves. This trains threat detection at speed.",
             "cta_label": "Intuition Trainer",
-            "cta_url": "/train",
+            "cta_url": "/train?mode=intuition",
         })
     else:  # expert
         training_plan.append({
@@ -2902,7 +2923,7 @@ async def get_coach_report(
                 "why": "Your inconsistency is holding you back. Your bad games are dragging your rating down.",
                 "how": "Build a pre-game checklist: Are you well-rested? Have you warmed up with 5 puzzles? Are you tilted from a previous game? Don't play if two of these are no.",
                 "cta_label": "Daily Warmup",
-                "cta_url": "/train",
+                "cta_url": "/train?mode=warmup",
             })
         if worst_phase == "endgame":
             training_plan.append({
@@ -2910,7 +2931,7 @@ async def get_coach_report(
                 "why": "Your endgame has gaps — likely in complex positions with multiple pieces on the board.",
                 "how": "Study practical rook endgames and conversion technique. Play out endgame positions against Stockfish from your own games.",
                 "cta_label": "Practice Endgames",
-                "cta_url": "/train",
+                "cta_url": "/train?phase=endgame",
             })
 
     # Ensure at least 3 training actions

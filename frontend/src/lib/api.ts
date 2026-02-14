@@ -553,6 +553,8 @@ export interface ChessIdentity {
 export interface HonestTruth {
   icon: string;
   text: string;
+  cta_label?: string;
+  cta_url?: string;
 }
 
 export interface PhaseReportItem {
@@ -561,6 +563,8 @@ export interface PhaseReportItem {
   score: number;
   tag: "strongest" | "weakest" | "neutral";
   commentary: string;
+  cta_label?: string | null;
+  cta_url?: string | null;
 }
 
 export interface TrainingAction {
