@@ -1155,6 +1155,622 @@ async def get_advanced_analytics(
 
 
 # ═══════════════════════════════════════════════════════════
+# Chess Identity – Fixed Persona System
+# ═══════════════════════════════════════════════════════════
+
+# 12 fixed personas. Each has matching criteria evaluated against player metrics.
+# The persona with the highest match score is assigned.
+
+CHESS_PERSONAS = [
+    {
+        "id": "the_tactician",
+        "name": "The Tactician",
+        "emoji": "⚔️",
+        "tagline": "You see the board in combinations, not positions.",
+        "gm_comparison": "Mikhail Tal",
+        "description": "You live for the attack. Your games are full of sharp tactics, sacrifices, and forcing sequences. You'd rather calculate 10 moves deep than slowly maneuver a knight. When it works, it's brilliant. When it doesn't, it's spectacular.",
+        "color": "#ef4444",  # red
+    },
+    {
+        "id": "the_fortress",
+        "name": "The Fortress",
+        "emoji": "🏰",
+        "tagline": "You don't beat opponents — you outlast them.",
+        "gm_comparison": "Tigran Petrosian",
+        "description": "You are the wall. Your opponents crash against your solid position and slowly run out of ideas. You rarely blunder, rarely take risks, and rarely lose games you shouldn't. Your chess is clean, disciplined, and frustrating to face.",
+        "color": "#3b82f6",  # blue
+    },
+    {
+        "id": "the_grinder",
+        "name": "The Grinder",
+        "emoji": "🔧",
+        "tagline": "You squeeze water from stones.",
+        "gm_comparison": "Anatoly Karpov",
+        "description": "You don't need fireworks. A small edge is all you need — a slightly better pawn structure, a tiny initiative — and you nurse it into a win. Your endgame technique is your lethal weapon. Opponents hate playing you because nothing is ever truly drawn.",
+        "color": "#8b5cf6",  # purple
+    },
+    {
+        "id": "the_speedster",
+        "name": "The Speedster",
+        "emoji": "⚡",
+        "tagline": "Your clock is a weapon, not a constraint.",
+        "gm_comparison": "Hikaru Nakamura",
+        "description": "You thrive under time pressure. While opponents panic with 30 seconds left, you play your best chess. Fast time controls are your playground — bullet and blitz bring out something in you that classical never does.",
+        "color": "#f59e0b",  # amber
+    },
+    {
+        "id": "the_scientist",
+        "name": "The Scientist",
+        "emoji": "🔬",
+        "tagline": "Every position is a puzzle to be solved precisely.",
+        "gm_comparison": "Vladimir Kramnik",
+        "description": "You approach chess with methodical precision. You don't wing it — you calculate, evaluate, and choose. Your best-move rate is high because you treat every position like a laboratory experiment. When the position demands accuracy, you deliver.",
+        "color": "#06b6d4",  # cyan
+    },
+    {
+        "id": "the_phoenix",
+        "name": "The Phoenix",
+        "emoji": "🔥",
+        "tagline": "You don't know the meaning of a lost position.",
+        "gm_comparison": "David Bronstein",
+        "description": "Other players resign positions you go on to win. You have an uncanny ability to create complications when you're losing, and your opponents crack under the pressure. Your comebacks aren't lucky — they're a pattern.",
+        "color": "#f97316",  # orange
+    },
+    {
+        "id": "the_assassin",
+        "name": "The Assassin",
+        "emoji": "🗡️",
+        "tagline": "You play up. You don't play down.",
+        "gm_comparison": "Garry Kasparov",
+        "description": "Higher-rated opponents don't intimidate you — they motivate you. You have a remarkable ability to raise your game against stronger players. Upsets aren't anomalies for you, they're a signature.",
+        "color": "#dc2626",  # red-600
+    },
+    {
+        "id": "the_chameleon",
+        "name": "The Chameleon",
+        "emoji": "🦎",
+        "tagline": "You have no weaknesses because you have every style.",
+        "gm_comparison": "Magnus Carlsen",
+        "description": "You're dangerous because you're unpredictable. Your skill profile is balanced — no clear weakness, no obvious pattern for opponents to exploit. You can grind endgames, attack kings, or play positionally depending on what the position demands.",
+        "color": "#10b981",  # emerald
+    },
+    {
+        "id": "the_berserker",
+        "name": "The Berserker",
+        "emoji": "💥",
+        "tagline": "Your games are never boring.",
+        "gm_comparison": "Rashid Nezhmetdinov",
+        "description": "Draw? What draw? Your games end decisively — either you win spectacularly or you go down in flames. You take risks others wouldn't dream of. Your opponents never know what's coming, and frankly, sometimes neither do you.",
+        "color": "#e11d48",  # rose
+    },
+    {
+        "id": "the_professor",
+        "name": "The Professor",
+        "emoji": "📖",
+        "tagline": "You win games before move 15.",
+        "gm_comparison": "Levon Aronian",
+        "description": "Your opening preparation is your superpower. While opponents are still figuring out what to play, you're already out of book with a comfortable position. Your opening accuracy is significantly better than the rest of your game.",
+        "color": "#6366f1",  # indigo
+    },
+    {
+        "id": "the_survivor",
+        "name": "The Survivor",
+        "emoji": "🛡️",
+        "tagline": "You bend, but you don't break.",
+        "gm_comparison": "Viswanathan Anand",
+        "description": "You might not always find the best move, but you almost never find the worst one. Your composure under pressure is remarkable — low blunder rate, consistent play, and a knack for holding difficult positions.",
+        "color": "#14b8a6",  # teal
+    },
+    {
+        "id": "the_adventurer",
+        "name": "The Adventurer",
+        "emoji": "🌟",
+        "tagline": "Your chess identity is still being written.",
+        "gm_comparison": "Bobby Fischer (early career)",
+        "description": "You're on a journey. Your style is evolving with every game you play, and the data shows it — improving trends, growing pattern recognition, and a hunger to learn. The most exciting thing about your chess? What comes next.",
+        "color": "#a855f7",  # violet
+    },
+]
+
+
+def _score_persona(persona_id: str, metrics: dict) -> float:
+    """
+    Score how well a player matches each persona.
+    Returns a float score — higher is better match.
+    All logic is deterministic based on metrics.
+    """
+    score = 0.0
+
+    avg_cpl = metrics.get("avg_cpl", 50)
+    blunder_rate = metrics.get("blunder_rate", 3)
+    best_rate = metrics.get("best_rate", 30)
+    error_rate = metrics.get("error_rate", 5)
+    win_rate = metrics.get("win_rate", 50)
+    draw_rate = metrics.get("draw_rate", 15)
+    comeback_wins = metrics.get("comeback_wins", 0)
+    collapses = metrics.get("collapses", 0)
+    upsets = metrics.get("upsets", 0)
+    opening_cpl = metrics.get("opening_cpl", 50)
+    middlegame_cpl = metrics.get("middlegame_cpl", 50)
+    endgame_cpl = metrics.get("endgame_cpl", 50)
+    cpl_stddev = metrics.get("cpl_stddev", 20)
+    total_games = metrics.get("total_games", 0)
+    best_tc = metrics.get("best_tc_category", "")
+    skill_balance = metrics.get("skill_balance", 20)  # lower = more balanced
+    trend = metrics.get("trend", "stable")
+
+    if persona_id == "the_tactician":
+        # High best-move rate + high error rate = sharp tactical player
+        if best_rate > 40:
+            score += (best_rate - 40) * 2
+        if error_rate > 3:
+            score += (error_rate - 3) * 3
+        if middlegame_cpl > avg_cpl:
+            score += 5  # middlegame complexity
+        if best_rate > 50 and error_rate > 4:
+            score += 15  # quintessential tactician
+
+    elif persona_id == "the_fortress":
+        # Low blunder rate, low CPL, few collapses
+        if blunder_rate < 1.5:
+            score += (1.5 - blunder_rate) * 20
+        if avg_cpl < 30:
+            score += (30 - avg_cpl) * 1.5
+        if error_rate < 2.5:
+            score += (2.5 - error_rate) * 8
+        if collapses == 0 and total_games >= 5:
+            score += 10
+
+    elif persona_id == "the_grinder":
+        # Endgame specialist — endgame CPL much lower than avg
+        if endgame_cpl < avg_cpl * 0.8:
+            score += (avg_cpl - endgame_cpl) * 1.5
+        if endgame_cpl < opening_cpl and endgame_cpl < middlegame_cpl:
+            score += 20
+        if blunder_rate < 2:
+            score += 5
+
+    elif persona_id == "the_speedster":
+        # Best performance in bullet/blitz
+        if best_tc in ("bullet", "blitz"):
+            score += 25
+        # Low time-pressure blunder rate indicates good time management
+        tp_blunder_ratio = metrics.get("time_pressure_blunder_ratio", None)
+        if tp_blunder_ratio is not None and tp_blunder_ratio < 0.1:
+            score += 15
+
+    elif persona_id == "the_scientist":
+        # Very high best-move rate, low CPL
+        if best_rate > 45:
+            score += (best_rate - 45) * 4
+        if avg_cpl < 25:
+            score += (25 - avg_cpl) * 2
+        if error_rate < 2:
+            score += 10
+        if cpl_stddev < 12:
+            score += 10  # consistent precision
+
+    elif persona_id == "the_phoenix":
+        # High comeback wins relative to games
+        if comeback_wins >= 3:
+            score += comeback_wins * 5
+        if comeback_wins >= 5:
+            score += 15  # bonus for truly prolific comebacks
+        comeback_ratio = comeback_wins / max(total_games, 1)
+        if comeback_ratio > 0.1:
+            score += 20
+
+    elif persona_id == "the_assassin":
+        # Giant killer — beats higher-rated players
+        if upsets >= 3:
+            score += upsets * 4
+        if upsets >= 5:
+            score += 15
+        upset_ratio = upsets / max(total_games, 1)
+        if upset_ratio > 0.08:
+            score += 20
+
+    elif persona_id == "the_chameleon":
+        # Balanced skill profile — low variance across axes
+        if skill_balance < 10:
+            score += (10 - skill_balance) * 5
+        if skill_balance < 15:
+            score += 10
+        # No extreme phase difference
+        phase_range = max(opening_cpl, middlegame_cpl, endgame_cpl) - min(opening_cpl, middlegame_cpl, endgame_cpl)
+        if phase_range < 10:
+            score += 15
+        elif phase_range < 15:
+            score += 8
+
+    elif persona_id == "the_berserker":
+        # Very low draw rate, high variance
+        if draw_rate < 8:
+            score += (8 - draw_rate) * 4
+        if cpl_stddev > 25:
+            score += (cpl_stddev - 25) * 2
+        if draw_rate < 5 and total_games >= 5:
+            score += 15
+
+    elif persona_id == "the_professor":
+        # Opening specialist — opening CPL much lower than other phases
+        if opening_cpl < avg_cpl * 0.75:
+            score += (avg_cpl - opening_cpl) * 2
+        if opening_cpl < middlegame_cpl and opening_cpl < endgame_cpl:
+            score += 15
+        if opening_cpl < 15:
+            score += 10  # excellent opening play
+
+    elif persona_id == "the_survivor":
+        # Very low blunder rate, high composure
+        if blunder_rate < 1:
+            score += (1 - blunder_rate) * 30
+        if collapses <= 1 and total_games >= 10:
+            score += 10
+        if cpl_stddev < 15:
+            score += 8
+
+    elif persona_id == "the_adventurer":
+        # Improving trend, relatively new player
+        if trend == "improving":
+            score += 20
+        if total_games < 30:
+            score += 10  # still finding style
+        if total_games < 15:
+            score += 10
+
+    return score
+
+
+@router.get("/chess-identity")
+async def get_chess_identity(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Chess Identity — deterministic persona assignment based on all available metrics.
+    Returns one primary persona with personalized stats and narrative details.
+    """
+    import hashlib, json
+
+    # ── Check minimum data ──
+    analyzed_q = (
+        select(func.count())
+        .select_from(GameAnalysis)
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    analyzed_count = (await db.execute(analyzed_q)).scalar() or 0
+    if analyzed_count < 3:
+        return {"has_data": False, "message": "Analyze at least 3 games to discover your chess identity."}
+
+    # ── Total games ──
+    total_q = select(func.count()).select_from(Game).where(Game.user_id == user.id)
+    total_games = (await db.execute(total_q)).scalar() or 0
+
+    # ── Aggregate stats ──
+    agg_q = (
+        select(
+            func.avg(GameAnalysis.overall_cpl).label("avg_cpl"),
+            func.avg(GameAnalysis.phase_opening_cpl).label("opening_cpl"),
+            func.avg(GameAnalysis.phase_middlegame_cpl).label("middlegame_cpl"),
+            func.avg(GameAnalysis.phase_endgame_cpl).label("endgame_cpl"),
+            func.sum(GameAnalysis.blunders_count).label("total_blunders"),
+            func.sum(GameAnalysis.mistakes_count).label("total_mistakes"),
+            func.sum(GameAnalysis.best_moves_count).label("total_best"),
+            func.sum(Game.moves_count).label("total_moves"),
+        )
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    agg = (await db.execute(agg_q)).one()
+
+    avg_cpl = agg.avg_cpl or 50
+    opening_cpl = agg.opening_cpl or avg_cpl
+    middlegame_cpl = agg.middlegame_cpl or avg_cpl
+    endgame_cpl = agg.endgame_cpl or avg_cpl
+    total_blunders = agg.total_blunders or 0
+    total_mistakes = agg.total_mistakes or 0
+    total_best = agg.total_best or 0
+    total_moves = agg.total_moves or 1
+    player_moves = total_moves / 2
+
+    blunder_rate = total_blunders / player_moves * 100 if player_moves > 0 else 0
+    mistake_rate = total_mistakes / player_moves * 100 if player_moves > 0 else 0
+    error_rate = blunder_rate + mistake_rate
+    best_rate = total_best / player_moves * 100 if player_moves > 0 else 0
+
+    # ── Win/loss/draw ──
+    results_q = (
+        select(Game.result, func.count().label("cnt"))
+        .where(Game.user_id == user.id)
+        .group_by(Game.result)
+    )
+    result_rows = (await db.execute(results_q)).all()
+    result_map = {r.result: r.cnt for r in result_rows}
+    wins = result_map.get("win", 0)
+    losses = result_map.get("loss", 0)
+    draws = result_map.get("draw", 0)
+    win_rate = round(wins / total_games * 100, 1) if total_games else 0
+    draw_rate = round(draws / total_games * 100, 1) if total_games else 0
+
+    # ── CPL stddev for consistency ──
+    cpl_stddev_q = (
+        select(func.stddev(GameAnalysis.overall_cpl))
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id, GameAnalysis.overall_cpl.isnot(None))
+    )
+    cpl_stddev = (await db.execute(cpl_stddev_q)).scalar() or 20
+
+    # ── Comeback wins ──
+    comeback_q = (
+        select(func.count(func.distinct(MoveEvaluation.game_id)))
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            Game.result == "win",
+            MoveEvaluation.eval_after.isnot(None),
+            MoveEvaluation.eval_after < -200,
+        )
+    )
+    comeback_wins = (await db.execute(comeback_q)).scalar() or 0
+
+    # ── Collapses ──
+    collapse_q = (
+        select(func.count(func.distinct(MoveEvaluation.game_id)))
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            Game.result == "loss",
+            MoveEvaluation.eval_after.isnot(None),
+            MoveEvaluation.eval_after > 200,
+        )
+    )
+    collapses = (await db.execute(collapse_q)).scalar() or 0
+
+    # ── Upsets (giant kills) ──
+    upset_q = (
+        select(func.count())
+        .select_from(Game)
+        .where(
+            Game.user_id == user.id,
+            Game.result == "win",
+            Game.opponent_elo.isnot(None),
+            Game.player_elo.isnot(None),
+            Game.opponent_elo > Game.player_elo + 100,
+        )
+    )
+    upsets = (await db.execute(upset_q)).scalar() or 0
+
+    # ── Best time control ──
+    tc_q = (
+        select(
+            Game.time_control,
+            func.count().label("cnt"),
+            func.avg(GameAnalysis.overall_cpl).label("tc_cpl"),
+        )
+        .outerjoin(GameAnalysis, GameAnalysis.game_id == Game.id)
+        .where(Game.user_id == user.id, Game.time_control.isnot(None))
+        .group_by(Game.time_control)
+        .having(func.count() >= 3)
+        .order_by(func.avg(GameAnalysis.overall_cpl).asc())
+    )
+    tc_rows = (await db.execute(tc_q)).all()
+    best_tc_category = ""
+    if tc_rows:
+        best_tc_raw = tc_rows[0].time_control
+        best_tc_category = _classify_time_control(best_tc_raw) or ""
+
+    # ── Time pressure blunder ratio ──
+    tp_q = (
+        select(
+            func.count().label("tp_moves"),
+            func.sum(case((MoveEvaluation.move_quality == "Blunder", 1), else_=0)).label("tp_blunders"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.time_remaining.isnot(None),
+            MoveEvaluation.time_remaining < 30,
+        )
+    )
+    tp_row = (await db.execute(tp_q)).one_or_none()
+    tp_blunder_ratio = None
+    if tp_row and tp_row.tp_moves and tp_row.tp_moves > 0:
+        tp_blunder_ratio = (tp_row.tp_blunders or 0) / tp_row.tp_moves
+
+    # ── Skill balance (stddev of skill profile axes) ──
+    # Recompute the 6 axes inline
+    def cpl_to_score(cpl_val: float) -> int:
+        return max(0, min(100, round(103.17 * 2.718 ** (-0.01 * cpl_val) - 3.17)))
+
+    opening_score = cpl_to_score(opening_cpl)
+    middlegame_score = cpl_to_score(middlegame_cpl)
+    endgame_score = cpl_to_score(endgame_cpl)
+    best_rate_pct = max(0, min(100, round(best_rate * 2)))
+    composure_score = max(0, min(100, round(100 - blunder_rate * 15)))
+    consistency_score = max(0, min(100, round(100 - cpl_stddev * 2)))
+
+    axes_scores = [opening_score, middlegame_score, endgame_score, best_rate_pct, composure_score, consistency_score]
+    axes_mean = sum(axes_scores) / len(axes_scores)
+    skill_balance = (sum((s - axes_mean) ** 2 for s in axes_scores) / len(axes_scores)) ** 0.5
+
+    # ── Trend ──
+    recent_q = (
+        select(GameAnalysis.overall_cpl)
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id, GameAnalysis.overall_cpl.isnot(None))
+        .order_by(Game.date.desc())
+        .limit(10)
+    )
+    recent_rows = (await db.execute(recent_q)).scalars().all()
+    recent_cpl = sum(recent_rows) / len(recent_rows) if recent_rows else avg_cpl
+    if avg_cpl and recent_cpl:
+        diff = recent_cpl - avg_cpl
+        trend = "improving" if diff < -5 else ("declining" if diff > 5 else "stable")
+    else:
+        trend = "stable"
+
+    # ── Phase identification ──
+    phase_cpls = {"opening": opening_cpl, "middlegame": middlegame_cpl, "endgame": endgame_cpl}
+    best_phase = min(phase_cpls, key=phase_cpls.get)
+    worst_phase = max(phase_cpls, key=phase_cpls.get)
+
+    # ── Build metrics dict ──
+    metrics = {
+        "avg_cpl": avg_cpl,
+        "blunder_rate": blunder_rate,
+        "mistake_rate": mistake_rate,
+        "error_rate": error_rate,
+        "best_rate": best_rate,
+        "win_rate": win_rate,
+        "draw_rate": draw_rate,
+        "comeback_wins": comeback_wins,
+        "collapses": collapses,
+        "upsets": upsets,
+        "opening_cpl": opening_cpl,
+        "middlegame_cpl": middlegame_cpl,
+        "endgame_cpl": endgame_cpl,
+        "cpl_stddev": cpl_stddev,
+        "total_games": total_games,
+        "best_tc_category": best_tc_category,
+        "time_pressure_blunder_ratio": tp_blunder_ratio,
+        "skill_balance": skill_balance,
+        "trend": trend,
+    }
+
+    # ── Score all personas ──
+    scored = []
+    for persona in CHESS_PERSONAS:
+        s = _score_persona(persona["id"], metrics)
+        scored.append((s, persona))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    primary = scored[0][1]
+    primary_score = scored[0][0]
+
+    # Secondary persona (if score > 50% of primary and different)
+    secondary = None
+    if len(scored) > 1 and scored[1][0] > primary_score * 0.5 and scored[1][0] > 5:
+        secondary = scored[1][1]
+
+    # ── Build personalized "signature stats" ──
+    signature_stats = []
+
+    # Always include best phase
+    signature_stats.append({
+        "label": "Strongest Phase",
+        "value": best_phase.capitalize(),
+        "detail": f"{round(phase_cpls[best_phase], 1)} avg CPL",
+    })
+
+    # Best-move rate
+    signature_stats.append({
+        "label": "Best Move Rate",
+        "value": f"{round(best_rate, 1)}%",
+        "detail": f"{total_best} engine-best moves",
+    })
+
+    # Blunder rate
+    signature_stats.append({
+        "label": "Blunder Rate",
+        "value": f"{round(blunder_rate, 1)}/100",
+        "detail": f"{total_blunders} total blunders",
+    })
+
+    # Comeback or upset count if notable
+    if comeback_wins >= 2:
+        signature_stats.append({
+            "label": "Comebacks",
+            "value": str(comeback_wins),
+            "detail": "Wins from losing positions",
+        })
+    if upsets >= 2:
+        signature_stats.append({
+            "label": "Giant Kills",
+            "value": str(upsets),
+            "detail": "Wins vs higher-rated opponents",
+        })
+
+    # Win rate
+    signature_stats.append({
+        "label": "Win Rate",
+        "value": f"{win_rate}%",
+        "detail": f"{wins}W / {draws}D / {losses}L",
+    })
+
+    # ── Build "kryptonite" — what beats this player ──
+    kryptonite = None
+    if worst_phase and phase_cpls[worst_phase] > avg_cpl * 1.15:
+        kryptonite = {
+            "area": worst_phase.capitalize(),
+            "message": f"Your {worst_phase} accuracy ({round(phase_cpls[worst_phase], 1)} CPL) is your Achilles heel.",
+        }
+    elif collapses >= 3:
+        kryptonite = {
+            "area": "Converting Advantages",
+            "message": f"You collapsed from winning positions {collapses} times. Won games are slipping away.",
+        }
+    elif blunder_rate > 3:
+        kryptonite = {
+            "area": "Blunders",
+            "message": f"At {round(blunder_rate, 1)} blunders per 100 moves, critical errors are holding you back.",
+        }
+
+    # ── One thing to change ──
+    one_thing = None
+    if blunder_rate > 3:
+        one_thing = "Before every move, ask yourself: 'Can my opponent take something?' Cutting your blunder rate in half would transform your results."
+    elif worst_phase == "endgame" and endgame_cpl > avg_cpl * 1.2:
+        one_thing = "Spend 15 minutes a day on basic endgames. King and pawn, rook endings. Your middlegame is already strong — the endgame is where your points are hiding."
+    elif worst_phase == "opening" and opening_cpl > avg_cpl * 1.2:
+        one_thing = "Pick one opening as White and one as Black. Learn them to move 10. You're losing accuracy in the first 15 moves and playing catch-up."
+    elif collapses >= 3:
+        one_thing = "When you're winning, slow down. Take a breath, check for your opponent's best response. Your biggest gains are in positions you've already earned."
+    elif cpl_stddev > 25:
+        one_thing = "Focus on consistency. Your best games show what you're capable of — make your average game look more like your best game."
+    else:
+        one_thing = "Keep playing and analyzing. Your chess is solid — incremental improvements in your weakest phase will unlock the next level."
+
+    # ── Skill axes for the radar in the identity card ──
+    axes = [
+        {"axis": "Opening", "score": opening_score},
+        {"axis": "Middlegame", "score": middlegame_score},
+        {"axis": "Endgame", "score": endgame_score},
+        {"axis": "Tactics", "score": best_rate_pct},
+        {"axis": "Composure", "score": composure_score},
+        {"axis": "Consistency", "score": consistency_score},
+    ]
+    overall_score = round(sum(a["score"] for a in axes) / len(axes))
+
+    return {
+        "has_data": True,
+        "persona": {
+            "id": primary["id"],
+            "name": primary["name"],
+            "emoji": primary["emoji"],
+            "tagline": primary["tagline"],
+            "gm_comparison": primary["gm_comparison"],
+            "description": primary["description"],
+            "color": primary["color"],
+        },
+        "secondary_persona": {
+            "id": secondary["id"],
+            "name": secondary["name"],
+            "emoji": secondary["emoji"],
+            "tagline": secondary["tagline"],
+        } if secondary else None,
+        "signature_stats": signature_stats[:6],
+        "kryptonite": kryptonite,
+        "one_thing": one_thing,
+        "skill_axes": axes,
+        "overall_score": overall_score,
+        "analyzed_games": analyzed_count,
+        "total_games": total_games,
+    }
+
+
+# ═══════════════════════════════════════════════════════════
 # Weekly Study Plan
 # ═══════════════════════════════════════════════════════════
 

@@ -25,6 +25,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   Activity,
+  Crown,
+  User,
 } from "lucide-react";
 import {
   Radar,
@@ -54,6 +56,7 @@ import {
   type RecurringPattern,
   type SkillProfile,
   type ProgressDataPoint,
+  type ChessIdentity,
 } from "@/lib/api";
 import {
   Card,
@@ -82,6 +85,7 @@ export default function InsightsPage() {
   const [recurringPatterns, setRecurringPatterns] = useState<RecurringPattern[]>([]);
   const [skillProfile, setSkillProfile] = useState<SkillProfile | null>(null);
   const [progressData, setProgressData] = useState<ProgressDataPoint[]>([]);
+  const [identity, setIdentity] = useState<ChessIdentity | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -89,7 +93,7 @@ export default function InsightsPage() {
     async function load() {
       setLoading(true);
       try {
-        const [ov, ph, wk, tm, st, op, pat, sp, prog] = await Promise.all([
+        const [ov, ph, wk, tm, st, op, pat, sp, prog, id] = await Promise.all([
           insightsAPI.overview(),
           insightsAPI.phaseBreakdown(),
           insightsAPI.weaknesses(),
@@ -99,6 +103,7 @@ export default function InsightsPage() {
           patternsAPI.recurring().catch(() => ({ patterns: [] })),
           insightsAPI.skillProfile().catch(() => null),
           insightsAPI.progress(6).catch(() => null),
+          insightsAPI.chessIdentity().catch(() => null),
         ]);
         setOverview(ov);
         setPhases(ph);
@@ -109,6 +114,7 @@ export default function InsightsPage() {
         setRecurringPatterns(pat.patterns ?? []);
         if (sp) setSkillProfile(sp);
         if (prog) setProgressData(prog.data ?? []);
+        if (id) setIdentity(id);
       } catch {
         // API may not be connected yet
       } finally {
@@ -176,6 +182,11 @@ export default function InsightsPage() {
         </Card>
       ) : (
         <>
+          {/* ─── Chess Identity Card ─── */}
+          {identity?.has_data && identity.persona && (
+            <IdentityCard identity={identity} />
+          )}
+
           {/* ─── Above the fold: Accuracy hero + 3 insight cards ─── */}
           <div className="text-center py-4">
             <p className="text-sm text-gray-500 uppercase tracking-wider mb-1">Overall Accuracy</p>
@@ -917,6 +928,185 @@ function CollapsibleInsight({
       {isOpen && (
         <div className="px-5 pb-5">
           {children}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ─── Chess Identity Card ────────────────────────────────
+
+function IdentityCard({ identity }: { identity: ChessIdentity }) {
+  const persona = identity.persona!;
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Card className="overflow-hidden">
+      {/* Hero banner with persona */}
+      <div
+        className="relative p-6 pb-4"
+        style={{
+          background: `linear-gradient(135deg, ${persona.color}15 0%, transparent 60%)`,
+          borderBottom: `1px solid ${persona.color}30`,
+        }}
+      >
+        <div className="flex items-start gap-4">
+          <div
+            className="flex items-center justify-center h-16 w-16 rounded-2xl text-4xl flex-shrink-0"
+            style={{ backgroundColor: `${persona.color}20` }}
+          >
+            {persona.emoji}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <Crown className="h-4 w-4" style={{ color: persona.color }} />
+              <span className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                Your Chess Identity
+              </span>
+            </div>
+            <h2 className="text-2xl font-bold" style={{ color: persona.color }}>
+              {persona.name}
+            </h2>
+            <p className="text-sm text-gray-400 italic mt-0.5">
+              &ldquo;{persona.tagline}&rdquo;
+            </p>
+            <p className="text-xs text-gray-500 mt-1.5 flex items-center gap-1">
+              <User className="h-3 w-3" />
+              Plays like <span className="font-semibold text-gray-300">{persona.gm_comparison}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Secondary persona badge */}
+        {identity.secondary_persona && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs text-gray-500">Also:</span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-2/80 text-xs font-medium">
+              <span>{identity.secondary_persona.emoji}</span>
+              {identity.secondary_persona.name}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Expandable details */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-6 py-3 text-left hover:bg-surface-2/30 transition-colors"
+      >
+        <span className="text-sm font-medium text-gray-400">
+          {expanded ? "Hide details" : "See your full profile"}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 text-gray-500 transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {expanded && (
+        <div className="px-6 pb-6 space-y-5 animate-fade-in">
+          {/* Description */}
+          <p className="text-sm text-gray-300 leading-relaxed">
+            {persona.description}
+          </p>
+
+          {/* Signature Stats */}
+          {identity.signature_stats && identity.signature_stats.length > 0 && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-3">
+                Signature Stats
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {identity.signature_stats.map((stat, i) => (
+                  <div
+                    key={i}
+                    className="p-3 bg-surface-2/50 rounded-lg"
+                  >
+                    <p className="text-xs text-gray-500">{stat.label}</p>
+                    <p className="text-lg font-bold mt-0.5">{stat.value}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{stat.detail}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Kryptonite */}
+          {identity.kryptonite && (
+            <div className="p-4 bg-red-900/10 border border-red-800/20 rounded-lg">
+              <div className="flex items-center gap-2 mb-1.5">
+                <AlertTriangle className="h-4 w-4 text-red-400" />
+                <span className="text-sm font-semibold text-red-400">
+                  Your Kryptonite: {identity.kryptonite.area}
+                </span>
+              </div>
+              <p className="text-sm text-gray-400">{identity.kryptonite.message}</p>
+            </div>
+          )}
+
+          {/* One Thing To Change */}
+          {identity.one_thing && (
+            <div
+              className="p-4 rounded-lg border"
+              style={{
+                backgroundColor: `${persona.color}08`,
+                borderColor: `${persona.color}25`,
+              }}
+            >
+              <div className="flex items-center gap-2 mb-1.5">
+                <Target className="h-4 w-4" style={{ color: persona.color }} />
+                <span className="text-sm font-semibold" style={{ color: persona.color }}>
+                  The One Thing To Change
+                </span>
+              </div>
+              <p className="text-sm text-gray-300 leading-relaxed">
+                {identity.one_thing}
+              </p>
+            </div>
+          )}
+
+          {/* Mini skill radar */}
+          {identity.skill_axes && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Skill Shape
+                </p>
+                <span className="text-sm text-gray-500">
+                  Overall: <span className="font-bold" style={{ color: persona.color }}>{identity.overall_score}</span>/100
+                </span>
+              </div>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart data={identity.skill_axes} cx="50%" cy="50%" outerRadius="70%">
+                    <PolarGrid stroke="#333" />
+                    <PolarAngleAxis
+                      dataKey="axis"
+                      tick={{ fill: "#9ca3af", fontSize: 11, fontWeight: 500 }}
+                    />
+                    <PolarRadiusAxis
+                      angle={30}
+                      domain={[0, 100]}
+                      tick={false}
+                      axisLine={false}
+                    />
+                    <Radar
+                      name="Skill"
+                      dataKey="score"
+                      stroke={persona.color}
+                      fill={persona.color}
+                      fillOpacity={0.15}
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: persona.color }}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-600 text-center">
+            Based on {identity.analyzed_games} analyzed games out of {identity.total_games} total
+          </p>
         </div>
       )}
     </Card>

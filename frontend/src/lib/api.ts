@@ -481,6 +481,50 @@ export interface UserProfile {
   ai_coach_reviews_used: number;
 }
 
+// ─── Chess Identity ─────────────────────────────────────
+
+export interface ChessPersona {
+  id: string;
+  name: string;
+  emoji: string;
+  tagline: string;
+  gm_comparison: string;
+  description: string;
+  color: string;
+}
+
+export interface ChessIdentitySecondary {
+  id: string;
+  name: string;
+  emoji: string;
+  tagline: string;
+}
+
+export interface SignatureStat {
+  label: string;
+  value: string;
+  detail: string;
+}
+
+export interface Kryptonite {
+  area: string;
+  message: string;
+}
+
+export interface ChessIdentity {
+  has_data: boolean;
+  message?: string;
+  persona?: ChessPersona;
+  secondary_persona?: ChessIdentitySecondary | null;
+  signature_stats?: SignatureStat[];
+  kryptonite?: Kryptonite | null;
+  one_thing?: string | null;
+  skill_axes?: SkillAxis[];
+  overall_score?: number;
+  analyzed_games?: number;
+  total_games?: number;
+}
+
 // ─── Games ──────────────────────────────────────────────
 
 export const gamesAPI = {
@@ -736,6 +780,10 @@ export const insightsAPI = {
 
   studyPlan(): Promise<StudyPlanResponse> {
     return fetchAPI<StudyPlanResponse>("/insights/study-plan");
+  },
+
+  chessIdentity(): Promise<ChessIdentity> {
+    return fetchAPI<ChessIdentity>("/insights/chess-identity");
   },
 };
 
