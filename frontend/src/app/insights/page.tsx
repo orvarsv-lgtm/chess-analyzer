@@ -87,6 +87,17 @@ export default function InsightsPage() {
   const [progressData, setProgressData] = useState<ProgressDataPoint[]>([]);
   const [identity, setIdentity] = useState<ChessIdentity | null>(null);
 
+  function weaknessTrainUrl(area: string): string {
+    const a = area.toLowerCase();
+    if (a === "opening") return "/train?phase=opening";
+    if (a === "middlegame") return "/train?phase=middlegame";
+    if (a === "endgame") return "/train?phase=endgame";
+    if (a.includes("converting") || a.includes("advantage")) return "/train?mode=advantage";
+    if (a.includes("blunder")) return "/train?mode=warmup";
+    if (a.includes("time")) return "/train?mode=timed";
+    return "/train?mode=warmup";
+  }
+
   useEffect(() => {
     if (!session) return;
 
@@ -443,7 +454,7 @@ export default function InsightsPage() {
                         </Badge>
                       </div>
                       <p className="text-sm text-gray-400 mt-1">{w.message}</p>
-                      <Link href="/train" className="text-sm text-brand-400 mt-1.5 flex items-center gap-1 hover:gap-2 transition-all">
+                      <Link href={weaknessTrainUrl(w.area)} className="text-sm text-brand-400 mt-1.5 flex items-center gap-1 hover:gap-2 transition-all">
                         <Dumbbell className="h-3 w-3" /> Train this <ArrowRight className="h-3 w-3" />
                       </Link>
                     </div>
