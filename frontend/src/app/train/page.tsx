@@ -100,16 +100,15 @@ function TrainPageInner() {
   const [openingDrillGame] = useState(() => new Chess());
   const [openingDrillFen, setOpeningDrillFen] = useState("start");
   const [openingDrillMoves, setOpeningDrillMoves] = useState<string[]>([]);
-  const [openingDrillState, setOpeningDrillState] = useState<"playing" | "validating" | "correct" | "wrong" | "done">("playing");
+  const [openingDrillState, setOpeningDrillState] = useState<"playing" | "validating" | "wrong">("playing");
   const [openingDrillHint, setOpeningDrillHint] = useState<string>("");
-  const [openingDrillScore, setOpeningDrillScore] = useState({ correct: 0, total: 0 });
+  const [openingDrillScore, setOpeningDrillScore] = useState({ correct: 0, total: 0, lines: 0 });
+  const [openingDrillBestMove, setOpeningDrillBestMove] = useState<string>("");
   const [openingDrillCurrentPath, setOpeningDrillCurrentPath] = useState<OpeningTreeNode[]>([]);
   const [openingDrillExplanation, setOpeningDrillExplanation] = useState<string>("");
   const [openingDrillExplanationLoading, setOpeningDrillExplanationLoading] = useState(false);
   const [openingDrillSelectedSquare, setOpeningDrillSelectedSquare] = useState<Square | null>(null);
   const [openingDrillLegalMoves, setOpeningDrillLegalMoves] = useState<Square[]>([]);
-  const [openingDrillWrongFen, setOpeningDrillWrongFen] = useState<string>("");
-  const [openingDrillWrongMoveIdx, setOpeningDrillWrongMoveIdx] = useState<number>(0);
 
   // ─── Puzzle queue state ──────────────────────────────
   const [queue, setQueue] = useState<PuzzleItem[]>([]);
@@ -480,15 +479,14 @@ function TrainPageInner() {
     setOpeningDrillColor(color);
     setView("opening-drill");
     setOpeningDrillState("playing");
-    setOpeningDrillScore({ correct: 0, total: 0 });
+    setOpeningDrillScore({ correct: 0, total: 0, lines: 0 });
     setOpeningDrillMoves([]);
     setOpeningDrillHint("");
+    setOpeningDrillBestMove("");
     setOpeningDrillExplanation("");
     setOpeningDrillExplanationLoading(false);
     setOpeningDrillSelectedSquare(null);
     setOpeningDrillLegalMoves([]);
-    setOpeningDrillWrongFen("");
-    setOpeningDrillWrongMoveIdx(0);
     openingDrillGame.reset();
     setOpeningDrillFen(openingDrillGame.fen());
     setOpeningDrillCurrentPath([]);
@@ -513,8 +511,46 @@ function TrainPageInner() {
     }
   }
 
+  // Helper: auto-reset to a new line after a short delay
+  function openingDrillAutoReset() {
+    setOpeningDrillScore((s) => ({ ...s, lines: s.lines + 1 }));
+    setTimeout(() => {
+      openingDrillRetry();
+    }, 1200);
+  }
+
+  // Helper: accept a move, play opponent reply, then continue or auto-reset
+  function openingDrillAcceptAndContinue(moveSan: string, matchingNode: OpeningTreeNode | undefined) {
+    setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+    setOpeningDrillHint("");
+    setOpeningDrillExplanation("");
+    setOpeningDrillBestMove("");
+    playCorrect();
+
+    if (matchingNode && matchingNode.children.length > 0) {
+      const reply = pickWeightedRandom(matchingNode.children);
+      setTimeout(() => {
+        openingDrillGame.move(reply.san);
+        setOpeningDrillFen(openingDrillGame.fen());
+        setOpeningDrillMoves((prev) => [...prev, reply.san]);
+        playMove();
+
+        if (reply.children.length === 0) {
+          // End of tree line — auto-reset to a new line
+          openingDrillAutoReset();
+        } else {
+          setOpeningDrillCurrentPath(reply.children);
+          setOpeningDrillState("playing");
+        }
+      }, 500);
+    } else {
+      // No more tree data — auto-reset to a new line
+      openingDrillAutoReset();
+    }
+  }
+
   function openingDrillTryMove(sourceSquare: Square, targetSquare: Square): boolean {
-    if (openingDrillState !== "playing") return false;
+    if (openingDrillState === "validating") return false;
 
     const moveCopy = new Chess(openingDrillGame.fen());
     const move = moveCopy.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
@@ -527,6 +563,24 @@ function TrainPageInner() {
     const fenBeforeMove = openingDrillGame.fen();
     const moveSan = move.san;
 
+    // If in "wrong" state, the user is retrying — only accept the best move
+    if (openingDrillState === "wrong") {
+      if (openingDrillBestMove && moveSan === openingDrillBestMove) {
+        // They found the right move!
+        openingDrillGame.move(moveSan);
+        setOpeningDrillFen(openingDrillGame.fen());
+        setOpeningDrillMoves((prev) => [...prev, moveSan]);
+        // Find matching tree node to continue
+        const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
+        openingDrillAcceptAndContinue(moveSan, matchingNode);
+        return true;
+      } else {
+        // Still wrong — shake or ignore
+        playIncorrect();
+        return true;
+      }
+    }
+
     // ── 1. Check if the move exists in the opening repertoire tree ──
     const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
 
@@ -534,35 +588,11 @@ function TrainPageInner() {
     const treeViable = matchingNode && (matchingNode.average_cpl == null || matchingNode.average_cpl <= 50);
 
     if (matchingNode && treeViable) {
-      // Move is in the repertoire and viable — accept it immediately (no Stockfish needed)
+      // Move is in the repertoire and viable — accept it immediately
       openingDrillGame.move(moveSan);
       setOpeningDrillFen(openingDrillGame.fen());
       setOpeningDrillMoves((prev) => [...prev, moveSan]);
-      setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
-      setOpeningDrillHint("");
-      setOpeningDrillExplanation("");
-      playCorrect();
-
-      // Opponent replies from the tree
-      if (matchingNode.children.length > 0) {
-        const reply = pickWeightedRandom(matchingNode.children);
-        setTimeout(() => {
-          openingDrillGame.move(reply.san);
-          setOpeningDrillFen(openingDrillGame.fen());
-          setOpeningDrillMoves((prev) => [...prev, reply.san]);
-          playMove();
-
-          if (reply.children.length === 0) {
-            setOpeningDrillState("done");
-          } else {
-            setOpeningDrillCurrentPath(reply.children);
-            setOpeningDrillState("playing");
-          }
-        }, 500);
-      } else {
-        // End of tree line
-        setOpeningDrillState("done");
-      }
+      openingDrillAcceptAndContinue(moveSan, matchingNode);
       return true;
     }
 
@@ -579,30 +609,7 @@ function TrainPageInner() {
       .then((result) => {
         if (result.viable) {
           // Move is good (≤50 cp loss) — accept it
-          setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
-          setOpeningDrillHint("");
-          setOpeningDrillExplanation("");
-          playCorrect();
-
-          // If the move exists in the tree, continue down the tree
-          if (matchingNode && matchingNode.children.length > 0) {
-            const reply = pickWeightedRandom(matchingNode.children);
-            setTimeout(() => {
-              openingDrillGame.move(reply.san);
-              setOpeningDrillFen(openingDrillGame.fen());
-              setOpeningDrillMoves((prev) => [...prev, reply.san]);
-              playMove();
-              if (reply.children.length === 0) {
-                setOpeningDrillState("done");
-              } else {
-                setOpeningDrillCurrentPath(reply.children);
-                setOpeningDrillState("playing");
-              }
-            }, 500);
-          } else {
-            // Not in tree or no children — line ends
-            setOpeningDrillState("done");
-          }
+          openingDrillAcceptAndContinue(moveSan, matchingNode);
         } else {
           // Move loses too much (>50 cp) — wrong
           // Undo the optimistic move
@@ -613,11 +620,9 @@ function TrainPageInner() {
           setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
           playIncorrect();
 
+          setOpeningDrillBestMove(result.best_move_san);
           setOpeningDrillHint(`Best was ${result.best_move_san} (your move lost ${result.cp_loss} cp)`);
           setOpeningDrillState("wrong");
-
-          setOpeningDrillWrongFen(fenBeforeMove);
-          setOpeningDrillWrongMoveIdx(openingDrillMoves.length);
 
           // Fetch AI explanation
           setOpeningDrillExplanationLoading(true);
@@ -642,9 +647,7 @@ function TrainPageInner() {
       })
       .catch(() => {
         // Stockfish unavailable — accept any legal move
-        setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
-        playCorrect();
-        setOpeningDrillState("done");
+        openingDrillAcceptAndContinue(moveSan, matchingNode);
       });
 
     return true;
@@ -656,6 +659,7 @@ function TrainPageInner() {
     setOpeningDrillMoves([]);
     setOpeningDrillState("playing");
     setOpeningDrillHint("");
+    setOpeningDrillBestMove("");
     setOpeningDrillExplanation("");
     setOpeningDrillExplanationLoading(false);
     setOpeningDrillSelectedSquare(null);
@@ -672,38 +676,9 @@ function TrainPageInner() {
     }
   }
 
-  function openingDrillRetryFromHere() {
-    // Replay moves up to the point of the mistake to restore the position
-    openingDrillGame.reset();
-    const movesToReplay = openingDrillMoves.slice(0, openingDrillWrongMoveIdx);
-    for (const m of movesToReplay) {
-      openingDrillGame.move(m);
-    }
-    setOpeningDrillFen(openingDrillGame.fen());
-    setOpeningDrillMoves(movesToReplay);
-    setOpeningDrillState("playing");
-    setOpeningDrillHint("");
-    setOpeningDrillExplanation("");
-    setOpeningDrillExplanationLoading(false);
-    setOpeningDrillSelectedSquare(null);
-    setOpeningDrillLegalMoves([]);
-
-    // Walk the tree to find the current path at this position
-    let currentNodes = openingTree;
-    for (const m of movesToReplay) {
-      const node = currentNodes.find((n) => n.san === m);
-      if (node) {
-        currentNodes = node.children;
-      } else {
-        break;
-      }
-    }
-    setOpeningDrillCurrentPath(currentNodes);
-  }
-
   // Opening drill click-to-move handlers
   function onDrillPieceClick(_piece: string, square: Square) {
-    if (openingDrillState !== "playing") return;
+    if (openingDrillState !== "playing" && openingDrillState !== "wrong") return;
 
 
     const clicked = openingDrillGame.get(square);
@@ -733,7 +708,7 @@ function TrainPageInner() {
   }
 
   function onDrillSquareClick(square: Square, piece?: string) {
-    if (openingDrillState !== "playing") return;
+    if (openingDrillState !== "playing" && openingDrillState !== "wrong") return;
 
 
     const clicked = openingDrillGame.get(square);
@@ -1898,6 +1873,7 @@ function TrainPageInner() {
             {accuracy !== null && (
               <Badge variant="default">
                 {openingDrillScore.correct}/{openingDrillScore.total} correct
+                {openingDrillScore.lines > 0 && ` · ${openingDrillScore.lines} lines`}
               </Badge>
             )}
             <Button variant="ghost" size="sm" onClick={() => setView("hub")}>
@@ -1937,70 +1913,28 @@ function TrainPageInner() {
                   customLightSquareStyle={{ backgroundColor: "#edeed1" }}
                 />
 
-                {/* Feedback overlay */}
-                <AnimatePresence>
-                  {openingDrillState === "wrong" && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg"
-                    >
-                      <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-red-900/90 max-w-[90%]">
-                        <XCircle className="h-10 w-10 text-red-400" />
-                        <p className="text-lg font-bold text-red-300">Inaccurate Move</p>
-                        {openingDrillHint && (
-                          <p className="text-sm text-red-400/80 font-mono">{openingDrillHint}</p>
-                        )}
-                        {openingDrillExplanationLoading && (
-                          <div className="flex items-center gap-2 text-sm text-red-400/60">
-                            <Spinner className="h-4 w-4" /> Getting explanation...
-                          </div>
-                        )}
-                        {openingDrillExplanation && (
-                          <p className="text-sm text-gray-300 bg-black/30 rounded-lg px-4 py-3 leading-relaxed max-w-[400px] text-center">
-                            {openingDrillExplanation}
-                          </p>
-                        )}
-                        <div className="flex gap-2 mt-2">
-                          <Button variant="secondary" size="sm" onClick={openingDrillRetryFromHere}>
-                            <RotateCcw className="h-4 w-4" /> Try Again
-                          </Button>
-                          <Button variant="secondary" size="sm" onClick={openingDrillRetry}>
-                            <RotateCcw className="h-4 w-4" /> Start Over
-                          </Button>
-                          <Button size="sm" onClick={() => setView("hub")}>
-                            Back to Hub
-                          </Button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                  {openingDrillState === "done" && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg"
-                    >
-                      <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-green-900/90">
-                        <CheckCircle className="h-12 w-12 text-green-400" />
-                        <p className="text-lg font-bold text-green-300">Line Complete!</p>
-                        <p className="text-sm text-green-400/80">
-                          {openingDrillScore.correct}/{openingDrillScore.total} moves correct
-                        </p>
-                        <div className="flex gap-2 mt-2">
-                          <Button variant="secondary" size="sm" onClick={openingDrillRetry}>
-                            <RotateCcw className="h-4 w-4" /> Again
-                          </Button>
-                          <Button size="sm" onClick={() => startOpeningDrill(openingDrillColor === "white" ? "black" : "white")}>
-                            Try {openingDrillColor === "white" ? "Black" : "White"}
-                          </Button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {/* Wrong-move hint: non-blocking, shows below board area */}
+                {openingDrillState === "wrong" && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute bottom-0 left-0 right-0 bg-red-900/95 backdrop-blur-sm rounded-b-lg px-4 py-3 space-y-1"
+                  >
+                    <p className="text-sm font-semibold text-red-300 flex items-center gap-2">
+                      <XCircle className="h-4 w-4" /> Find the best move: play {openingDrillBestMove}
+                    </p>
+                    {openingDrillExplanationLoading && (
+                      <p className="text-xs text-red-400/60 flex items-center gap-1">
+                        <Spinner className="h-3 w-3" /> Loading explanation...
+                      </p>
+                    )}
+                    {openingDrillExplanation && (
+                      <p className="text-xs text-gray-300 leading-relaxed">
+                        {openingDrillExplanation}
+                      </p>
+                    )}
+                  </motion.div>
+                )}
               </div>
 
               {/* Move list */}
