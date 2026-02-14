@@ -1944,79 +1944,285 @@ async def get_chess_identity(
             "commentary": commentary,
         })
 
-    # ── Growth path — what leveling up looks like for this persona ──
+    # ── Growth path — hyper-specific, data-driven advice ──
+    # First, gather detailed blunder data for specificity
     growth_steps = []
 
-    # Always address the worst phase
+    # ── Query: which piece do you blunder most? ──
+    piece_blunder_q = (
+        select(
+            MoveEvaluation.piece,
+            func.count().label("cnt"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.move_quality == "Blunder",
+        )
+        .group_by(MoveEvaluation.piece)
+        .order_by(func.count().desc())
+    )
+    piece_blunder_rows = (await db.execute(piece_blunder_q)).all()
+    piece_names = {"K": "King", "Q": "Queen", "R": "Rook", "B": "Bishop", "N": "Knight", "P": "Pawn"}
+    top_blunder_piece = None
+    top_blunder_piece_count = 0
+    top_blunder_piece_pct = 0
+    if piece_blunder_rows and total_blunders > 0:
+        top_blunder_piece = piece_blunder_rows[0].piece
+        top_blunder_piece_count = piece_blunder_rows[0].cnt
+        top_blunder_piece_pct = round(top_blunder_piece_count / total_blunders * 100)
+
+    # ── Query: which phase has the most blunders? ──
+    phase_blunder_q = (
+        select(
+            MoveEvaluation.phase,
+            func.count().label("cnt"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.move_quality == "Blunder",
+            MoveEvaluation.phase.isnot(None),
+        )
+        .group_by(MoveEvaluation.phase)
+        .order_by(func.count().desc())
+    )
+    phase_blunder_rows = (await db.execute(phase_blunder_q)).all()
+    top_blunder_phase = None
+    top_blunder_phase_count = 0
+    if phase_blunder_rows and total_blunders > 0:
+        top_blunder_phase = phase_blunder_rows[0].phase
+        top_blunder_phase_count = phase_blunder_rows[0].cnt
+
+    # ── Query: top blunder subtypes with full distribution ──
+    subtype_q = (
+        select(
+            MoveEvaluation.blunder_subtype,
+            func.count().label("cnt"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.move_quality == "Blunder",
+            MoveEvaluation.blunder_subtype.isnot(None),
+        )
+        .group_by(MoveEvaluation.blunder_subtype)
+        .order_by(func.count().desc())
+    )
+    subtype_rows = (await db.execute(subtype_q)).all()
+    subtypes_with_count = total_blunders if total_blunders > 0 else 1
+    top_subtype = None
+    top_subtype_count = 0
+    top_subtype_pct = 0
+    if subtype_rows:
+        top_subtype = subtype_rows[0].blunder_subtype
+        top_subtype_count = subtype_rows[0].cnt
+        top_subtype_pct = round(top_subtype_count / subtypes_with_count * 100)
+
+    # ── Query: average cp_loss of blunders (how costly are they?) ──
+    blunder_severity_q = (
+        select(
+            func.avg(MoveEvaluation.cp_loss).label("avg_loss"),
+            func.max(MoveEvaluation.cp_loss).label("max_loss"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.move_quality == "Blunder",
+            MoveEvaluation.cp_loss.isnot(None),
+        )
+    )
+    severity_row = (await db.execute(blunder_severity_q)).one_or_none()
+    avg_blunder_loss = severity_row.avg_loss if severity_row and severity_row.avg_loss else 0
+    max_blunder_loss = severity_row.max_loss if severity_row and severity_row.max_loss else 0
+
+    # ── Query: blunders under time pressure vs with time ──
+    tp_blunder_q2 = (
+        select(
+            func.sum(case((MoveEvaluation.time_remaining < 30, 1), else_=0)).label("under_pressure"),
+            func.sum(case((MoveEvaluation.time_remaining >= 30, 1), else_=0)).label("with_time"),
+            func.count().label("total_with_clock"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(
+            Game.user_id == user.id,
+            MoveEvaluation.move_quality == "Blunder",
+            MoveEvaluation.time_remaining.isnot(None),
+        )
+    )
+    tp2_row = (await db.execute(tp_blunder_q2)).one_or_none()
+    tp_blunders = (tp2_row.under_pressure or 0) if tp2_row else 0
+    calm_blunders = (tp2_row.with_time or 0) if tp2_row else 0
+    tp_total = (tp2_row.total_with_clock or 0) if tp2_row else 0
+    tp_pct = round(tp_blunders / tp_total * 100) if tp_total > 0 else 0
+
+    # ── Now build the growth steps with real data ──
+
+    # 1. Worst phase with specific guidance
     if worst_phase == "endgame" and endgame_cpl > avg_cpl * 1.15:
-        growth_steps.append({
-            "priority": "high",
-            "title": "Shore Up Your Endgame",
-            "description": f"Your {worst_phase} CPL of {round(endgame_cpl, 1)} is {round(endgame_cpl - avg_cpl, 1)} points worse than your average. Study basic endgame patterns: King and Pawn, Rook endings, and opposition. Even modest improvement here will directly convert to rating points.",
-        })
+        eg_blunders = next((r.cnt for r in phase_blunder_rows if r.phase and r.phase.lower() == "endgame"), 0)
+        eg_piece = ""
+        # Get the most-blundered piece in endgames specifically
+        eg_piece_q = (
+            select(MoveEvaluation.piece, func.count().label("cnt"))
+            .join(Game, Game.id == MoveEvaluation.game_id)
+            .where(
+                Game.user_id == user.id,
+                MoveEvaluation.move_quality == "Blunder",
+                MoveEvaluation.phase.ilike("endgame"),
+            )
+            .group_by(MoveEvaluation.piece)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+        eg_piece_row = (await db.execute(eg_piece_q)).first()
+        if eg_piece_row:
+            eg_piece = piece_names.get(eg_piece_row.piece, eg_piece_row.piece)
+        desc = f"Your endgame CPL of {round(endgame_cpl, 1)} is {round(endgame_cpl - avg_cpl, 1)} points worse than your average."
+        if eg_blunders > 0:
+            desc += f" You've made {eg_blunders} blunders in the endgame"
+            if eg_piece:
+                desc += f", most often with your {eg_piece}"
+            desc += "."
+        if endgame_cpl > 80:
+            desc += " Focus on King and Pawn endings first — know when to push vs when to blockade. Then Rook endings: the Lucena and Philidor positions will save you 2-3 games a month."
+        else:
+            desc += " You're not far off — study Rook endgame technique and practice converting 1-pawn advantages. That's where your points are hiding."
+        growth_steps.append({"priority": "high", "title": "Shore Up Your Endgame", "description": desc})
+
     elif worst_phase == "opening" and opening_cpl > avg_cpl * 1.15:
-        growth_steps.append({
-            "priority": "high",
-            "title": "Deepen Your Opening Preparation",
-            "description": f"Your opening CPL of {round(opening_cpl, 1)} means you're starting games at a disadvantage. Pick 1-2 openings per color and learn them to move 12-15. You'll enter middlegames with confidence instead of scrambling.",
-        })
+        op_blunders = next((r.cnt for r in phase_blunder_rows if r.phase and r.phase.lower() == "opening"), 0)
+        desc = f"Your opening CPL of {round(opening_cpl, 1)} means you're starting at a disadvantage before the real fight begins."
+        if op_blunders > 0:
+            desc += f" You've blundered {op_blunders} times in the first 15 moves — these are the easiest errors to eliminate because openings are memorizable."
+        desc += " Pick ONE opening as White (e.g., London System or Italian) and ONE as Black (e.g., Caro-Kann or Scandinavian). Learn them to move 12. Don't try to learn 5 openings — own 2."
+        growth_steps.append({"priority": "high", "title": "Deepen Your Opening Preparation", "description": desc})
+
     elif worst_phase == "middlegame" and middlegame_cpl > avg_cpl * 1.15:
-        growth_steps.append({
-            "priority": "high",
-            "title": "Sharpen Your Middlegame Calculation",
-            "description": f"Your middlegame CPL of {round(middlegame_cpl, 1)} suggests you struggle with complex positions. Daily tactical training (15-20 min) will build the pattern recognition you need.",
-        })
+        mg_blunders = next((r.cnt for r in phase_blunder_rows if r.phase and r.phase.lower() == "middlegame"), 0)
+        desc = f"Your middlegame CPL of {round(middlegame_cpl, 1)} is where your accuracy drops most."
+        if mg_blunders > 0 and top_blunder_piece:
+            desc += f" {mg_blunders} of your {total_blunders} blunders happen in the middlegame, often involving your {piece_names.get(top_blunder_piece, top_blunder_piece)}."
+        desc += " Train tactics for 15 min/day on Lichess puzzles — focus on the themes you fail most (forks, pins, discovered attacks). The middlegame is pattern recognition, and patterns are trainable."
+        growth_steps.append({"priority": "high", "title": "Sharpen Your Middlegame Calculation", "description": desc})
 
-    # Blunder-specific advice
-    if blunder_rate > 2.5:
-        growth_steps.append({
-            "priority": "high",
-            "title": "Reduce Critical Errors",
-            "description": f"At {round(blunder_rate, 1)} blunders per 100 moves ({total_blunders} total), you're handing your opponents free points. Before each move, do a 3-second safety check: can anything be taken? Is my king safe? This single habit could cut your blunder rate in half.",
-        })
+    # 2. Blunder-specific advice — now with WHAT you're blundering
+    if blunder_rate > 2.5 and total_blunders >= 5:
+        desc = f"You've made {total_blunders} blunders across {analyzed_count} games ({round(blunder_rate, 1)} per 100 moves)."
 
-    # Conversion advice
+        # What kind of blunders?
+        subtype_detail = ""
+        if top_subtype and top_subtype_pct > 30:
+            subtype_labels = {
+                "hanging_piece": "leaving pieces undefended",
+                "missed_tactic": "missing tactical shots",
+                "king_safety": "king safety oversights",
+                "endgame_technique": "endgame technique errors",
+            }
+            subtype_label = subtype_labels.get(top_subtype, top_subtype.replace("_", " "))
+            subtype_detail = f" {top_subtype_pct}% of your blunders are {subtype_label}"
+            if top_subtype == "hanging_piece":
+                subtype_detail += " — before every move, scan the board: is anything undefended? Can my opponent capture something? This 3-second habit eliminates the most common blunder type."
+            elif top_subtype == "missed_tactic":
+                subtype_detail += " — you're missing forcing moves your opponent has. Train 'find the threat' puzzles: before your move, ask 'what does my opponent WANT to play?'"
+            elif top_subtype == "king_safety":
+                subtype_detail += " — your king is getting caught. Before committing to an attack, check: is MY king safe first? Castle early, don't push pawns in front of your king."
+            elif top_subtype == "endgame_technique":
+                subtype_detail += " — you know enough to reach endgames but not enough to play them. Study the 5 essential positions: Lucena, Philidor, opposition, king and pawn, and queen vs pawn."
+            else:
+                subtype_detail += "."
+            desc += subtype_detail
+
+        # Which piece?
+        elif top_blunder_piece and top_blunder_piece_pct > 25:
+            pname = piece_names.get(top_blunder_piece, top_blunder_piece)
+            desc += f" {top_blunder_piece_pct}% involve your {pname}."
+            if top_blunder_piece in ("Q", "R"):
+                desc += f" Your heavy pieces are your most expensive mistakes — before moving your {pname}, ask: is this square actually safe? Can I be forked? Is there a discovered attack?"
+            elif top_blunder_piece in ("N", "B"):
+                desc += f" You're losing minor pieces to tactical oversights. Check for forks and pins before committing your {pname} to a square."
+            else:
+                desc += f" Pay special attention to {pname} safety in complex positions."
+
+        # Time pressure angle?
+        if tp_pct > 50 and tp_total >= 5:
+            desc += f" {tp_pct}% of your blunders happen with less than 30 seconds on the clock — time management is a factor. Leave at least 1 minute for the last 10 moves."
+        elif tp_pct < 30 and tp_total >= 5:
+            desc += f" Only {tp_pct}% of your blunders are under time pressure — these are calculation errors, not speed errors. Slow down even when you have time."
+
+        # Severity
+        if avg_blunder_loss > 400:
+            desc += f" Your average blunder costs {round(avg_blunder_loss)} centipawns (≈{round(avg_blunder_loss / 100, 1)} pawns) — these aren't small inaccuracies, they're game-ending mistakes. Focus on eliminating the catastrophic ones first."
+
+        growth_steps.append({"priority": "high", "title": f"Stop Blundering Your {piece_names.get(top_blunder_piece, 'Pieces')}" if top_blunder_piece and top_blunder_piece_pct > 30 else "Cut Your Blunder Rate", "description": desc})
+
+    # 3. Conversion / collapse advice — with specifics
     if collapses >= 3:
-        growth_steps.append({
-            "priority": "medium",
-            "title": "Convert Won Games",
-            "description": f"You've collapsed from winning positions {collapses} times. When you're ahead, slow down — spend extra time calculating your opponent's best reply. Practice winning endgames to build the confidence to close out games.",
-        })
+        collapse_pct = round(collapses / max(losses, 1) * 100)
+        desc = f"You've collapsed from winning positions {collapses} times — that's {collapse_pct}% of your losses."
+        if worst_phase == "endgame" or endgame_cpl > middlegame_cpl * 1.2:
+            desc += f" Most collapses happen when the position simplifies and your endgame accuracy ({round(endgame_cpl, 1)} CPL) can't sustain the advantage. When you're winning and pieces are trading off, this is your danger zone."
+            desc += " Practice converting a +2 advantage in Rook endgames until it's automatic."
+        else:
+            desc += " When you're ahead, switch gears: stop looking for the best move and start looking for the SAFEST good move. Trade pieces, simplify, and remove your opponent's counterplay."
+        growth_steps.append({"priority": "medium", "title": "Close Out Won Games", "description": desc})
 
-    # Consistency advice
+    # 4. Consistency — with specific data, not vague
     if cpl_stddev > 25:
-        growth_steps.append({
-            "priority": "medium",
-            "title": "Play More Consistently",
-            "description": f"Your CPL swings (±{round(cpl_stddev, 1)}) suggest your form varies wildly. Your best games are already strong — the goal is making your average game look like your good games. Pre-game routines and avoiding tilt will help.",
-        })
+        # Find games with wildly different CPLs to illustrate the spread
+        desc = f"Your game-to-game accuracy swings by ±{round(cpl_stddev, 1)} CPL."
+        if tp_pct > 50 and tp_total >= 5:
+            desc += f" {tp_pct}% of your blunders happen under time pressure — your inconsistency is partly a clock management problem. Try allocating your time more evenly: don't spend 5 minutes on move 10 and then have 30 seconds for move 35."
+        elif blunder_rate > 3:
+            desc += f" With {round(blunder_rate, 1)} blunders per 100 moves, individual catastrophic errors are creating the swings. The fix isn't 'try harder' — it's building a pre-move checklist: (1) what does my opponent threaten? (2) is my piece safe on that square? (3) does this create any tactics?"
+        else:
+            desc += " Your best games are already strong — the gap is between your focused play and your unfocused play. Identifying WHEN you lose focus (after a mistake? in equal positions? when ahead?) is the key."
+        growth_steps.append({"priority": "medium", "title": "Close the Gap Between Your Best and Worst", "description": desc})
 
-    # Persona-specific growth
+    # 5. Persona-specific growth — with specific data
     if pid == "the_phoenix":
-        growth_steps.append({
-            "priority": "medium",
-            "title": "Make Comebacks Unnecessary",
-            "description": "Your comeback ability is rare and valuable — but the best version of you doesn't need it as often. Reducing early errors means you'll spend more games pressing your advantage instead of fighting from behind.",
-        })
+        comeback_pct = round(comeback_wins / max(total_games, 1) * 100, 1)
+        desc = f"You've fought back from losing positions {comeback_wins} times ({comeback_pct}% of games) — that's a genuine skill."
+        if blunder_rate > 2:
+            desc += f" But your blunder rate of {round(blunder_rate, 1)}/100 means you're creating the losing positions you then have to escape. Cut your blunders by even 30% and you'll spend more games pressing advantages instead of manufacturing comebacks."
+        else:
+            desc += " The next level is needing comebacks less often — not because you can't do them, but because you're ahead more from the start."
+        growth_steps.append({"priority": "medium", "title": "Win Without the Drama", "description": desc})
     elif pid == "the_berserker":
-        growth_steps.append({
-            "priority": "medium",
-            "title": "Add a Drawing Gear",
-            "description": "Your aggressive instinct is a weapon, but learning to hold equal positions and force draws in bad ones will add points. A berserker who can also play defense is terrifying.",
-        })
+        desc = f"Your {draw_rate}% draw rate shows you fight every game to the death — that's part of your identity."
+        if collapses >= 2:
+            desc += f" But {collapses} collapses from winning positions means your aggression is sometimes self-destructive. Learn to recognize when the position calls for consolidation: trade a pair of pieces, secure your king, THEN attack."
+        else:
+            desc += " To level up, learn to switch gears. Some positions demand patience — recognizing those moments and playing quietly for 3-4 moves before striking is what separates berserkers from titled players."
+        growth_steps.append({"priority": "medium", "title": "Channel Your Aggression", "description": desc})
     elif pid == "the_chameleon":
-        growth_steps.append({
-            "priority": "medium",
-            "title": "Develop a Weapon",
-            "description": "Your balance is your strength, but elite players combine balance with one devastating skill. Pick the phase or style that excites you most and push it to the next level.",
-        })
+        phase_range_val = max(opening_cpl, middlegame_cpl, endgame_cpl) - min(opening_cpl, middlegame_cpl, endgame_cpl)
+        desc = f"Your phase CPL range is only {round(phase_range_val, 1)} — you're equally capable everywhere. That's rare."
+        if best_rate < 35:
+            desc += f" But your best-move rate of {round(best_rate, 1)}% suggests your 'equal everywhere' is 'average everywhere.' Pick the phase you enjoy most and push it to elite level. A balanced player with one weapon becomes unpredictable."
+        else:
+            desc += " Your edge is that opponents can't target a weak phase. Double down on this by studying universal principles — piece activity, pawn structure, prophylaxis — that improve ALL phases at once."
+        growth_steps.append({"priority": "medium", "title": "Add a Specialty to Your Versatility", "description": desc})
 
-    # Always end with a positive forward-looking step
-    growth_steps.append({
-        "priority": "low",
-        "title": "Keep Analyzing Every Game",
-        "description": f"You've analyzed {analyzed_count} out of {total_games} games. Every analysis adds data to sharpen your identity and reveals patterns invisible to the naked eye. Make post-game analysis a habit — it's the single most effective way to improve.",
-    })
+    # 6. Final step — specific, not generic
+    if analyzed_count < total_games * 0.5 and total_games >= 10:
+        growth_steps.append({
+            "priority": "low",
+            "title": "Analyze More of Your Games",
+            "description": f"You've only analyzed {analyzed_count} of your {total_games} games ({round(analyzed_count / total_games * 100)}%). Every unanalyzed game is a missed lesson. Analyze at least your losses — that's where the biggest improvements hide.",
+        })
+    elif best_rate > 40 and blunder_rate < 2:
+        growth_steps.append({
+            "priority": "low",
+            "title": "Push Into Harder Territory",
+            "description": f"Your fundamentals are solid — {round(best_rate, 1)}% best moves, {round(blunder_rate, 1)} blunders/100. You're past the 'stop making mistakes' phase. Study master games in your openings, learn positional concepts (weak squares, minority attacks, piece coordination), and start playing longer time controls to deepen your calculation.",
+        })
+    else:
+        growth_steps.append({
+            "priority": "low",
+            "title": "Build a Post-Game Routine",
+            "description": f"After every game: (1) find your worst move and understand WHY it was bad, (2) find one move where you missed a tactic, (3) check if your opening was sound. 5 minutes of targeted review beats 30 minutes of passive analysis. You have {analyzed_count} games analyzed — make each one count.",
+        })
 
     # ── Skill axes for the radar in the identity card ──
     axes = [
