@@ -94,7 +94,7 @@ function TrainPageInner() {
   const [intuitionPreviewIdx, setIntuitionPreviewIdx] = useState(0);
 
   // ─── Opening Drill ──────────────────────────────────
-  type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; best_move_san?: string | null; eval_cp?: number | null; children: OpeningTreeNode[] };
+  type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; best_move_san?: string | null; eval_cp?: number | null; average_cpl?: number | null; children: OpeningTreeNode[] };
   const [openingTree, setOpeningTree] = useState<OpeningTreeNode[]>([]);
   const [openingDrillColor, setOpeningDrillColor] = useState<"white" | "black">("white");
   const [openingDrillGame] = useState(() => new Chess());
@@ -530,8 +530,11 @@ function TrainPageInner() {
     // ── 1. Check if the move exists in the opening repertoire tree ──
     const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
 
-    if (matchingNode) {
-      // Move is in the repertoire — accept it immediately (no Stockfish needed)
+    // Accept from tree only if average CPL is known and ≤50 (or unknown = trust it)
+    const treeViable = matchingNode && (matchingNode.average_cpl == null || matchingNode.average_cpl <= 50);
+
+    if (matchingNode && treeViable) {
+      // Move is in the repertoire and viable — accept it immediately (no Stockfish needed)
       openingDrillGame.move(moveSan);
       setOpeningDrillFen(openingDrillGame.fen());
       setOpeningDrillMoves((prev) => [...prev, moveSan]);
@@ -563,7 +566,7 @@ function TrainPageInner() {
       return true;
     }
 
-    // ── 2. Move NOT in tree — fall back to Stockfish validation ──
+    // ── 2. Move NOT in tree or tree says CPL > 50 — validate with Stockfish ──
     setOpeningDrillState("validating");
     // Show the move on the board optimistically
     openingDrillGame.move(moveSan);
@@ -575,13 +578,31 @@ function TrainPageInner() {
       .validateMove(fenBeforeMove, moveSan)
       .then((result) => {
         if (result.viable) {
-          // Move is good (≤50 cp loss) — accept it even though it's not in our tree
+          // Move is good (≤50 cp loss) — accept it
           setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
           setOpeningDrillHint("");
           setOpeningDrillExplanation("");
           playCorrect();
-          // Not in the tree so we can't continue — line ends
-          setOpeningDrillState("done");
+
+          // If the move exists in the tree, continue down the tree
+          if (matchingNode && matchingNode.children.length > 0) {
+            const reply = pickWeightedRandom(matchingNode.children);
+            setTimeout(() => {
+              openingDrillGame.move(reply.san);
+              setOpeningDrillFen(openingDrillGame.fen());
+              setOpeningDrillMoves((prev) => [...prev, reply.san]);
+              playMove();
+              if (reply.children.length === 0) {
+                setOpeningDrillState("done");
+              } else {
+                setOpeningDrillCurrentPath(reply.children);
+                setOpeningDrillState("playing");
+              }
+            }, 500);
+          } else {
+            // Not in tree or no children — line ends
+            setOpeningDrillState("done");
+          }
         } else {
           // Move loses too much (>50 cp) — wrong
           // Undo the optimistic move

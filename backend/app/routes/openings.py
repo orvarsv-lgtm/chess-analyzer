@@ -256,6 +256,13 @@ async def opening_tree(
                 "eval_before": ev.eval_before,
             }
 
+    # Build per-move CPL lookup: (fen_before, san) -> list of cp_loss values
+    cpl_by_move: dict[tuple[str, str], list[int]] = {}
+    for ev in all_evals:
+        if ev.fen_before and ev.san and ev.cp_loss is not None:
+            key = (ev.fen_before, ev.san)
+            cpl_by_move.setdefault(key, []).append(ev.cp_loss)
+
     # Build a trie of moves from all PGNs
     import chess.pgn
     from io import StringIO
@@ -330,6 +337,11 @@ async def opening_tree(
             fen = child_data.get("fen_before")
             ev_data = eval_by_fen.get(fen, {}) if fen else {}
 
+            # Compute average CPL for this specific move
+            cpl_key = (fen, child_data["san"]) if fen else None
+            cpl_values = cpl_by_move.get(cpl_key, []) if cpl_key else []
+            avg_cpl = round(sum(cpl_values) / len(cpl_values), 1) if cpl_values else None
+
             result.append({
                 "san": child_data["san"],
                 "uci": child_data.get("uci"),
@@ -340,6 +352,7 @@ async def opening_tree(
                 "win_rate": wr,
                 "best_move_san": ev_data.get("best_move_san"),
                 "eval_cp": ev_data.get("eval_before"),
+                "average_cpl": avg_cpl,
                 "children": to_tree_nodes(child_data, min_games),
             })
         return result
