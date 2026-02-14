@@ -1063,6 +1063,19 @@ export const openingsAPI = {
     if (params?.max_depth) searchParams.set("max_depth", String(params.max_depth));
     return fetchAPI(`/openings/tree?${searchParams}`);
   },
+
+  validateMove(fen: string, san: string): Promise<{
+    viable: boolean;
+    cp_loss: number;
+    best_move_san: string;
+    eval_before: number;
+    eval_after: number;
+  }> {
+    return fetchAPI(`/openings/validate-move`, {
+      method: "POST",
+      body: JSON.stringify({ fen, san }),
+    });
+  },
 };
 
 // ─── Cross-Game Patterns ────────────────────────────────

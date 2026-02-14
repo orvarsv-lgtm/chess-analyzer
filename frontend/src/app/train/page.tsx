@@ -100,7 +100,7 @@ function TrainPageInner() {
   const [openingDrillGame] = useState(() => new Chess());
   const [openingDrillFen, setOpeningDrillFen] = useState("start");
   const [openingDrillMoves, setOpeningDrillMoves] = useState<string[]>([]);
-  const [openingDrillState, setOpeningDrillState] = useState<"playing" | "correct" | "wrong" | "done">("playing");
+  const [openingDrillState, setOpeningDrillState] = useState<"playing" | "validating" | "correct" | "wrong" | "done">("playing");
   const [openingDrillHint, setOpeningDrillHint] = useState<string>("");
   const [openingDrillScore, setOpeningDrillScore] = useState({ correct: 0, total: 0 });
   const [openingDrillCurrentPath, setOpeningDrillCurrentPath] = useState<OpeningTreeNode[]>([]);
@@ -524,81 +524,121 @@ function TrainPageInner() {
     setOpeningDrillSelectedSquare(null);
     setOpeningDrillLegalMoves([]);
 
-    // A move is correct if it exists anywhere in the opening tree for this position.
-    // Multiple openings are viable (e.g. e4, d4, Nf3, c4) — we accept any of them.
-    const matchingNode = openingDrillCurrentPath.find((n) => n.san === move.san);
-    const isCorrect = !!matchingNode;
+    const fenBeforeMove = openingDrillGame.fen();
+    const moveSan = move.san;
 
-    if (isCorrect) {
-      // Correct! Apply the move
-      openingDrillGame.move(move.san);
-      const newMoves = [...openingDrillMoves, move.san];
-      setOpeningDrillMoves(newMoves);
-      setOpeningDrillFen(openingDrillGame.fen());
-      setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
-      setOpeningDrillHint("");
-      setOpeningDrillExplanation("");
-      playCorrect();
+    // Lock the board while Stockfish validates
+    setOpeningDrillState("validating");
+    // Show the move on the board optimistically
+    openingDrillGame.move(moveSan);
+    setOpeningDrillFen(openingDrillGame.fen());
+    const newMoves = [...openingDrillMoves, moveSan];
+    setOpeningDrillMoves(newMoves);
 
-      const traverseNode = matchingNode;
+    // Ask Stockfish: is this move ≤50 CPL?
+    openingsAPI
+      .validateMove(fenBeforeMove, moveSan)
+      .then((result) => {
+        const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
 
-      // Now play the opponent's reply (if any)
-      if (traverseNode && traverseNode.children.length > 0) {
-        // Pick weighted random reply (proportional to game count)
-        const reply = pickWeightedRandom(traverseNode.children);
-        setTimeout(() => {
-          openingDrillGame.move(reply.san);
-          setOpeningDrillFen(openingDrillGame.fen());
-          setOpeningDrillMoves((prev) => [...prev, reply.san]);
-          playMove();
-
-          // Check if there are more moves for the user
-          if (reply.children.length === 0) {
-            setOpeningDrillState("done");
-          } else {
-            setOpeningDrillCurrentPath(reply.children);
-          }
-        }, 500);
-      } else {
-        setOpeningDrillState("done");
-      }
-    } else {
-      // Wrong move — show feedback
-      setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
-      playIncorrect();
-
-      const viableMoves = openingDrillCurrentPath.slice(0, 4).map((n) => n.san);
-      setOpeningDrillHint(`Viable moves: ${viableMoves.join(", ")}`);
-      setOpeningDrillState("wrong");
-
-      // Save state for "try again from here"
-      setOpeningDrillWrongFen(openingDrillGame.fen());
-      setOpeningDrillWrongMoveIdx(openingDrillMoves.length);
-
-      // Fetch AI explanation for why the move was wrong
-      setOpeningDrillExplanationLoading(true);
-      setOpeningDrillExplanation("");
-      const bestMove = openingDrillCurrentPath[0]?.best_move_san || openingDrillCurrentPath[0]?.san || "?";
-      explanationsAPI
-        .explainMove({
-          fen: openingDrillGame.fen(),
-          san: move.san,
-          best_move_san: bestMove,
-          phase: "opening",
-          move_quality: "Mistake",
-          move_number: Math.floor(openingDrillMoves.length / 2) + 1,
-          color: openingDrillColor,
-        })
-        .then((res) => {
-          setOpeningDrillExplanation(res.explanation);
-        })
-        .catch(() => {
+        if (result.viable) {
+          // Move is good (≤50 cp loss) — accept it
+          setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+          setOpeningDrillHint("");
           setOpeningDrillExplanation("");
-        })
-        .finally(() => {
-          setOpeningDrillExplanationLoading(false);
-        });
-    }
+          playCorrect();
+
+          // Traverse into matching tree node if it exists, otherwise line ends
+          if (matchingNode && matchingNode.children.length > 0) {
+            const reply = pickWeightedRandom(matchingNode.children);
+            setTimeout(() => {
+              openingDrillGame.move(reply.san);
+              setOpeningDrillFen(openingDrillGame.fen());
+              setOpeningDrillMoves((prev) => [...prev, reply.san]);
+              playMove();
+
+              if (reply.children.length === 0) {
+                setOpeningDrillState("done");
+              } else {
+                setOpeningDrillCurrentPath(reply.children);
+                setOpeningDrillState("playing");
+              }
+            }, 500);
+          } else {
+            // Move was viable but not in our tree — line ends
+            setOpeningDrillState("done");
+          }
+        } else {
+          // Move loses too much (>50 cp) — wrong
+          // Undo the optimistic move
+          openingDrillGame.undo();
+          setOpeningDrillFen(openingDrillGame.fen());
+          setOpeningDrillMoves(openingDrillMoves);
+
+          setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
+          playIncorrect();
+
+          setOpeningDrillHint(`Best was ${result.best_move_san} (your move lost ${result.cp_loss} cp)`);
+          setOpeningDrillState("wrong");
+
+          setOpeningDrillWrongFen(fenBeforeMove);
+          setOpeningDrillWrongMoveIdx(openingDrillMoves.length);
+
+          // Fetch AI explanation
+          setOpeningDrillExplanationLoading(true);
+          setOpeningDrillExplanation("");
+          explanationsAPI
+            .explainMove({
+              fen: fenBeforeMove,
+              san: moveSan,
+              best_move_san: result.best_move_san,
+              cp_loss: result.cp_loss,
+              eval_before: result.eval_before,
+              eval_after: result.eval_after,
+              phase: "opening",
+              move_quality: result.cp_loss >= 100 ? "Blunder" : "Mistake",
+              move_number: Math.floor(openingDrillMoves.length / 2) + 1,
+              color: openingDrillColor,
+            })
+            .then((res) => setOpeningDrillExplanation(res.explanation))
+            .catch(() => setOpeningDrillExplanation(""))
+            .finally(() => setOpeningDrillExplanationLoading(false));
+        }
+      })
+      .catch(() => {
+        // Stockfish unavailable — fall back to tree-based check
+        const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
+        if (matchingNode) {
+          setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+          playCorrect();
+
+          if (matchingNode.children.length > 0) {
+            const reply = pickWeightedRandom(matchingNode.children);
+            setTimeout(() => {
+              openingDrillGame.move(reply.san);
+              setOpeningDrillFen(openingDrillGame.fen());
+              setOpeningDrillMoves((prev) => [...prev, reply.san]);
+              playMove();
+              if (reply.children.length === 0) setOpeningDrillState("done");
+              else { setOpeningDrillCurrentPath(reply.children); setOpeningDrillState("playing"); }
+            }, 500);
+          } else {
+            setOpeningDrillState("done");
+          }
+        } else {
+          // Undo the optimistic move
+          openingDrillGame.undo();
+          setOpeningDrillFen(openingDrillGame.fen());
+          setOpeningDrillMoves(openingDrillMoves);
+
+          setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
+          playIncorrect();
+          setOpeningDrillHint("Move not in your repertoire");
+          setOpeningDrillState("wrong");
+          setOpeningDrillWrongFen(fenBeforeMove);
+          setOpeningDrillWrongMoveIdx(openingDrillMoves.length);
+        }
+      });
 
     return true;
   }
@@ -658,6 +698,7 @@ function TrainPageInner() {
   function onDrillPieceClick(_piece: string, square: Square) {
     if (openingDrillState !== "playing") return;
 
+
     const clicked = openingDrillGame.get(square);
 
     if (openingDrillSelectedSquare) {
@@ -686,6 +727,7 @@ function TrainPageInner() {
 
   function onDrillSquareClick(square: Square, piece?: string) {
     if (openingDrillState !== "playing") return;
+
 
     const clicked = openingDrillGame.get(square);
 
@@ -1965,6 +2007,11 @@ function TrainPageInner() {
                 {openingDrillState === "playing" && (
                   <span className="text-sm text-brand-400 animate-pulse">Your move...</span>
                 )}
+                {openingDrillState === "validating" && (
+                  <span className="text-sm text-yellow-400 animate-pulse flex items-center gap-1">
+                    <Spinner className="h-3 w-3" /> Checking...
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1976,9 +2023,9 @@ function TrainPageInner() {
                     How It Works
                   </h3>
                   <div className="space-y-2 text-sm text-gray-400">
-                    <p>Play the <span className="text-emerald-400 font-medium">engine-recommended best move</span> at each position.</p>
-                    <p>Your opponent will respond with moves from your actual games, weighted by how often they occur.</p>
-                    <p>If you play the wrong move, we&apos;ll explain why and you can try again from that position.</p>
+                    <p>Play any <span className="text-emerald-400 font-medium">viable move</span> — anything under 50 centipawn loss is accepted.</p>
+                    <p>Your opponent responds with moves from your actual games, weighted by how often they occur.</p>
+                    <p>If your move loses too much, Stockfish will explain why and you can try again.</p>
                   </div>
                 </CardContent>
               </Card>

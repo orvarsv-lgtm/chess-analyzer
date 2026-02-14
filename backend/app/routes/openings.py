@@ -13,6 +13,8 @@ import asyncio
 import time
 from typing import Optional
 
+import chess
+import chess.engine
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -20,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
+from app.config import get_settings
 from app.db.models import Game, MoveEvaluation, OpeningRepertoire, User
 from app.db.session import get_db
 
@@ -480,4 +483,97 @@ def _parse_explorer_response(data: dict, fen: str, source: str) -> ExplorerRespo
         opening=opening_name,
         eco=eco,
         top_games=top_games,
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# Move validation via Stockfish
+# ═══════════════════════════════════════════════════════════
+
+CPL_THRESHOLD = 50  # moves losing ≤50 cp are considered viable
+VALIDATE_DEPTH = 14
+
+
+class ValidateMoveRequest(BaseModel):
+    fen: str
+    san: str
+
+
+class ValidateMoveResponse(BaseModel):
+    viable: bool
+    cp_loss: int
+    best_move_san: str
+    eval_before: int  # centipawns from side-to-move perspective
+    eval_after: int
+
+
+def _score_to_cp(score: chess.engine.Score, turn: chess.Color) -> int:
+    """Convert engine score to centipawns from side-to-move perspective."""
+    pov = score.pov(turn)
+    if pov.is_mate():
+        m = pov.mate() or 0
+        return 10_000 if m > 0 else -10_000
+    return pov.score() or 0
+
+
+@router.post("/validate-move", response_model=ValidateMoveResponse)
+async def validate_move(
+    body: ValidateMoveRequest,
+    user: User = Depends(require_user),
+):
+    """
+    Check whether a move is viable (≤50 cp loss) using Stockfish.
+    Used by the opening drill to accept any reasonable move.
+    """
+    settings = get_settings()
+
+    try:
+        board = chess.Board(body.fen)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid FEN")
+
+    try:
+        move = board.parse_san(body.san)
+    except (ValueError, chess.InvalidMoveError, chess.IllegalMoveError):
+        raise HTTPException(400, f"Invalid or illegal move: {body.san}")
+
+    turn = board.turn
+
+    try:
+        transport, engine = await chess.engine.popen_uci(settings.stockfish_path)
+    except Exception:
+        raise HTTPException(503, "Stockfish engine unavailable")
+
+    try:
+        # Evaluate position before the move
+        info_before = await engine.analyse(
+            board,
+            chess.engine.Limit(depth=VALIDATE_DEPTH),
+            info=chess.engine.INFO_SCORE | chess.engine.INFO_PV,
+        )
+        eval_before = _score_to_cp(info_before["score"].relative, turn)
+        best_pv = info_before.get("pv", [])
+        best_move_san = board.san(best_pv[0]) if best_pv else body.san
+
+        # Evaluate position after the move
+        board.push(move)
+        info_after = await engine.analyse(
+            board,
+            chess.engine.Limit(depth=VALIDATE_DEPTH),
+            info=chess.engine.INFO_SCORE,
+        )
+        # eval_after is from opponent's perspective, flip sign
+        eval_after = -_score_to_cp(info_after["score"].relative, board.turn)
+    finally:
+        await engine.quit()
+
+    cp_loss = max(0, eval_before - eval_after)
+    viable = cp_loss <= CPL_THRESHOLD
+
+    return ValidateMoveResponse(
+        viable=viable,
+        cp_loss=cp_loss,
+        best_move_san=best_move_san,
+        eval_before=eval_before,
+        eval_after=eval_after,
     )
