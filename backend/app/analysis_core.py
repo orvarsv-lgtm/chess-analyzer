@@ -348,6 +348,7 @@ def generate_puzzle_data(
     move_quality: str,
     move_number: int,
     best_second_gap_cp: int | None = None,
+    is_only_legal: bool = False,
     eval_before_cp: int | None = None,
     solution_line: list[str] | None = None,
 ) -> dict | None:
@@ -357,10 +358,12 @@ def generate_puzzle_data(
 
     Filtering rules:
     - Only Blunder / Mistake / Missed Win moves qualify.
-    - There must be essentially ONE good move: the gap between the best
-      and second-best engine line must be >= 150 cp.  If the gap is
-      smaller, multiple moves are acceptable and the position is not a
-      clean puzzle.
+        - There must be essentially ONE good move: the gap between the best
+            and second-best engine line must be >= 300 cp. If the gap is
+            smaller (or unknown), multiple moves may be acceptable and the
+            position is not a clean puzzle.
+        - Exception: if there is only one legal move, allow it even if
+            second-best data is unavailable.
     - The position must not already be completely winning for one side
       (abs eval >= 600 cp) — those puzzles are trivial.
     - The user must have missed it (implied by move_quality check above;
@@ -378,11 +381,13 @@ def generate_puzzle_data(
         return None
 
     # ── Only-one-good-move filter ──
-    # If we have the gap between best and 2nd-best move, reject positions
-    # where the 2nd-best move is close to the best (multiple good options).
+    # Require a strong best-vs-second gap for non-forced positions.
     PUZZLE_GAP_THRESHOLD_CP = 300
-    if best_second_gap_cp is not None and best_second_gap_cp < PUZZLE_GAP_THRESHOLD_CP:
-        return None
+    if not is_only_legal:
+        if best_second_gap_cp is None:
+            return None
+        if best_second_gap_cp < PUZZLE_GAP_THRESHOLD_CP:
+            return None
 
     puzzle_key = hashlib.md5(f"{fen_before}|{san}".encode()).hexdigest()
 

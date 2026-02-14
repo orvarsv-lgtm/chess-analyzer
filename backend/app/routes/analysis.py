@@ -442,6 +442,7 @@ async def run_analysis_sync(
                                 move_quality=quality,
                                 move_number=move_num,
                                 best_second_gap_cp=best_second_gap_cp,
+                                is_only_legal=is_only_legal,
                                 eval_before_cp=prev_score_cp,
                             )
                             if puzzle_data:
