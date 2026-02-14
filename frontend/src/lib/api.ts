@@ -550,6 +550,70 @@ export interface ChessIdentity {
   total_games?: number;
 }
 
+// ─── Coach Report ───────────────────────────────────────
+
+export interface HonestTruth {
+  icon: string;
+  text: string;
+}
+
+export interface PhaseReportItem {
+  phase: string;
+  cpl: number;
+  score: number;
+  tag: "strongest" | "weakest" | "neutral";
+  commentary: string;
+}
+
+export interface TrainingAction {
+  title: string;
+  why: string;
+  how: string;
+  cta_label: string;
+  cta_url: string;
+  elo_note: string;
+}
+
+export interface WeekTheme {
+  day: string;
+  focus: string;
+  duration: number;
+}
+
+export interface TodayFocus {
+  day: string;
+  focus: string;
+  activities: { name: string; duration_min: number; detail?: string }[];
+}
+
+export interface CoachReport {
+  has_data: boolean;
+  message?: string;
+  // Player context
+  elo?: number | null;
+  elo_trend?: number | null;
+  elo_tier?: string;
+  elo_tier_label?: string;
+  // Identity for theming
+  persona?: ChessPersona;
+  overall_score?: number;
+  analyzed_games?: number;
+  total_games?: number;
+  // Report sections
+  headline?: string;
+  honest_truths?: HonestTruth[];
+  chess_story?: string;
+  phase_report?: PhaseReportItem[];
+  tendencies?: ChessTendency[];
+  kryptonite?: Kryptonite | null;
+  training_plan?: TrainingAction[];
+  growth_path?: GrowthStep[];
+  one_thing?: string | null;
+  // Weekly context
+  today_focus?: TodayFocus | null;
+  week_themes?: WeekTheme[];
+}
+
 // ─── Games ──────────────────────────────────────────────
 
 export const gamesAPI = {
@@ -809,6 +873,10 @@ export const insightsAPI = {
 
   chessIdentity(): Promise<ChessIdentity> {
     return fetchAPI<ChessIdentity>("/insights/chess-identity");
+  },
+
+  coachReport(): Promise<CoachReport> {
+    return fetchAPI<CoachReport>("/insights/coach-report");
   },
 };
 

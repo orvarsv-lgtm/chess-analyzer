@@ -13,6 +13,7 @@ import {
   LogIn,
   LogOut,
   BookOpen,
+  Sparkles,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { href: "/openings", label: "Openings", icon: BookOpen, requireAuth: true },
   { href: "/train", label: "Train", icon: Dumbbell, requireAuth: true },
   { href: "/insights", label: "Insights", icon: BarChart3, requireAuth: true },
+  { href: "/insights/report", label: "AI Coach", icon: Sparkles, requireAuth: true },
   { href: "/profile", label: "Profile", icon: UserCircle, requireAuth: true },
 ] as const;
 
@@ -56,7 +58,11 @@ export function Sidebar() {
             .filter(({ requireAuth }) => !requireAuth || !!session)
             .map(({ href, label, icon: Icon }) => {
             const isActive =
-              href === "/" ? pathname === "/" : pathname.startsWith(href);
+              href === "/"
+                ? pathname === "/"
+                : href === "/insights"
+                  ? pathname === "/insights"
+                  : pathname.startsWith(href);
 
             return (
               <Link
@@ -112,7 +118,11 @@ export function Sidebar() {
             .filter(({ requireAuth }) => !requireAuth || !!session)
             .map(({ href, label, icon: Icon }) => {
             const isActive =
-              href === "/" ? pathname === "/" : pathname.startsWith(href);
+              href === "/"
+                ? pathname === "/"
+                : href === "/insights"
+                  ? pathname === "/insights"
+                  : pathname.startsWith(href);
 
             return (
               <Link

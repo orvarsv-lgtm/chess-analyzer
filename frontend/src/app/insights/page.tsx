@@ -18,7 +18,6 @@ import {
   ChevronRight,
   Dumbbell,
   ArrowRight,
-  Sparkles,
   Shield,
   Swords,
   GraduationCap,
@@ -27,8 +26,7 @@ import {
   Activity,
   Crown,
   User,
-  FileText,
-  X,
+  Sparkles,
 } from "lucide-react";
 import {
   Radar,
@@ -188,7 +186,20 @@ export default function InsightsPage() {
           {identity?.has_data && identity.persona && (
             <>
               <IdentityCard identity={identity} />
-              <AIReportButton identity={identity} />
+              <Link
+                href="/insights/report"
+                className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 border-dashed transition-all hover:border-solid group"
+                style={{
+                  borderColor: `${identity.persona.color}40`,
+                  background: `linear-gradient(135deg, ${identity.persona.color}08 0%, transparent 60%)`,
+                }}
+              >
+                <Sparkles className="h-5 w-5 transition-transform group-hover:scale-110" style={{ color: identity.persona.color }} />
+                <span className="text-sm font-semibold" style={{ color: identity.persona.color }}>
+                  View Your AI Coach Report
+                </span>
+                <span className="text-xs text-gray-500 ml-1">— Personalized training plan &amp; actionable advice</span>
+              </Link>
             </>
           )}
 
@@ -939,238 +950,6 @@ function CollapsibleInsight({
   );
 }
 
-// ─── AI Report Button + Modal ───────────────────────────
-
-function AIReportButton({ identity }: { identity: ChessIdentity }) {
-  const [showReport, setShowReport] = useState(false);
-  const persona = identity.persona!;
-
-  return (
-    <>
-      <button
-        onClick={() => setShowReport(true)}
-        className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 border-dashed transition-all hover:border-solid group"
-        style={{
-          borderColor: `${persona.color}40`,
-          background: `linear-gradient(135deg, ${persona.color}08 0%, transparent 60%)`,
-        }}
-      >
-        <FileText className="h-5 w-5 transition-transform group-hover:scale-110" style={{ color: persona.color }} />
-        <span className="text-sm font-semibold" style={{ color: persona.color }}>
-          View Full AI Report
-        </span>
-        <span className="text-xs text-gray-500 ml-1">— Your complete chess story and deep analysis</span>
-      </button>
-      {showReport && (
-        <AIReportModal identity={identity} onClose={() => setShowReport(false)} />
-      )}
-    </>
-  );
-}
-
-function AIReportModal({
-  identity,
-  onClose,
-}: {
-  identity: ChessIdentity;
-  onClose: () => void;
-}) {
-  const persona = identity.persona!;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-sm p-4 sm:p-8">
-      <div className="relative w-full max-w-2xl bg-surface-1 rounded-2xl shadow-2xl border border-surface-3/50 my-8">
-        {/* Header */}
-        <div
-          className="sticky top-0 z-10 flex items-center justify-between p-6 rounded-t-2xl border-b border-surface-3/30"
-          style={{
-            background: `linear-gradient(135deg, ${persona.color}15 0%, var(--surface-1) 60%)`,
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">{persona.emoji}</span>
-            <div>
-              <h2 className="text-xl font-bold" style={{ color: persona.color }}>
-                AI Report: {persona.name}
-              </h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Based on {identity.analyzed_games} analyzed games
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-surface-2/80 transition-colors"
-          >
-            <X className="h-5 w-5 text-gray-400" />
-          </button>
-        </div>
-
-        {/* Report Body */}
-        <div className="p-6 space-y-8">
-          {/* Who You Are */}
-          <ReportSection title="Who You Are" icon="🧬">
-            <p className="text-sm text-gray-300 leading-relaxed">
-              {persona.description}
-            </p>
-            {identity.why_you && identity.why_you.length > 0 && (
-              <div className="mt-4 space-y-2">
-                {identity.why_you.map((reason, i) => (
-                  <div key={i} className="flex items-start gap-2.5 text-sm">
-                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: persona.color }} />
-                    <p className="text-gray-400 leading-relaxed">{reason}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ReportSection>
-
-          {/* Your Chess Story */}
-          {identity.chess_story && (
-            <ReportSection title="Your Chess Story" icon="📖">
-              <p className="text-sm text-gray-300 leading-[1.8]">
-                {identity.chess_story}
-              </p>
-            </ReportSection>
-          )}
-
-          {/* Phase Breakdown */}
-          {identity.phase_breakdown && identity.phase_breakdown.length > 0 && (
-            <ReportSection title="Phase-by-Phase Breakdown" icon="🎯">
-              <div className="space-y-4">
-                {identity.phase_breakdown.map((phase, i) => (
-                  <div key={i}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-semibold">{phase.phase}</span>
-                      <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full ${
-                        phase.tag === "strongest"
-                          ? "bg-green-900/30 text-green-400"
-                          : phase.tag === "weakest"
-                          ? "bg-red-900/30 text-red-400"
-                          : "bg-surface-3/50 text-gray-500"
-                      }`}>
-                        {phase.tag}
-                      </span>
-                      <span className="ml-auto text-xs text-gray-500">{phase.cpl} CPL</span>
-                      <span className={`text-sm font-bold ${
-                        phase.score >= 75 ? "text-green-400" : phase.score >= 50 ? "text-yellow-400" : "text-red-400"
-                      }`}>
-                        {phase.score}/100
-                      </span>
-                    </div>
-                    <div className="h-1 bg-surface-3/50 rounded-full mb-2">
-                      <div
-                        className={`h-full rounded-full ${
-                          phase.tag === "strongest" ? "bg-green-500" : phase.tag === "weakest" ? "bg-red-500" : "bg-gray-500"
-                        }`}
-                        style={{ width: `${phase.score}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-gray-400 leading-relaxed">{phase.commentary}</p>
-                  </div>
-                ))}
-              </div>
-            </ReportSection>
-          )}
-
-          {/* Tendencies */}
-          {identity.tendencies && identity.tendencies.length > 0 && (
-            <ReportSection title="Behavioral Tendencies" icon="🔬">
-              <div className="grid sm:grid-cols-2 gap-3">
-                {identity.tendencies.map((t, i) => (
-                  <div key={i} className="flex items-start gap-3 p-3 bg-surface-2/40 rounded-lg">
-                    <span className="text-lg">{t.icon}</span>
-                    <div>
-                      <p className="text-sm font-semibold">{t.label}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{t.description}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </ReportSection>
-          )}
-
-          {/* Kryptonite */}
-          {identity.kryptonite && (
-            <ReportSection title="Your Kryptonite" icon="⚠️">
-              <div className="p-4 bg-red-900/10 border border-red-800/20 rounded-lg">
-                <p className="text-sm font-semibold text-red-400 mb-1">{identity.kryptonite.area}</p>
-                <p className="text-sm text-gray-400 leading-relaxed">{identity.kryptonite.message}</p>
-              </div>
-            </ReportSection>
-          )}
-
-          {/* Growth Path */}
-          {identity.growth_path && identity.growth_path.length > 0 && (
-            <ReportSection title="Your Growth Path" icon="🚀">
-              <div className="space-y-3">
-                {identity.growth_path.map((step, i) => (
-                  <div key={i} className="p-4 bg-surface-2/30 rounded-lg border border-surface-3/30">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className={`h-2.5 w-2.5 rounded-full ${
-                        step.priority === "high" ? "bg-red-400" : step.priority === "medium" ? "bg-yellow-400" : "bg-green-400"
-                      }`} />
-                      <span className="text-sm font-semibold">{step.title}</span>
-                      <span className={`text-[10px] uppercase tracking-wider font-medium px-1.5 py-0.5 rounded ${
-                        step.priority === "high"
-                          ? "bg-red-900/20 text-red-400"
-                          : step.priority === "medium"
-                          ? "bg-yellow-900/20 text-yellow-400"
-                          : "bg-green-900/20 text-green-400"
-                      }`}>
-                        {step.priority}
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-400 leading-relaxed ml-5">{step.description}</p>
-                  </div>
-                ))}
-              </div>
-            </ReportSection>
-          )}
-
-          {/* One Thing */}
-          {identity.one_thing && (
-            <div
-              className="p-5 rounded-xl border"
-              style={{
-                backgroundColor: `${persona.color}0a`,
-                borderColor: `${persona.color}25`,
-              }}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Target className="h-4 w-4" style={{ color: persona.color }} />
-                <span className="text-sm font-bold" style={{ color: persona.color }}>
-                  The One Thing To Change
-                </span>
-              </div>
-              <p className="text-sm text-gray-300 leading-relaxed">{identity.one_thing}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="p-6 pt-0">
-          <p className="text-xs text-gray-600 text-center">
-            Fully deterministic — no AI language models, no randomness, just your data.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReportSection({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-base">{icon}</span>
-        <h3 className="text-sm font-bold uppercase tracking-wider text-gray-400">{title}</h3>
-      </div>
-      {children}
-    </div>
-  );
-}
-
 // ─── Chess Identity Card ────────────────────────────────
 
 function IdentityCard({ identity }: { identity: ChessIdentity }) {
@@ -1376,72 +1155,6 @@ function IdentityCard({ identity }: { identity: ChessIdentity }) {
                   />
                 </RadarChart>
               </ResponsiveContainer>
-            </div>
-          </div>
-        )}
-
-        {/* ═══ Kryptonite ═══ */}
-        {identity.kryptonite && (
-          <div className="p-4 bg-red-900/10 border border-red-800/25 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="h-4 w-4 text-red-400" />
-              <span className="text-sm font-bold text-red-400">
-                Your Kryptonite: {identity.kryptonite.area}
-              </span>
-            </div>
-            <p className="text-sm text-gray-300 leading-relaxed">{identity.kryptonite.message}</p>
-          </div>
-        )}
-
-        {/* ═══ The One Thing To Change ═══ */}
-        {identity.one_thing && (
-          <div
-            className="p-4 rounded-xl border"
-            style={{
-              backgroundColor: `${persona.color}0a`,
-              borderColor: `${persona.color}25`,
-            }}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Target className="h-4 w-4" style={{ color: persona.color }} />
-              <span className="text-sm font-bold" style={{ color: persona.color }}>
-                The One Thing To Change
-              </span>
-            </div>
-            <p className="text-sm text-gray-300 leading-relaxed">
-              {identity.one_thing}
-            </p>
-          </div>
-        )}
-
-        {/* ═══ Growth Path ═══ */}
-        {identity.growth_path && identity.growth_path.length > 0 && (
-          <div>
-            <SectionHeader icon="🚀" title="Your Growth Path" color={persona.color} />
-            <div className="mt-3 space-y-3">
-              {identity.growth_path.map((step, i) => (
-                <div
-                  key={i}
-                  className="p-4 bg-surface-2/30 rounded-lg border border-surface-3/30"
-                >
-                  <div className="flex items-center gap-2.5 mb-1.5">
-                    <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${
-                      step.priority === "high" ? "bg-red-400" : step.priority === "medium" ? "bg-yellow-400" : "bg-green-400"
-                    }`} />
-                    <span className="text-sm font-semibold">{step.title}</span>
-                    <span className={`text-[10px] uppercase tracking-wider font-medium px-1.5 py-0.5 rounded ${
-                      step.priority === "high"
-                        ? "bg-red-900/20 text-red-400"
-                        : step.priority === "medium"
-                        ? "bg-yellow-900/20 text-yellow-400"
-                        : "bg-green-900/20 text-green-400"
-                    }`}>
-                      {step.priority}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400 leading-relaxed ml-5">{step.description}</p>
-                </div>
-              ))}
             </div>
           </div>
         )}

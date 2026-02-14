@@ -2417,3 +2417,525 @@ async def get_study_plan(
             "total_puzzles": total_puzzles,
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# AI Coach Report — elo-aware, deeply personalized
+# ═══════════════════════════════════════════════════════════
+
+
+@router.get("/coach-report")
+async def get_coach_report(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate a full AI Coach Report with elo-tiered advice, training plan with CTAs,
+    honest truths, and a personalized chess story. Deterministic — no LLMs.
+    """
+
+    # ── Fetch identity data (reuse the chess-identity computation) ──
+    identity = await get_chess_identity(user=user, db=db)
+    if not identity.get("has_data"):
+        return {"has_data": False, "message": "Analyze at least 3 games to generate your coach report."}
+
+    # ── Get player elo ──
+    elo_q = (
+        select(Game.player_elo)
+        .where(Game.user_id == user.id, Game.player_elo.isnot(None))
+        .order_by(Game.date.desc())
+        .limit(1)
+    )
+    current_elo = (await db.execute(elo_q)).scalar()
+
+    # Elo 30 games ago for trend
+    elo_old_q = (
+        select(Game.player_elo)
+        .where(Game.user_id == user.id, Game.player_elo.isnot(None))
+        .order_by(Game.date.desc())
+        .offset(30)
+        .limit(1)
+    )
+    old_elo = (await db.execute(elo_old_q)).scalar()
+    elo_trend = (current_elo - old_elo) if current_elo and old_elo else None
+
+    # Classify elo tier
+    elo = current_elo or 0
+    if elo < 1000:
+        tier = "beginner"
+        tier_label = "Beginner"
+    elif elo < 1500:
+        tier = "intermediate"
+        tier_label = "Intermediate"
+    elif elo < 1900:
+        tier = "advanced"
+        tier_label = "Advanced"
+    else:
+        tier = "expert"
+        tier_label = "Expert"
+
+    # ── Extract the metrics we need from the identity response ──
+    persona = identity["persona"]
+    phase_breakdown = identity.get("phase_breakdown", [])
+    growth_path = identity.get("growth_path", [])
+    kryptonite = identity.get("kryptonite")
+    one_thing = identity.get("one_thing")
+    chess_story = identity.get("chess_story", "")
+    why_you = identity.get("why_you", [])
+    tendencies = identity.get("tendencies", [])
+    analyzed_games = identity.get("analyzed_games", 0)
+    total_games = identity.get("total_games", 0)
+    skill_axes = identity.get("skill_axes", [])
+    overall_score = identity.get("overall_score", 0)
+
+    # ── Re-query the raw metrics for the headline and honest truths ──
+    agg_q = (
+        select(
+            func.avg(GameAnalysis.overall_cpl).label("avg_cpl"),
+            func.avg(GameAnalysis.phase_opening_cpl).label("opening_cpl"),
+            func.avg(GameAnalysis.phase_middlegame_cpl).label("middlegame_cpl"),
+            func.avg(GameAnalysis.phase_endgame_cpl).label("endgame_cpl"),
+            func.sum(GameAnalysis.blunders_count).label("total_blunders"),
+            func.sum(GameAnalysis.mistakes_count).label("total_mistakes"),
+            func.sum(GameAnalysis.best_moves_count).label("total_best"),
+            func.sum(Game.moves_count).label("total_moves"),
+        )
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id)
+    )
+    agg = (await db.execute(agg_q)).one()
+    avg_cpl = agg.avg_cpl or 50
+    opening_cpl = agg.opening_cpl or avg_cpl
+    middlegame_cpl = agg.middlegame_cpl or avg_cpl
+    endgame_cpl = agg.endgame_cpl or avg_cpl
+    total_blunders = agg.total_blunders or 0
+    total_moves = agg.total_moves or 1
+    player_moves = total_moves / 2
+    blunder_rate = total_blunders / player_moves * 100 if player_moves > 0 else 0
+    total_best = agg.total_best or 0
+    best_rate = total_best / player_moves * 100 if player_moves > 0 else 0
+
+    # Win/loss
+    results_q = (
+        select(Game.result, func.count().label("cnt"))
+        .where(Game.user_id == user.id)
+        .group_by(Game.result)
+    )
+    result_rows = (await db.execute(results_q)).all()
+    result_map = {r.result: r.cnt for r in result_rows}
+    wins = result_map.get("win", 0)
+    losses = result_map.get("loss", 0)
+    draws = result_map.get("draw", 0)
+    win_rate = round(wins / max(total_games, 1) * 100, 1)
+
+    # Phase identification
+    phase_cpls = {"opening": opening_cpl, "middlegame": middlegame_cpl, "endgame": endgame_cpl}
+    best_phase = min(phase_cpls, key=phase_cpls.get)
+    worst_phase = max(phase_cpls, key=phase_cpls.get)
+
+    # CPL stddev
+    cpl_stddev_q = (
+        select(func.stddev(GameAnalysis.overall_cpl))
+        .join(Game, Game.id == GameAnalysis.game_id)
+        .where(Game.user_id == user.id, GameAnalysis.overall_cpl.isnot(None))
+    )
+    cpl_stddev = (await db.execute(cpl_stddev_q)).scalar() or 20
+
+    # Comebacks / collapses
+    comeback_q = (
+        select(func.count(func.distinct(MoveEvaluation.game_id)))
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(Game.user_id == user.id, Game.result == "win",
+               MoveEvaluation.eval_after.isnot(None), MoveEvaluation.eval_after < -200)
+    )
+    comeback_wins = (await db.execute(comeback_q)).scalar() or 0
+
+    collapse_q = (
+        select(func.count(func.distinct(MoveEvaluation.game_id)))
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(Game.user_id == user.id, Game.result == "loss",
+               MoveEvaluation.eval_after.isnot(None), MoveEvaluation.eval_after > 200)
+    )
+    collapses = (await db.execute(collapse_q)).scalar() or 0
+
+    # Top blunder piece
+    piece_blunder_q = (
+        select(MoveEvaluation.piece, func.count().label("cnt"))
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(Game.user_id == user.id, MoveEvaluation.move_quality == "Blunder")
+        .group_by(MoveEvaluation.piece)
+        .order_by(func.count().desc())
+        .limit(1)
+    )
+    piece_names = {"K": "King", "Q": "Queen", "R": "Rook", "B": "Bishop", "N": "Knight", "P": "Pawn"}
+    pb_row = (await db.execute(piece_blunder_q)).first()
+    top_piece = piece_names.get(pb_row.piece, pb_row.piece) if pb_row else None
+    top_piece_pct = round(pb_row.cnt / max(total_blunders, 1) * 100) if pb_row else 0
+
+    # Top blunder subtype
+    subtype_q = (
+        select(MoveEvaluation.blunder_subtype, func.count().label("cnt"))
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(Game.user_id == user.id, MoveEvaluation.move_quality == "Blunder",
+               MoveEvaluation.blunder_subtype.isnot(None))
+        .group_by(MoveEvaluation.blunder_subtype)
+        .order_by(func.count().desc())
+        .limit(1)
+    )
+    st_row = (await db.execute(subtype_q)).first()
+    top_subtype = st_row.blunder_subtype if st_row else None
+    subtype_labels = {
+        "hanging_piece": "hanging pieces",
+        "missed_tactic": "missed tactics",
+        "king_safety": "king safety mistakes",
+        "endgame_technique": "endgame technique errors",
+    }
+
+    # Time pressure blunder %
+    tp_q = (
+        select(
+            func.sum(case((MoveEvaluation.time_remaining < 30, 1), else_=0)).label("under_tp"),
+            func.count().label("total"),
+        )
+        .join(Game, Game.id == MoveEvaluation.game_id)
+        .where(Game.user_id == user.id, MoveEvaluation.move_quality == "Blunder",
+               MoveEvaluation.time_remaining.isnot(None))
+    )
+    tp_row = (await db.execute(tp_q)).one_or_none()
+    tp_blunders = (tp_row.under_tp or 0) if tp_row else 0
+    tp_total = (tp_row.total or 0) if tp_row else 0
+    tp_pct = round(tp_blunders / tp_total * 100) if tp_total > 0 else None
+
+    # ══════════════════════════════════════════════════════
+    # BUILD THE REPORT
+    # ══════════════════════════════════════════════════════
+
+    # ── 1. Headline — one punchy sentence ──
+    headline = ""
+    if tier == "beginner":
+        if blunder_rate > 4:
+            headline = f"You're a {persona['name']} who gives away too many pieces — fix that one thing and your rating jumps."
+        elif worst_phase == "endgame" and endgame_cpl > avg_cpl * 1.3:
+            headline = f"You play good chess until the endgame, then it falls apart. That's fixable."
+        else:
+            headline = f"You're finding your style as {persona['name']} — the foundation is there, now let's build on it."
+    elif tier == "intermediate":
+        if worst_phase == "endgame" and endgame_cpl > avg_cpl * 1.2:
+            headline = f"You're a {persona['name']} who plays like a {round(elo + 150)} in the opening and a {round(max(elo - 200, 400))} in the endgame. That gap is where your rating is stuck."
+        elif blunder_rate > 3:
+            headline = f"You're strong enough to build good positions but blunder them away. Your {round(blunder_rate, 1)} blunders per 100 moves is the single biggest thing holding you back."
+        else:
+            headline = f"You're a solid {persona['name']} with {win_rate}% wins — the next 100 rating points are hiding in your {worst_phase}."
+    elif tier == "advanced":
+        if cpl_stddev > 25:
+            headline = f"Your best games are {tier_label}-level, but your worst games are 400 points below. Consistency is your rating ceiling."
+        elif collapses >= 3:
+            headline = f"You build winning positions like a {round(elo + 200)} and convert them like a {round(max(elo - 300, 800))}. Conversion is your bottleneck."
+        else:
+            headline = f"You're a {persona['name']} at {elo} — to break {round((elo // 100 + 1) * 100)}, sharpen your {worst_phase} and tighten your consistency."
+    else:  # expert
+        if cpl_stddev > 20:
+            headline = f"At {elo}, your ceiling is high but your floor is inconsistent. The games where you play like yourself, you're dangerous."
+        else:
+            headline = f"You're a refined {persona['name']} at {elo}. The gains from here are surgical — specific preparation and eliminating your last blind spots."
+
+    # ── 2. Honest Truths — blunt, data-backed observations ──
+    honest_truths = []
+
+    # Phase imbalance
+    phase_gap = round(phase_cpls[worst_phase] - phase_cpls[best_phase], 1)
+    if phase_gap > 20:
+        honest_truths.append({
+            "icon": "📊",
+            "text": f"You play like two different people. Your {best_phase} accuracy ({round(phase_cpls[best_phase], 1)} CPL) is {phase_gap} points better than your {worst_phase} ({round(phase_cpls[worst_phase], 1)} CPL). That gap costs you games you should be winning.",
+        })
+
+    # Blunder piece
+    if top_piece and top_piece_pct > 25 and total_blunders >= 5:
+        honest_truths.append({
+            "icon": "♟️",
+            "text": f"{top_piece_pct}% of your blunders involve your {top_piece} — that's {pb_row.cnt if pb_row else 0} out of {total_blunders}. You have a specific blind spot with this piece.",
+        })
+
+    # Blunder type
+    if top_subtype and st_row and st_row.cnt >= 3:
+        sub_pct = round(st_row.cnt / max(total_blunders, 1) * 100)
+        honest_truths.append({
+            "icon": "🔍",
+            "text": f"Your #1 blunder pattern is {subtype_labels.get(top_subtype, top_subtype.replace('_', ' '))} ({sub_pct}% of your blunders). This isn't random — it's a trainable pattern.",
+        })
+
+    # Collapses
+    if collapses >= 3:
+        collapse_pct = round(collapses / max(losses, 1) * 100)
+        honest_truths.append({
+            "icon": "📉",
+            "text": f"You've blown {collapses} won games — that's {collapse_pct}% of your losses. You're not losing because you're outplayed, you're losing positions you've already earned.",
+        })
+
+    # Time pressure
+    if tp_pct is not None and tp_pct > 50 and tp_total >= 5:
+        honest_truths.append({
+            "icon": "⏰",
+            "text": f"{tp_pct}% of your blunders happen with less than 30 seconds left. You're not a bad calculator — you're a bad time manager.",
+        })
+
+    # Consistency
+    if cpl_stddev > 30:
+        honest_truths.append({
+            "icon": "🎢",
+            "text": f"Your accuracy swings wildly between games (±{round(cpl_stddev, 1)} CPL). On your good days you play {round(max(elo + 150, 0))} chess. On your bad days, {round(max(elo - 250, 400))}. Closing that gap IS your rating gain.",
+        })
+
+    # Limit to 3 most impactful
+    honest_truths = honest_truths[:3]
+
+    # If we couldn't find blunt truths, add a general one
+    if not honest_truths:
+        honest_truths.append({
+            "icon": "📋",
+            "text": f"With {round(avg_cpl, 1)} average CPL across {analyzed_games} games, you're playing solid chess. The gains from here are about refinement, not revolution.",
+        })
+
+    # ── 3. Phase report — elo-calibrated commentary ──
+    phase_report = []
+    for pb in phase_breakdown:
+        phase_name = pb["phase"].lower()
+        cpl_val = pb["cpl"]
+        score_val = pb["score"]
+        tag = pb["tag"]
+
+        # Elo-aware commentary
+        if tier == "beginner":
+            if phase_name == "opening":
+                if cpl_val < 40:
+                    commentary = "Your opening is actually decent — don't stress about memorizing lines. Just keep developing pieces, controlling the center, and castling early. That's all you need right now."
+                else:
+                    commentary = f"You're losing accuracy early ({cpl_val} CPL). Don't memorize openings yet — just follow three rules: (1) control the center with pawns, (2) develop knights before bishops, (3) castle before move 10. That alone will drop this number."
+            elif phase_name == "middlegame":
+                if cpl_val > 60:
+                    commentary = f"At {cpl_val} CPL, you're making expensive decisions in complex positions. Before every move, ask ONE question: 'can my opponent take something if I play this?' That single habit will cut your errors dramatically."
+                else:
+                    commentary = f"Your middlegame is reasonable at {cpl_val} CPL. Keep practicing tactical puzzles — forks, pins, and skewers are the patterns that matter most at your level."
+            else:  # endgame
+                if cpl_val > 70:
+                    commentary = f"Your endgame ({cpl_val} CPL) needs the most work. Learn just TWO things: (1) activate your King in the endgame — push it to the center, (2) passed pawns must be pushed. These two principles alone will transform your endgames."
+                else:
+                    commentary = f"Your endgame is okay at {cpl_val} CPL. When pieces come off the board, remember: your King becomes a fighting piece. Push it forward."
+        elif tier == "intermediate":
+            if phase_name == "opening":
+                if cpl_val > 50:
+                    commentary = f"At {cpl_val} CPL, you're consistently coming out of the opening worse. Pick ONE system as White and ONE as Black — learn them to move 12. Don't try to be a theory expert. Own two openings deeply instead of five superficially."
+                elif cpl_val < 25:
+                    commentary = f"Your opening prep ({cpl_val} CPL) is a genuine strength. You're getting good positions out of the gate — now make sure you don't waste that advantage in the middlegame."
+                else:
+                    commentary = f"Your opening is fine at {cpl_val} CPL — not losing you games, not winning them either. At your level this is acceptable. Focus your study time elsewhere."
+            elif phase_name == "middlegame":
+                if cpl_val > 55:
+                    commentary = f"The middlegame ({cpl_val} CPL) is where your games get complicated and your accuracy drops. This is a calculation problem. 15 minutes of tactical puzzles daily — not easy ones, ones that take you 2-3 minutes to solve. Build the muscle."
+                else:
+                    commentary = f"Your middlegame calculation ({cpl_val} CPL) is solid for your rating. Start thinking about positional concepts: weak squares, piece activity, and when to trade."
+            else:
+                if cpl_val > 60:
+                    commentary = f"Your endgame ({cpl_val} CPL) is where wins become draws and draws become losses. Learn these specifically: (1) Lucena position, (2) Philidor position, (3) King opposition, (4) when to trade into a pawn endgame. These four concepts cover 80% of practical endgames."
+                else:
+                    commentary = f"Your endgame ({cpl_val} CPL) is decent. Practice converting advantages — when you're up a pawn, you should be winning 80%+ of those games."
+        elif tier == "advanced":
+            if phase_name == "opening":
+                if cpl_val > 40:
+                    commentary = f"At {elo}, your opening CPL of {cpl_val} is too high. You're likely playing openings you don't fully understand. Audit your repertoire: which lines have the worst CPL? Cut the ones that don't work and deepen the ones that do."
+                else:
+                    commentary = f"Your opening preparation ({cpl_val} CPL) is strong. At this level, marginal opening gains come from understanding the PLANS after the opening, not memorizing more moves."
+            elif phase_name == "middlegame":
+                if cpl_val > 50:
+                    commentary = f"Your middlegame ({cpl_val} CPL) is your growth area. At {elo}, this usually means you're good at tactics but weak at strategic planning. Study annotated GM games focusing on how they choose plans — Yusupov's series or Silman's 'Reassess Your Chess' are ideal."
+                else:
+                    commentary = f"Your middlegame ({cpl_val} CPL) is competitive for your rating. Push further by studying your specific opening structures — understand the typical plans, piece placements, and pawn breaks."
+            else:
+                if cpl_val > 50:
+                    commentary = f"Your endgame ({cpl_val} CPL) is the gap between you and the next level. At {elo}, endgame technique separates improving players from stuck players. Study Dvoretsky's Endgame Manual or do targeted endgame practice — not just puzzles, but playing out positions against an engine."
+                else:
+                    commentary = f"Your endgame ({cpl_val} CPL) is strong. Focus on the complex ones: rook + pawn vs rook, bishop vs knight, and opposite-colored bishop endgames."
+        else:  # expert
+            if phase_name == "opening":
+                commentary = f"At {elo}, your opening ({cpl_val} CPL) should be near-automatic. Any opening with CPL > 20 is worth auditing. Consider building a preparation database for your main lines — know the critical positions to move 20+."
+            elif phase_name == "middlegame":
+                commentary = f"Your middlegame ({cpl_val} CPL) is where the subtle gains are. Study your losses with an engine: find the moments where you chose a reasonable move but there was a much stronger one. These 'not-quite-right' moves are your growth edge."
+            else:
+                commentary = f"Your endgame ({cpl_val} CPL) at {elo} — if this is your weakness, it's likely in complex endgames with multiple pieces. Study practical rook endgames and conversion technique from real games."
+
+        phase_report.append({
+            "phase": pb["phase"],
+            "cpl": cpl_val,
+            "score": score_val,
+            "tag": tag,
+            "commentary": commentary,
+        })
+
+    # ── 4. Training plan — actionable with CTA links ──
+    training_plan = []
+
+    # The most impactful training action based on tier + data
+    if tier == "beginner":
+        # Beginners: principles first, not tactics
+        if blunder_rate > 4:
+            training_plan.append({
+                "title": "Daily Blunder Check Practice",
+                "why": f"You blunder {round(blunder_rate, 1)} times per 100 moves. At your level, just NOT hanging pieces would win you more games than anything else.",
+                "how": "Before every move in your games, count your opponent's attacks. Start with the Blunder Preventer trainer to build the habit.",
+                "cta_label": "Start Blunder Preventer",
+                "cta_url": "/train",
+                "elo_note": "At your rating, reducing blunders is 3x more valuable than learning openings.",
+            })
+        training_plan.append({
+            "title": "5 Puzzles a Day — No More, No Less",
+            "why": "Pattern recognition is how your brain learns chess. 5 puzzles daily is better than 50 once a week.",
+            "how": "Do the Daily Warmup every day. Don't rush — if a puzzle takes 3 minutes, that's fine. The goal is accuracy, not speed.",
+            "cta_label": "Start Daily Warmup",
+            "cta_url": "/train",
+            "elo_note": "Consistency beats volume. 5/day for a month > 100 in one sitting.",
+        })
+        if worst_phase == "endgame" and endgame_cpl > 70:
+            training_plan.append({
+                "title": "Learn 2 Endgame Rules",
+                "why": f"Your endgame accuracy ({round(endgame_cpl, 1)} CPL) is dragging down your results. You don't need theory — you need two rules.",
+                "how": "Rule 1: In the endgame, your King is a fighting piece — push it to the center. Rule 2: Passed pawns must be pushed. Practice endgame puzzles to internalize these.",
+                "cta_label": "Practice Endgames",
+                "cta_url": "/train",
+                "elo_note": "At your level, just activating your King in endgames will win you 2-3 extra games per month.",
+            })
+    elif tier == "intermediate":
+        # Intermediates: targeted weakness training
+        if worst_phase == "endgame" and endgame_cpl > avg_cpl * 1.15:
+            training_plan.append({
+                "title": "Endgame Conversion Training",
+                "why": f"Your endgame CPL of {round(endgame_cpl, 1)} is your biggest weakness. You build good positions but can't finish.",
+                "how": "Use the 'Capitalize Advantages' trainer — it gives you positions from YOUR games where you were winning but failed to convert. Practice until you can win these 8 out of 10 times.",
+                "cta_label": "Capitalize Advantages",
+                "cta_url": "/train",
+                "elo_note": f"At {elo}, endgame improvement has the highest points-per-hour-of-study ratio.",
+            })
+        if blunder_rate > 2.5:
+            training_plan.append({
+                "title": f"Fix Your {top_piece + ' ' if top_piece and top_piece_pct > 30 else ''}Blunders",
+                "why": f"You blunder {round(blunder_rate, 1)} times per 100 moves ({total_blunders} total)." + (f" {top_piece_pct}% involve your {top_piece}." if top_piece and top_piece_pct > 25 else "") + (f" Your main pattern: {subtype_labels.get(top_subtype, '')}." if top_subtype else ""),
+                "how": "Do the Blunder Preventer daily. Then review your blunders from recent games — you'll start seeing the same patterns.",
+                "cta_label": "Blunder Preventer",
+                "cta_url": "/train",
+                "elo_note": f"Cutting blunders from {round(blunder_rate, 1)} to {round(blunder_rate * 0.6, 1)} per 100 moves is worth ~75 rating points.",
+            })
+        training_plan.append({
+            "title": "Tactical Pattern Training",
+            "why": f"Your best-move rate is {round(best_rate, 1)}%. Improving this means finding better moves more often — that's pure rating.",
+            "how": "Solve puzzles from your own mistakes first (they're the most relevant), then supplement with global puzzles. Aim for puzzles that take you 1-3 minutes — not instant ones.",
+            "cta_label": "Train From Your Mistakes",
+            "cta_url": "/train",
+            "elo_note": "Puzzles from your own games train the exact patterns you face. That's targeted improvement.",
+        })
+    elif tier == "advanced":
+        # Advanced: repertoire refinement, positional play, conversion
+        if worst_phase == "opening" and opening_cpl > 35:
+            training_plan.append({
+                "title": "Audit Your Opening Repertoire",
+                "why": f"Your opening CPL of {round(opening_cpl, 1)} is high for {elo}. Some of your lines aren't working.",
+                "how": "Go to your Openings page and sort by CPL. Find the 2-3 openings with the worst accuracy. Either study them deeper or switch to something more solid.",
+                "cta_label": "View Openings",
+                "cta_url": "/openings",
+                "elo_note": f"At {elo}, entering the middlegame with a small edge from preparation creates a snowball effect.",
+            })
+        if collapses >= 3:
+            training_plan.append({
+                "title": "Conversion Practice",
+                "why": f"You've collapsed {collapses} times from winning positions. These are games you already won at the board — then gave back.",
+                "how": "The 'Capitalize Advantages' trainer gives you YOUR positions where you were winning. Practice finding the calm, safe continuation instead of the flashy one.",
+                "cta_label": "Capitalize Advantages",
+                "cta_url": "/train",
+                "elo_note": "Converting +2 advantages consistently is what separates 1500s from 1800s.",
+            })
+        training_plan.append({
+            "title": "Intuition Sharpening",
+            "why": "At your level, rapid pattern recognition separates good play from great play. The faster you spot threats, the more time you save for critical decisions.",
+            "how": "Do the Intuition Trainer: spot the blunder among 4 moves. This trains threat detection at speed.",
+            "cta_label": "Intuition Trainer",
+            "cta_url": "/train",
+            "elo_note": "Fast pattern recognition frees up clock time for the critical moments.",
+        })
+    else:  # expert
+        training_plan.append({
+            "title": "Deep Game Analysis",
+            "why": f"At {elo}, improvement comes from understanding your decisions, not just drilling tactics.",
+            "how": "Review your last 5 losses in detail. For each loss, find the move where you went wrong and understand the CONCEPT you missed — was it a tactical pattern, a positional misjudgment, or a calculation error?",
+            "cta_label": "View Games",
+            "cta_url": "/games",
+            "elo_note": "Self-aware analysis is the #1 training method for players above 1900.",
+        })
+        if cpl_stddev > 20:
+            training_plan.append({
+                "title": "Consistency Protocol",
+                "why": f"Your CPL stddev of {round(cpl_stddev, 1)} means you're inconsistent. Your bad games are dragging your rating.",
+                "how": "Build a pre-game checklist: Are you well-rested? Have you warmed up (5 puzzles)? Are you tilted from a previous game? Don't play if two of these are no.",
+                "cta_label": "Daily Warmup",
+                "cta_url": "/train",
+                "elo_note": "At your level, NOT playing bad games is as valuable as playing good ones.",
+            })
+        if worst_phase == "endgame" and endgame_cpl > 40:
+            training_plan.append({
+                "title": "Complex Endgame Study",
+                "why": f"Your endgame CPL of {round(endgame_cpl, 1)} suggests gaps in complex endgames — likely rook endgames with multiple pawns or minor piece endgames.",
+                "how": "Study Dvoretsky's Endgame Manual chapters 1-3, or practice specific endgame positions against Stockfish from your own games.",
+                "cta_label": "Practice Endgames",
+                "cta_url": "/train",
+                "elo_note": "At expert level, endgame technique is the most common decider in equal positions.",
+            })
+
+    # Ensure at least 3 training actions
+    if len(training_plan) < 3:
+        training_plan.append({
+            "title": "Build the Analysis Habit",
+            "why": f"You've analyzed {analyzed_games} of {total_games} games. Every game has lessons — wins and losses alike.",
+            "how": "After every game, spend 5 minutes: find your worst move, find your best move, check your opening. That's the full routine.",
+            "cta_label": "View Games",
+            "cta_url": "/games",
+            "elo_note": "Players who analyze every game improve 2x faster than those who don't.",
+        })
+
+    # ── 5. Weekly focus (compact version of study plan) ──
+    from datetime import date as date_type
+    today_str = date_type.today().strftime("%A")
+    # Get the study plan for this week's focus areas
+    study_plan = await get_study_plan(user=user, db=db)
+    today_focus = None
+    week_themes = []
+    if study_plan.get("days"):
+        for day in study_plan["days"]:
+            if day.get("is_today"):
+                today_focus = {"day": day["day"], "focus": day["focus"], "activities": day["activities"]}
+            week_themes.append({"day": day["day"], "focus": day["focus"], "duration": day.get("total_duration_min", 0)})
+
+    # ── Assemble the complete report ──
+    return {
+        "has_data": True,
+        # Player context
+        "elo": current_elo,
+        "elo_trend": elo_trend,
+        "elo_tier": tier,
+        "elo_tier_label": tier_label,
+        # Identity (for theming)
+        "persona": persona,
+        "overall_score": overall_score,
+        "analyzed_games": analyzed_games,
+        "total_games": total_games,
+        # Report sections
+        "headline": headline,
+        "honest_truths": honest_truths,
+        "chess_story": chess_story,
+        "phase_report": phase_report,
+        "tendencies": tendencies,
+        "kryptonite": kryptonite,
+        "training_plan": training_plan[:4],
+        "growth_path": growth_path,
+        "one_thing": one_thing,
+        # Weekly context
+        "today_focus": today_focus,
+        "week_themes": week_themes,
+    }
