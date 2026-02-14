@@ -29,7 +29,7 @@ import {
   ChevronDown,
   BookOpen,
 } from "lucide-react";
-import { puzzlesAPI, insightsAPI, openingsAPI, type PuzzleItem, type Weakness, type PuzzleHistoryResponse, type DailyWarmupResponse, type AdvantagePositionsResponse, type IntuitionChallengeResponse } from "@/lib/api";
+import { puzzlesAPI, insightsAPI, openingsAPI, explanationsAPI, type PuzzleItem, type Weakness, type PuzzleHistoryResponse, type DailyWarmupResponse, type AdvantagePositionsResponse, type IntuitionChallengeResponse } from "@/lib/api";
 import { playMove, playCorrect, playIncorrect, playStreak, playWarmupComplete } from "@/lib/sounds";
 import {
   Button,
@@ -94,7 +94,7 @@ function TrainPageInner() {
   const [intuitionPreviewIdx, setIntuitionPreviewIdx] = useState(0);
 
   // ─── Opening Drill ──────────────────────────────────
-  type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; children: OpeningTreeNode[] };
+  type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; best_move_san?: string | null; eval_cp?: number | null; children: OpeningTreeNode[] };
   const [openingTree, setOpeningTree] = useState<OpeningTreeNode[]>([]);
   const [openingDrillColor, setOpeningDrillColor] = useState<"white" | "black">("white");
   const [openingDrillGame] = useState(() => new Chess());
@@ -104,6 +104,12 @@ function TrainPageInner() {
   const [openingDrillHint, setOpeningDrillHint] = useState<string>("");
   const [openingDrillScore, setOpeningDrillScore] = useState({ correct: 0, total: 0 });
   const [openingDrillCurrentPath, setOpeningDrillCurrentPath] = useState<OpeningTreeNode[]>([]);
+  const [openingDrillExplanation, setOpeningDrillExplanation] = useState<string>("");
+  const [openingDrillExplanationLoading, setOpeningDrillExplanationLoading] = useState(false);
+  const [openingDrillSelectedSquare, setOpeningDrillSelectedSquare] = useState<Square | null>(null);
+  const [openingDrillLegalMoves, setOpeningDrillLegalMoves] = useState<Square[]>([]);
+  const [openingDrillWrongFen, setOpeningDrillWrongFen] = useState<string>("");
+  const [openingDrillWrongMoveIdx, setOpeningDrillWrongMoveIdx] = useState<number>(0);
 
   // ─── Puzzle queue state ──────────────────────────────
   const [queue, setQueue] = useState<PuzzleItem[]>([]);
@@ -437,7 +443,39 @@ function TrainPageInner() {
     }
   }
 
+  // ─── Keyboard navigation for Intuition Trainer ───────
+  useEffect(() => {
+    if (view !== "intuition") return;
+    const challenge = intuitionChallenges?.challenges[intuitionIdx];
+    if (!challenge) return;
+    const maxIdx = Math.max(0, challenge.options.length - 1);
+
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setIntuitionPreviewIdx((i) => Math.max(0, i - 1));
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setIntuitionPreviewIdx((i) => Math.min(maxIdx, i + 1));
+      }
+    }
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [view, intuitionChallenges, intuitionIdx]);
+
   // ─── Opening Drill functions ─────────────────────────
+
+  function pickWeightedRandom(nodes: OpeningTreeNode[]): OpeningTreeNode {
+    const totalGames = nodes.reduce((sum, n) => sum + n.games, 0);
+    let roll = Math.random() * totalGames;
+    for (const n of nodes) {
+      roll -= n.games;
+      if (roll <= 0) return n;
+    }
+    return nodes[0];
+  }
+
   async function startOpeningDrill(color: "white" | "black") {
     setOpeningDrillColor(color);
     setView("opening-drill");
@@ -445,6 +483,12 @@ function TrainPageInner() {
     setOpeningDrillScore({ correct: 0, total: 0 });
     setOpeningDrillMoves([]);
     setOpeningDrillHint("");
+    setOpeningDrillExplanation("");
+    setOpeningDrillExplanationLoading(false);
+    setOpeningDrillSelectedSquare(null);
+    setOpeningDrillLegalMoves([]);
+    setOpeningDrillWrongFen("");
+    setOpeningDrillWrongMoveIdx(0);
     openingDrillGame.reset();
     setOpeningDrillFen(openingDrillGame.fen());
     setOpeningDrillCurrentPath([]);
@@ -453,9 +497,9 @@ function TrainPageInner() {
       const data = await openingsAPI.tree({ color, max_depth: 12 });
       const tree = (data.tree || []) as OpeningTreeNode[];
       setOpeningTree(tree);
-      // If playing black, auto-play white's first move (most played)
+      // If playing black, auto-play white's first move (weighted random)
       if (color === "black" && tree.length > 0) {
-        const topMove = tree[0];
+        const topMove = pickWeightedRandom(tree);
         openingDrillGame.move(topMove.san);
         setOpeningDrillFen(openingDrillGame.fen());
         setOpeningDrillMoves([topMove.san]);
@@ -476,10 +520,26 @@ function TrainPageInner() {
     const move = moveCopy.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
     if (!move) return false;
 
-    // Check if this move exists in the tree
+    // Clear selection state
+    setOpeningDrillSelectedSquare(null);
+    setOpeningDrillLegalMoves([]);
+
+    // Determine the "correct" move:
+    // 1. Use engine best_move_san if available for this position (from any node in currentPath)
+    // 2. Fall back to most-played move in tree
+    const bestMoveSan = openingDrillCurrentPath[0]?.best_move_san;
     const matchingNode = openingDrillCurrentPath.find((n) => n.san === move.san);
 
-    if (matchingNode) {
+    // Check correctness: engine best move takes priority, then tree match
+    let isCorrect = false;
+    if (bestMoveSan) {
+      isCorrect = move.san === bestMoveSan;
+    } else {
+      // No engine data — accept any move that's in the tree
+      isCorrect = !!matchingNode;
+    }
+
+    if (isCorrect) {
       // Correct! Apply the move
       openingDrillGame.move(move.san);
       const newMoves = [...openingDrillMoves, move.san];
@@ -487,12 +547,16 @@ function TrainPageInner() {
       setOpeningDrillFen(openingDrillGame.fen());
       setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
       setOpeningDrillHint("");
+      setOpeningDrillExplanation("");
       playCorrect();
 
+      // Find the matching node to traverse into its children
+      const traverseNode = matchingNode || openingDrillCurrentPath.find((n) => n.san === move.san);
+
       // Now play the opponent's reply (if any)
-      if (matchingNode.children.length > 0) {
-        // Pick the most played reply
-        const reply = matchingNode.children[0];
+      if (traverseNode && traverseNode.children.length > 0) {
+        // Pick weighted random reply (proportional to game count)
+        const reply = pickWeightedRandom(traverseNode.children);
         setTimeout(() => {
           openingDrillGame.move(reply.san);
           setOpeningDrillFen(openingDrillGame.fen());
@@ -510,12 +574,40 @@ function TrainPageInner() {
         setOpeningDrillState("done");
       }
     } else {
-      // Wrong move
+      // Wrong move — show feedback
       setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
       playIncorrect();
-      const correctMoves = openingDrillCurrentPath.slice(0, 3).map((n) => n.san);
-      setOpeningDrillHint(`You usually play: ${correctMoves.join(", ")}`);
+
+      const correctMove = bestMoveSan || openingDrillCurrentPath[0]?.san || "?";
+      setOpeningDrillHint(`Best move was: ${correctMove}`);
       setOpeningDrillState("wrong");
+
+      // Save state for "try again from here"
+      setOpeningDrillWrongFen(openingDrillGame.fen());
+      setOpeningDrillWrongMoveIdx(openingDrillMoves.length);
+
+      // Fetch AI explanation for why the move was wrong
+      setOpeningDrillExplanationLoading(true);
+      setOpeningDrillExplanation("");
+      explanationsAPI
+        .explainMove({
+          fen: openingDrillGame.fen(),
+          san: move.san,
+          best_move_san: correctMove,
+          phase: "opening",
+          move_quality: "Mistake",
+          move_number: Math.floor(openingDrillMoves.length / 2) + 1,
+          color: openingDrillColor,
+        })
+        .then((res) => {
+          setOpeningDrillExplanation(res.explanation);
+        })
+        .catch(() => {
+          setOpeningDrillExplanation("");
+        })
+        .finally(() => {
+          setOpeningDrillExplanationLoading(false);
+        });
     }
 
     return true;
@@ -527,9 +619,13 @@ function TrainPageInner() {
     setOpeningDrillMoves([]);
     setOpeningDrillState("playing");
     setOpeningDrillHint("");
+    setOpeningDrillExplanation("");
+    setOpeningDrillExplanationLoading(false);
+    setOpeningDrillSelectedSquare(null);
+    setOpeningDrillLegalMoves([]);
 
     if (openingDrillColor === "black" && openingTree.length > 0) {
-      const topMove = openingTree[0];
+      const topMove = pickWeightedRandom(openingTree);
       openingDrillGame.move(topMove.san);
       setOpeningDrillFen(openingDrillGame.fen());
       setOpeningDrillMoves([topMove.san]);
@@ -538,6 +634,113 @@ function TrainPageInner() {
       setOpeningDrillCurrentPath(openingTree);
     }
   }
+
+  function openingDrillRetryFromHere() {
+    // Replay moves up to the point of the mistake to restore the position
+    openingDrillGame.reset();
+    const movesToReplay = openingDrillMoves.slice(0, openingDrillWrongMoveIdx);
+    for (const m of movesToReplay) {
+      openingDrillGame.move(m);
+    }
+    setOpeningDrillFen(openingDrillGame.fen());
+    setOpeningDrillMoves(movesToReplay);
+    setOpeningDrillState("playing");
+    setOpeningDrillHint("");
+    setOpeningDrillExplanation("");
+    setOpeningDrillExplanationLoading(false);
+    setOpeningDrillSelectedSquare(null);
+    setOpeningDrillLegalMoves([]);
+
+    // Walk the tree to find the current path at this position
+    let currentNodes = openingTree;
+    for (const m of movesToReplay) {
+      const node = currentNodes.find((n) => n.san === m);
+      if (node) {
+        currentNodes = node.children;
+      } else {
+        break;
+      }
+    }
+    setOpeningDrillCurrentPath(currentNodes);
+  }
+
+  // Opening drill click-to-move handlers
+  function onDrillPieceClick(_piece: string, square: Square) {
+    if (openingDrillState !== "playing") return;
+
+    const clicked = openingDrillGame.get(square);
+
+    if (openingDrillSelectedSquare) {
+      if (openingDrillSelectedSquare === square) {
+        setOpeningDrillSelectedSquare(null);
+        setOpeningDrillLegalMoves([]);
+        return;
+      }
+      if (clicked && clicked.color === openingDrillGame.turn()) {
+        setOpeningDrillSelectedSquare(null);
+        setOpeningDrillLegalMoves([]);
+        return;
+      }
+      if (openingDrillTryMove(openingDrillSelectedSquare, square)) return;
+    }
+
+    if (clicked && clicked.color === openingDrillGame.turn()) {
+      setOpeningDrillSelectedSquare(square);
+      const moves = openingDrillGame.moves({ square, verbose: true });
+      setOpeningDrillLegalMoves(moves.map((m) => m.to as Square));
+    } else {
+      setOpeningDrillSelectedSquare(null);
+      setOpeningDrillLegalMoves([]);
+    }
+  }
+
+  function onDrillSquareClick(square: Square, piece?: string) {
+    if (openingDrillState !== "playing") return;
+
+    const clicked = openingDrillGame.get(square);
+
+    if (openingDrillSelectedSquare) {
+      if (openingDrillSelectedSquare === square) {
+        setOpeningDrillSelectedSquare(null);
+        setOpeningDrillLegalMoves([]);
+        return;
+      }
+      if (clicked && clicked.color === openingDrillGame.turn()) {
+        setOpeningDrillSelectedSquare(null);
+        setOpeningDrillLegalMoves([]);
+        return;
+      }
+      if (openingDrillTryMove(openingDrillSelectedSquare, square)) return;
+    }
+
+    if (piece) {
+      if (clicked && clicked.color === openingDrillGame.turn()) {
+        setOpeningDrillSelectedSquare(square);
+        const moves = openingDrillGame.moves({ square, verbose: true });
+        setOpeningDrillLegalMoves(moves.map((m) => m.to as Square));
+        return;
+      }
+    }
+
+    setOpeningDrillSelectedSquare(null);
+    setOpeningDrillLegalMoves([]);
+  }
+
+  const drillSquareStyles = useMemo(() => {
+    const styles: Record<string, CSSProperties> = {};
+    if (openingDrillSelectedSquare) {
+      styles[openingDrillSelectedSquare] = { backgroundColor: "rgba(255, 255, 0, 0.35)" };
+    }
+    for (const sq of openingDrillLegalMoves) {
+      const piece = openingDrillGame.get(sq);
+      if (piece) {
+        styles[sq] = { background: "radial-gradient(transparent 56%, rgba(0,0,0,0.35) 56%)" };
+      } else {
+        styles[sq] = { background: "radial-gradient(circle, rgba(0,0,0,0.35) 22%, transparent 23%)" };
+      }
+    }
+    return styles;
+  }, [openingDrillSelectedSquare, openingDrillLegalMoves, openingDrillFen]);
 
   // ─── Handle move ─────────────────────────────────────
   function tryMove(sourceSquare: Square, targetSquare: Square): boolean {
@@ -1243,7 +1446,7 @@ function TrainPageInner() {
                         <span className="font-semibold text-sm">White Repertoire</span>
                       </div>
                       <p className="text-xs text-gray-500 line-clamp-2">
-                        Test yourself on your most-played openings as White. Can you remember your own lines?
+                        Find the engine&apos;s best move in your White openings. Opponents respond as they do in your games.
                       </p>
                       <p className="text-xs mt-2 text-emerald-400 flex items-center gap-1">
                         Drill <ArrowRight className="h-3 w-3" />
@@ -1258,7 +1461,7 @@ function TrainPageInner() {
                         <span className="font-semibold text-sm">Black Repertoire</span>
                       </div>
                       <p className="text-xs text-gray-500 line-clamp-2">
-                        Test yourself on your most-played openings as Black. Build muscle memory for your defenses.
+                        Find the engine&apos;s best move in your Black openings. Opponents respond as they do in your games.
                       </p>
                       <p className="text-xs mt-2 text-sky-400 flex items-center gap-1">
                         Drill <ArrowRight className="h-3 w-3" />
@@ -1474,7 +1677,7 @@ function TrainPageInner() {
     const previewIdx = Math.min(intuitionPreviewIdx, previewMaxIdx);
     const previewOption = challenge?.options[previewIdx];
 
-    let previewFen = challenge?.options[0]?.fen_before;
+    let previewFen = previewOption?.fen_before ?? challenge?.options[0]?.fen_before;
     if (previewFen && previewOption?.san) {
       try {
         const previewChess = new Chess(previewFen);
@@ -1568,7 +1771,7 @@ function TrainPageInner() {
                     </Button>
                   </div>
                   <p className="text-xs text-gray-500 text-center mt-2">
-                    Use preview controls to move through candidate sequence
+                    Use ← → arrow keys or buttons to preview moves
                   </p>
                 </div>
               </div>
@@ -1649,7 +1852,7 @@ function TrainPageInner() {
               <BookOpen className="h-6 w-6 text-emerald-400" /> Opening Drill
             </h1>
             <p className="text-gray-500 mt-1">
-              Play your {openingDrillColor === "white" ? "White" : "Black"} repertoire from memory
+              Play the best move in your {openingDrillColor === "white" ? "White" : "Black"} openings
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1680,10 +1883,13 @@ function TrainPageInner() {
               <div className="relative">
                 <Chessboard
                   position={openingDrillFen}
+                  onPieceClick={onDrillPieceClick}
+                  onSquareClick={onDrillSquareClick}
                   onPieceDrop={(s, t) => openingDrillTryMove(s as Square, t as Square)}
                   boardOrientation={openingDrillColor}
                   boardWidth={560}
                   arePiecesDraggable={openingDrillState === "playing"}
+                  customSquareStyles={drillSquareStyles}
                   customBoardStyle={{
                     borderRadius: "8px",
                     boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
@@ -1701,13 +1907,26 @@ function TrainPageInner() {
                       exit={{ opacity: 0, scale: 0.9 }}
                       className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg"
                     >
-                      <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-red-900/90">
-                        <XCircle className="h-12 w-12 text-red-400" />
-                        <p className="text-lg font-bold text-red-300">Not your usual move</p>
+                      <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-red-900/90 max-w-[90%]">
+                        <XCircle className="h-10 w-10 text-red-400" />
+                        <p className="text-lg font-bold text-red-300">Not the best move</p>
                         {openingDrillHint && (
-                          <p className="text-sm text-red-400/80">{openingDrillHint}</p>
+                          <p className="text-sm text-red-400/80 font-mono">{openingDrillHint}</p>
+                        )}
+                        {openingDrillExplanationLoading && (
+                          <div className="flex items-center gap-2 text-sm text-red-400/60">
+                            <Spinner className="h-4 w-4" /> Getting explanation...
+                          </div>
+                        )}
+                        {openingDrillExplanation && (
+                          <p className="text-sm text-gray-300 bg-black/30 rounded-lg px-4 py-3 leading-relaxed max-w-[400px] text-center">
+                            {openingDrillExplanation}
+                          </p>
                         )}
                         <div className="flex gap-2 mt-2">
+                          <Button variant="secondary" size="sm" onClick={openingDrillRetryFromHere}>
+                            <RotateCcw className="h-4 w-4" /> Try Again
+                          </Button>
                           <Button variant="secondary" size="sm" onClick={openingDrillRetry}>
                             <RotateCcw className="h-4 w-4" /> Start Over
                           </Button>
@@ -1767,9 +1986,9 @@ function TrainPageInner() {
                     How It Works
                   </h3>
                   <div className="space-y-2 text-sm text-gray-400">
-                    <p>Play the opening moves you usually play in your games.</p>
-                    <p>We built this from your actual game data — these are YOUR lines, not textbook moves.</p>
-                    <p>If you deviate from your usual repertoire, we&apos;ll show you what you normally play.</p>
+                    <p>Play the <span className="text-emerald-400 font-medium">engine-recommended best move</span> at each position.</p>
+                    <p>Your opponent will respond with moves from your actual games, weighted by how often they occur.</p>
+                    <p>If you play the wrong move, we&apos;ll explain why and you can try again from that position.</p>
                   </div>
                 </CardContent>
               </Card>

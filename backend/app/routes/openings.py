@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_user
-from app.db.models import Game, OpeningRepertoire, User
+from app.db.models import Game, MoveEvaluation, OpeningRepertoire, User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -106,7 +106,10 @@ class OpeningTreeNode(BaseModel):
     wins: int
     draws: int
     losses: int
-    average_cpl: Optional[float]
+    average_cpl: Optional[float] = None
+    best_move_san: Optional[str] = None
+    eval_cp: Optional[int] = None
+    win_rate: Optional[float] = None
     children: list["OpeningTreeNode"] = []
 
 
@@ -218,7 +221,7 @@ async def opening_tree(
 ):
     """
     Build an opening tree from the user's actual games.
-    Shows the user's most-played lines with win rates.
+    Shows the user's most-played lines with win rates and engine eval data.
     """
     # Fetch all user games of the specified color with analysis
     games_q = await db.execute(
@@ -231,6 +234,24 @@ async def opening_tree(
 
     if not games:
         return {"tree": [], "total_games": 0}
+
+    # Fetch engine evaluations for these games (indexed by fen_before)
+    game_ids = [g.id for g in games]
+    evals_q = await db.execute(
+        select(MoveEvaluation).where(
+            MoveEvaluation.game_id.in_(game_ids),
+        )
+    )
+    all_evals = evals_q.scalars().all()
+
+    # Build lookup: fen_before -> best_move_san, eval_before (take first non-null)
+    eval_by_fen: dict[str, dict] = {}
+    for ev in all_evals:
+        if ev.fen_before and ev.fen_before not in eval_by_fen:
+            eval_by_fen[ev.fen_before] = {
+                "best_move_san": ev.best_move_san,
+                "eval_before": ev.eval_before,
+            }
 
     # Build a trie of moves from all PGNs
     import chess.pgn
@@ -256,6 +277,7 @@ async def opening_tree(
                 if ply >= max_depth:
                     break
 
+                fen_before = board.fen()
                 san = board.san(move)
                 uci = move.uci()
                 board.push(move)
@@ -270,6 +292,7 @@ async def opening_tree(
                         "wins": 0,
                         "draws": 0,
                         "losses": 0,
+                        "fen_before": fen_before,
                     }
 
                 child = node["children"][san]
@@ -300,6 +323,10 @@ async def opening_tree(
             total = child_data["games"]
             wr = round((child_data["wins"] / total) * 100, 1) if total > 0 else 0
 
+            # Cross-reference engine eval data
+            fen = child_data.get("fen_before")
+            ev_data = eval_by_fen.get(fen, {}) if fen else {}
+
             result.append({
                 "san": child_data["san"],
                 "uci": child_data.get("uci"),
@@ -308,6 +335,8 @@ async def opening_tree(
                 "draws": child_data["draws"],
                 "losses": child_data["losses"],
                 "win_rate": wr,
+                "best_move_san": ev_data.get("best_move_san"),
+                "eval_cp": ev_data.get("eval_before"),
                 "children": to_tree_nodes(child_data, min_games),
             })
         return result
