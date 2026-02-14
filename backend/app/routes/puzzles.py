@@ -68,7 +68,17 @@ async def list_puzzles(
     db: AsyncSession = Depends(get_db),
 ):
     """List puzzles generated from the user's games. Optionally filter by game_id."""
-    query = select(Puzzle).where(Puzzle.source_user_id == user.id)
+    # Exclude all puzzles the user has already attempted
+    attempted_sq = (
+        select(PuzzleAttempt.puzzle_id)
+        .where(PuzzleAttempt.user_id == user.id)
+        .distinct()
+        .subquery()
+    )
+    query = select(Puzzle).where(
+        Puzzle.source_user_id == user.id,
+        Puzzle.id.notin_(select(attempted_sq)),
+    )
 
     if game_id:
         query = query.where(Puzzle.source_game_id == game_id)
@@ -111,16 +121,16 @@ async def global_puzzles(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List puzzles from ALL users' games (community puzzles). Excludes already-solved."""
-    # Subquery: puzzle IDs the user has already solved correctly
-    solved_sq = (
+    """List puzzles from ALL users' games (community puzzles). Excludes already-attempted."""
+    # Subquery: puzzle IDs the user has already attempted (any result)
+    attempted_sq = (
         select(PuzzleAttempt.puzzle_id)
-        .where(PuzzleAttempt.user_id == user.id, PuzzleAttempt.correct == True)
+        .where(PuzzleAttempt.user_id == user.id)
         .distinct()
         .subquery()
     )
 
-    query = select(Puzzle).where(Puzzle.id.notin_(select(solved_sq)))
+    query = select(Puzzle).where(Puzzle.id.notin_(select(attempted_sq)))
 
     if difficulty:
         query = query.where(Puzzle.difficulty == difficulty)
@@ -361,10 +371,10 @@ async def get_daily_warmup(
         weak_phases = sorted(phase_map, key=phase_map.get, reverse=True)[:2]
 
     if weak_phases:
-        # Get puzzles the user hasn't solved from their weak phases
-        solved_sq = (
+        # Get puzzles the user hasn't attempted from their weak phases
+        attempted_sq = (
             select(PuzzleAttempt.puzzle_id)
-            .where(PuzzleAttempt.user_id == user.id, PuzzleAttempt.correct == True)
+            .where(PuzzleAttempt.user_id == user.id)
             .distinct()
             .subquery()
         )
@@ -372,7 +382,7 @@ async def get_daily_warmup(
             select(Puzzle)
             .where(
                 Puzzle.phase.in_(weak_phases),
-                Puzzle.id.notin_(select(solved_sq)),
+                Puzzle.id.notin_(select(attempted_sq)),
                 Puzzle.id.notin_(seen_ids) if seen_ids else True,
             )
             .order_by(func.random())
@@ -384,19 +394,19 @@ async def get_daily_warmup(
                 puzzles_out.append(puzzle_dict(p, "weakness"))
                 seen_ids.add(p.id)
 
-    # ── 3. Fill remaining slots with random unsolved puzzles ──
+    # ── 3. Fill remaining slots with random unattempted puzzles ──
     remaining = 5 - len(puzzles_out)
     if remaining > 0:
-        solved_sq2 = (
+        attempted_sq2 = (
             select(PuzzleAttempt.puzzle_id)
-            .where(PuzzleAttempt.user_id == user.id, PuzzleAttempt.correct == True)
+            .where(PuzzleAttempt.user_id == user.id)
             .distinct()
             .subquery()
         )
         random_q = (
             select(Puzzle)
             .where(
-                Puzzle.id.notin_(select(solved_sq2)),
+                Puzzle.id.notin_(select(attempted_sq2)),
                 Puzzle.id.notin_(seen_ids) if seen_ids else True,
             )
             .order_by(func.random())

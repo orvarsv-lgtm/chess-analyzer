@@ -25,6 +25,8 @@ import {
   Trophy,
   Shield,
   Eye,
+  SlidersHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import { puzzlesAPI, insightsAPI, type PuzzleItem, type Weakness, type PuzzleHistoryResponse, type DailyWarmupResponse, type AdvantagePositionsResponse, type IntuitionChallengeResponse } from "@/lib/api";
 import { playMove, playCorrect, playIncorrect, playStreak, playWarmupComplete } from "@/lib/sounds";
@@ -90,6 +92,21 @@ function TrainPageInner() {
   const [queue, setQueue] = useState<PuzzleItem[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  // ─── Puzzle Options / Filters ────────────────────────
+  const [filterDifficulty, setFilterDifficulty] = useState<string>("");
+  const [filterPhase, setFilterPhase] = useState<string>("");
+  const [filterType, setFilterType] = useState<string>("");
+  const [showOptions, setShowOptions] = useState(false);
+  const hasFilters = filterDifficulty || filterPhase || filterType;
+
+  const puzzleFilters = useMemo(() => {
+    const f: { difficulty?: string; phase?: string; puzzle_type?: string } = {};
+    if (filterDifficulty) f.difficulty = filterDifficulty;
+    if (filterPhase) f.phase = filterPhase;
+    if (filterType) f.puzzle_type = filterType;
+    return f;
+  }, [filterDifficulty, filterPhase, filterType]);
 
   // ─── Solving state ───────────────────────────────────
   const [puzzleState, setPuzzleState] = useState<PuzzleState>("solving");
@@ -187,27 +204,28 @@ function TrainPageInner() {
   }, []);
 
   // ─── Load puzzles ────────────────────────────────────
-  const loadPuzzles = useCallback(async (source?: PuzzleSource) => {
+  const loadPuzzles = useCallback(async (source?: PuzzleSource, filters?: { difficulty?: string; phase?: string; puzzle_type?: string }) => {
     const src = source ?? puzzleSource;
+    const f = filters ?? puzzleFilters;
     setLoading(true);
     try {
       let puzzles: PuzzleItem[] = [];
 
       if (src === "game" && gameIdParam) {
         // Puzzles from a specific game
-        puzzles = await puzzlesAPI.list({ game_id: Number(gameIdParam), limit: 20 });
+        puzzles = await puzzlesAPI.list({ game_id: Number(gameIdParam), limit: 20, ...f });
       } else if (src === "global") {
         // Community puzzles from all users
-        puzzles = await puzzlesAPI.global({ limit: 20 });
+        puzzles = await puzzlesAPI.global({ limit: 20, ...f });
       } else {
         // User's own puzzles (spaced repetition first, then own, then global fallback)
         puzzles = await puzzlesAPI.reviewQueue(10);
         if (!puzzles || puzzles.length === 0) {
-          puzzles = await puzzlesAPI.list({ limit: 10 });
+          puzzles = await puzzlesAPI.list({ limit: 10, ...f });
         }
         // If still no puzzles from user's games, fall back to global pool
         if (!puzzles || puzzles.length === 0) {
-          puzzles = await puzzlesAPI.global({ limit: 10 });
+          puzzles = await puzzlesAPI.global({ limit: 10, ...f });
         }
       }
 
@@ -218,7 +236,7 @@ function TrainPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [puzzleSource, gameIdParam]);
+  }, [puzzleSource, gameIdParam, puzzleFilters]);
 
   // Auto-start session if game_id is in URL
   useEffect(() => {
@@ -241,7 +259,7 @@ function TrainPageInner() {
     const src = source ?? puzzleSource;
     if (timed !== undefined) setIsTimed(timed);
     setPuzzleSource(src);
-    loadPuzzles(src);
+    loadPuzzles(src, puzzleFilters);
     setView("session");
     setSolvedToday(0);
     setCorrectToday(0);
@@ -689,6 +707,92 @@ function TrainPageInner() {
             </button>
           ))}
         </div>
+
+        {/* ─── Puzzle Options ─── */}
+        <Card className="overflow-hidden">
+          <button
+            onClick={() => setShowOptions(!showOptions)}
+            className="w-full flex items-center justify-between p-4 text-left hover:bg-white/[0.02] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-gray-400" />
+              <span className="text-sm font-medium">Puzzle Options</span>
+              {hasFilters && (
+                <Badge variant="success" className="text-[10px] px-1.5 py-0">
+                  Filtered
+                </Badge>
+              )}
+            </div>
+            <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${showOptions ? "rotate-180" : ""}`} />
+          </button>
+          <AnimatePresence>
+            {showOptions && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4 grid gap-3 sm:grid-cols-3">
+                  {/* Difficulty */}
+                  <div>
+                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Difficulty</label>
+                    <select
+                      value={filterDifficulty}
+                      onChange={(e) => setFilterDifficulty(e.target.value)}
+                      className="w-full rounded-lg bg-surface-2 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="">All</option>
+                      <option value="bronze">Bronze</option>
+                      <option value="silver">Silver</option>
+                      <option value="gold">Gold</option>
+                      <option value="platinum">Platinum</option>
+                    </select>
+                  </div>
+                  {/* Game Phase */}
+                  <div>
+                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Phase</label>
+                    <select
+                      value={filterPhase}
+                      onChange={(e) => setFilterPhase(e.target.value)}
+                      className="w-full rounded-lg bg-surface-2 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="">All</option>
+                      <option value="opening">Opening</option>
+                      <option value="middlegame">Middlegame</option>
+                      <option value="endgame">Endgame</option>
+                    </select>
+                  </div>
+                  {/* Puzzle Type */}
+                  <div>
+                    <label className="text-xs text-gray-500 uppercase tracking-wider mb-1.5 block">Type</label>
+                    <select
+                      value={filterType}
+                      onChange={(e) => setFilterType(e.target.value)}
+                      className="w-full rounded-lg bg-surface-2 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="">All</option>
+                      <option value="blunder">Blunder</option>
+                      <option value="mistake">Mistake</option>
+                      <option value="missed_win">Missed Win</option>
+                    </select>
+                  </div>
+                </div>
+                {hasFilters && (
+                  <div className="px-4 pb-4">
+                    <button
+                      onClick={() => { setFilterDifficulty(""); setFilterPhase(""); setFilterType(""); }}
+                      className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+                    >
+                      Clear all filters
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
 
         {hubLoading ? (
           <div className="flex justify-center py-12">

@@ -459,9 +459,14 @@ export interface PuzzleItem {
   id: number;
   puzzle_key: string;
   fen: string;
+  side_to_move?: string;
   best_move_san: string;
+  best_move_uci?: string;
   eval_loss_cp: number;
+  phase?: string;
+  puzzle_type?: string;
   difficulty: string;
+  explanation?: string | null;
   themes: string[];
 }
 
