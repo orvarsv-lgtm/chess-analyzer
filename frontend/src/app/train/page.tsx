@@ -91,8 +91,7 @@ function TrainPageInner() {
   const [intuitionIdx, setIntuitionIdx] = useState(0);
   const [intuitionPicked, setIntuitionPicked] = useState<number | null>(null);
   const [intuitionScore, setIntuitionScore] = useState(0);
-  const [intuitionPreviewIdx, setIntuitionPreviewIdx] = useState(0);
-  const [intuitionPreviewPhase, setIntuitionPreviewPhase] = useState<0 | 1>(0); // 0=before move, 1=after move
+  const [intuitionStep, setIntuitionStep] = useState(0); // linear step: 0=opt0 before, 1=opt0 after, 2=opt1 before, ...
 
   // ─── Opening Drill ──────────────────────────────────
   type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; best_move_san?: string | null; eval_cp?: number | null; average_cpl?: number | null; children: OpeningTreeNode[] };
@@ -436,8 +435,7 @@ function TrainPageInner() {
     setIntuitionIdx(0);
     setIntuitionPicked(null);
     setIntuitionScore(0);
-    setIntuitionPreviewIdx(0);
-    setIntuitionPreviewPhase(0);
+    setIntuitionStep(0);
     try {
       const data = await puzzlesAPI.intuitionChallenge(5);
       setIntuitionChallenges(data);
@@ -451,31 +449,21 @@ function TrainPageInner() {
     if (view !== "intuition") return;
     const challenge = intuitionChallenges?.challenges[intuitionIdx];
     if (!challenge) return;
-    const maxIdx = Math.max(0, challenge.options.length - 1);
+    const maxStep = challenge.options.length * 2 - 1;
 
     function handleKey(e: KeyboardEvent) {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        if (intuitionPreviewPhase === 1) {
-          setIntuitionPreviewPhase(0);
-          return;
-        }
-        setIntuitionPreviewIdx((i) => Math.max(0, i - 1));
-        setIntuitionPreviewPhase(1);
+        setIntuitionStep((s) => Math.max(0, s - 1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        if (intuitionPreviewPhase === 0) {
-          setIntuitionPreviewPhase(1);
-          return;
-        }
-        setIntuitionPreviewIdx((i) => Math.min(maxIdx, i + 1));
-        setIntuitionPreviewPhase(0);
+        setIntuitionStep((s) => Math.min(maxStep, s + 1));
       }
     }
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [view, intuitionChallenges, intuitionIdx, intuitionPreviewPhase]);
+  }, [view, intuitionChallenges, intuitionIdx]);
 
   // ─── Opening Drill functions ─────────────────────────
 
@@ -1788,12 +1776,15 @@ function TrainPageInner() {
   if (view === "intuition") {
     const challenge = intuitionChallenges?.challenges[intuitionIdx];
     const isLast = intuitionIdx >= (intuitionChallenges?.total ?? 0) - 1;
-    const previewMaxIdx = Math.max(0, (challenge?.options.length ?? 1) - 1);
-    const previewIdx = Math.min(intuitionPreviewIdx, previewMaxIdx);
+    const optionCount = challenge?.options.length ?? 0;
+    const maxStep = Math.max(0, optionCount * 2 - 1);
+    const clampedStep = Math.min(intuitionStep, maxStep);
+    const previewIdx = Math.floor(clampedStep / 2);
+    const showAfter = clampedStep % 2 === 1;
     const previewOption = challenge?.options[previewIdx];
 
     let previewFen = previewOption?.fen_before ?? challenge?.options[0]?.fen_before;
-    if (intuitionPreviewPhase === 1 && previewFen && previewOption?.san) {
+    if (showAfter && previewFen && previewOption?.san) {
       try {
         const previewChess = new Chess(previewFen);
         previewChess.move(previewOption.san);
@@ -1868,40 +1859,26 @@ function TrainPageInner() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        if (intuitionPreviewPhase === 1) {
-                          setIntuitionPreviewPhase(0);
-                        } else {
-                          setIntuitionPreviewIdx((i) => Math.max(0, i - 1));
-                          setIntuitionPreviewPhase(1);
-                        }
-                      }}
-                      disabled={previewIdx <= 0 && intuitionPreviewPhase === 0}
+                      onClick={() => setIntuitionStep((s) => Math.max(0, s - 1))}
+                      disabled={clampedStep <= 0}
                     >
-                      Previous
+                      ←
                     </Button>
                     <p className="text-xs text-gray-400 text-center min-w-[180px]">
-                      Preview {previewIdx + 1}/{challenge.options.length}: {previewOption?.san ?? "-"}
-                      {" "}({intuitionPreviewPhase === 0 ? "before" : "after"})
+                      Move {previewIdx + 1}/{challenge.options.length}: <span className="font-mono font-semibold text-gray-200">{previewOption?.san ?? "-"}</span>
+                      {" "}— {showAfter ? "after" : "before"}
                     </p>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        if (intuitionPreviewPhase === 0) {
-                          setIntuitionPreviewPhase(1);
-                        } else {
-                          setIntuitionPreviewIdx((i) => Math.min(previewMaxIdx, i + 1));
-                          setIntuitionPreviewPhase(0);
-                        }
-                      }}
-                      disabled={previewIdx >= previewMaxIdx && intuitionPreviewPhase === 1}
+                      onClick={() => setIntuitionStep((s) => Math.min(maxStep, s + 1))}
+                      disabled={clampedStep >= maxStep}
                     >
-                      Next
+                      →
                     </Button>
                   </div>
                   <p className="text-xs text-gray-500 text-center mt-2">
-                    Use ← → arrow keys: one press = one side's move
+                    ← → arrow keys to step through moves
                   </p>
                 </div>
               </div>
@@ -1917,6 +1894,8 @@ function TrainPageInner() {
                   if (isBlunder) borderClass = "border-green-500 bg-green-900/10";
                   else if (isThis) borderClass = "border-red-500 bg-red-900/10";
                   else borderClass = "border-surface-3 opacity-60";
+                } else if (i === previewIdx) {
+                  borderClass = "border-purple-500/70 bg-purple-900/10";
                 }
 
                 return (
@@ -1925,8 +1904,7 @@ function TrainPageInner() {
                     className={`p-5 cursor-pointer transition-all ${borderClass} ${!picked ? "hover:scale-[1.02]" : ""}`}
                     onClick={() => {
                       if (picked) return;
-                      setIntuitionPreviewIdx(i);
-                      setIntuitionPreviewPhase(1);
+                      setIntuitionStep(i * 2 + 1);
                       setIntuitionPicked(i);
                       if (isBlunder) setIntuitionScore((s) => s + 1);
                     }}
@@ -1952,13 +1930,11 @@ function TrainPageInner() {
                   onClick={() => {
                     if (isLast) {
                       setIntuitionIdx((i) => i + 1); // triggers "complete" screen
-                      setIntuitionPreviewIdx(0);
-                      setIntuitionPreviewPhase(0);
+                      setIntuitionStep(0);
                     } else {
                       setIntuitionIdx((i) => i + 1);
                       setIntuitionPicked(null);
-                      setIntuitionPreviewIdx(0);
-                      setIntuitionPreviewPhase(0);
+                      setIntuitionStep(0);
                     }
                   }}
                   size="lg"
