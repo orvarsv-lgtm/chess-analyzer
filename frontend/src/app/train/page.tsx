@@ -91,7 +91,7 @@ function TrainPageInner() {
   const [intuitionIdx, setIntuitionIdx] = useState(0);
   const [intuitionPicked, setIntuitionPicked] = useState<number | null>(null);
   const [intuitionScore, setIntuitionScore] = useState(0);
-  const [intuitionStep, setIntuitionStep] = useState(0); // linear step: 0=opt0 before, 1=opt0 after, 2=opt1 before, ...
+  const [intuitionPreviewIdx, setIntuitionPreviewIdx] = useState(0);
 
   // ─── Opening Drill ──────────────────────────────────
   type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; best_move_san?: string | null; eval_cp?: number | null; average_cpl?: number | null; children: OpeningTreeNode[] };
@@ -435,7 +435,7 @@ function TrainPageInner() {
     setIntuitionIdx(0);
     setIntuitionPicked(null);
     setIntuitionScore(0);
-    setIntuitionStep(0);
+    setIntuitionPreviewIdx(0);
     try {
       const data = await puzzlesAPI.intuitionChallenge(5);
       setIntuitionChallenges(data);
@@ -449,15 +449,15 @@ function TrainPageInner() {
     if (view !== "intuition") return;
     const challenge = intuitionChallenges?.challenges[intuitionIdx];
     if (!challenge) return;
-    const maxStep = challenge.options.length * 2 - 1;
+    const lastIdx = challenge.options.length - 1;
 
     function handleKey(e: KeyboardEvent) {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setIntuitionStep((s) => Math.max(0, s - 1));
+        setIntuitionPreviewIdx((i) => Math.max(0, i - 1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setIntuitionStep((s) => Math.min(maxStep, s + 1));
+        setIntuitionPreviewIdx((i) => Math.min(lastIdx, i + 1));
       }
     }
 
@@ -1777,17 +1777,16 @@ function TrainPageInner() {
     const challenge = intuitionChallenges?.challenges[intuitionIdx];
     const isLast = intuitionIdx >= (intuitionChallenges?.total ?? 0) - 1;
     const optionCount = challenge?.options.length ?? 0;
-    const maxStep = Math.max(0, optionCount * 2 - 1);
-    const clampedStep = Math.min(intuitionStep, maxStep);
-    const previewIdx = Math.floor(clampedStep / 2);
-    const showAfter = clampedStep % 2 === 1;
-    const previewOption = challenge?.options[previewIdx];
+    const lastIdx = Math.max(0, optionCount - 1);
+    const activeIdx = Math.min(intuitionPreviewIdx, lastIdx);
+    const activeOption = challenge?.options[activeIdx];
 
-    let previewFen = previewOption?.fen_before ?? challenge?.options[0]?.fen_before;
-    if (showAfter && previewFen && previewOption?.san) {
+    // Always show the position AFTER the move was played
+    let previewFen = activeOption?.fen_before ?? challenge?.options[0]?.fen_before;
+    if (previewFen && activeOption?.san) {
       try {
         const previewChess = new Chess(previewFen);
-        previewChess.move(previewOption.san);
+        previewChess.move(activeOption.san);
         previewFen = previewChess.fen();
       } catch {
         // Keep original FEN if SAN parsing fails
@@ -1795,7 +1794,7 @@ function TrainPageInner() {
     }
 
     return (
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6 animate-fade-in">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -1839,10 +1838,12 @@ function TrainPageInner() {
             <p className="text-sm text-gray-400 text-center">
               Challenge {intuitionIdx + 1} of {intuitionChallenges.total} — Which move is the blunder?
             </p>
-            {/* Preview board */}
-            {challenge.options[0]?.fen_before && (
-              <div className="flex justify-center">
-                <div className="w-[420px] max-w-full">
+
+            {/* Board + move cards side by side on large screens */}
+            <div className="flex flex-col lg:flex-row gap-6 items-start">
+              {/* Board */}
+              {challenge.options[0]?.fen_before && (
+                <div className="flex-1 max-w-[420px] mx-auto lg:mx-0">
                   <Chessboard
                     position={previewFen}
                     boardOrientation={challenge.color === "black" ? "black" : "white"}
@@ -1855,86 +1856,95 @@ function TrainPageInner() {
                     customDarkSquareStyle={{ backgroundColor: "#779952" }}
                     customLightSquareStyle={{ backgroundColor: "#edeed1" }}
                   />
-                  <div className="mt-3 flex items-center justify-center gap-2">
+                  {/* Navigation below board */}
+                  <div className="mt-3 flex items-center justify-center gap-3">
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setIntuitionStep((s) => Math.max(0, s - 1))}
-                      disabled={clampedStep <= 0}
+                      onClick={() => setIntuitionPreviewIdx((i) => Math.max(0, i - 1))}
+                      disabled={activeIdx <= 0}
                     >
                       ←
                     </Button>
-                    <p className="text-xs text-gray-400 text-center min-w-[180px]">
-                      Move {previewIdx + 1}/{challenge.options.length}: <span className="font-mono font-semibold text-gray-200">{previewOption?.san ?? "-"}</span>
-                      {" "}— {showAfter ? "after" : "before"}
+                    <p className="text-sm text-gray-300 text-center font-medium min-w-[140px]">
+                      Move {activeOption?.move_number}: <span className="font-mono text-purple-300">{activeOption?.san ?? "-"}</span>
                     </p>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setIntuitionStep((s) => Math.min(maxStep, s + 1))}
-                      disabled={clampedStep >= maxStep}
+                      onClick={() => setIntuitionPreviewIdx((i) => Math.min(lastIdx, i + 1))}
+                      disabled={activeIdx >= lastIdx}
                     >
                       →
                     </Button>
                   </div>
-                  <p className="text-xs text-gray-500 text-center mt-2">
-                    ← → arrow keys to step through moves
+                  <p className="text-xs text-gray-600 text-center mt-1">
+                    ← → to preview each move
                   </p>
                 </div>
+              )}
+
+              {/* Move option cards */}
+              <div className="lg:w-[280px] w-full space-y-3">
+                {challenge.options.map((opt, i) => {
+                  const picked = intuitionPicked !== null;
+                  const isThis = intuitionPicked === i;
+                  const isBlunder = opt.is_blunder;
+                  const isActive = i === activeIdx && !picked;
+
+                  let borderClass = "border-surface-3 hover:border-purple-500/50";
+                  if (picked) {
+                    if (isBlunder) borderClass = "border-green-500 bg-green-900/10";
+                    else if (isThis) borderClass = "border-red-500 bg-red-900/10";
+                    else borderClass = "border-surface-3 opacity-60";
+                  } else if (isActive) {
+                    borderClass = "border-purple-500 bg-purple-900/15";
+                  }
+
+                  return (
+                    <Card
+                      key={i}
+                      className={`p-3 cursor-pointer transition-all ${borderClass} ${!picked ? "hover:scale-[1.01]" : ""}`}
+                      onClick={() => {
+                        if (picked) {
+                          setIntuitionPreviewIdx(i);
+                          return;
+                        }
+                        setIntuitionPreviewIdx(i);
+                        setIntuitionPicked(i);
+                        if (isBlunder) setIntuitionScore((s) => s + 1);
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1">
+                          <p className="text-xs text-gray-500">Move {opt.move_number}</p>
+                          <p className="text-lg font-bold font-mono">{opt.san}</p>
+                        </div>
+                        <Badge variant="default" className="text-[10px]">{opt.phase}</Badge>
+                        {picked && isBlunder && (
+                          <span className="text-xs font-semibold text-red-400">Blunder! −{opt.cp_loss}cp</span>
+                        )}
+                        {picked && isThis && !isBlunder && (
+                          <span className="text-xs text-gray-500">−{opt.cp_loss}cp</span>
+                        )}
+                      </div>
+                    </Card>
+                  );
+                })}
               </div>
-            )}
-            <div className="grid grid-cols-2 gap-4">
-              {challenge.options.map((opt, i) => {
-                const picked = intuitionPicked !== null;
-                const isThis = intuitionPicked === i;
-                const isBlunder = opt.is_blunder;
-
-                let borderClass = "border-surface-3 hover:border-purple-500/50";
-                if (picked) {
-                  if (isBlunder) borderClass = "border-green-500 bg-green-900/10";
-                  else if (isThis) borderClass = "border-red-500 bg-red-900/10";
-                  else borderClass = "border-surface-3 opacity-60";
-                } else if (i === previewIdx) {
-                  borderClass = "border-purple-500/70 bg-purple-900/10";
-                }
-
-                return (
-                  <Card
-                    key={i}
-                    className={`p-5 cursor-pointer transition-all ${borderClass} ${!picked ? "hover:scale-[1.02]" : ""}`}
-                    onClick={() => {
-                      if (picked) return;
-                      setIntuitionStep(i * 2 + 1);
-                      setIntuitionPicked(i);
-                      if (isBlunder) setIntuitionScore((s) => s + 1);
-                    }}
-                  >
-                    <div className="text-center">
-                      <p className="text-xs text-gray-500 mb-1">Move {opt.move_number}</p>
-                      <p className="text-2xl font-bold font-mono">{opt.san}</p>
-                      <Badge className="mt-2" variant="default">{opt.phase}</Badge>
-                      {picked && isBlunder && (
-                        <p className="text-xs text-red-400 mt-2">Blunder! (−{opt.cp_loss} cp)</p>
-                      )}
-                      {picked && isThis && !isBlunder && (
-                        <p className="text-xs text-gray-500 mt-2">Not a blunder (−{opt.cp_loss} cp)</p>
-                      )}
-                    </div>
-                  </Card>
-                );
-              })}
             </div>
+
             {intuitionPicked !== null && (
               <div className="flex justify-center">
                 <Button
                   onClick={() => {
                     if (isLast) {
-                      setIntuitionIdx((i) => i + 1); // triggers "complete" screen
-                      setIntuitionStep(0);
+                      setIntuitionIdx((i) => i + 1);
+                      setIntuitionPreviewIdx(0);
                     } else {
                       setIntuitionIdx((i) => i + 1);
                       setIntuitionPicked(null);
-                      setIntuitionStep(0);
+                      setIntuitionPreviewIdx(0);
                     }
                   }}
                   size="lg"
