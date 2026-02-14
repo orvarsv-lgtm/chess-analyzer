@@ -524,20 +524,10 @@ function TrainPageInner() {
     setOpeningDrillSelectedSquare(null);
     setOpeningDrillLegalMoves([]);
 
-    // Determine the "correct" move:
-    // 1. Use engine best_move_san if available for this position (from any node in currentPath)
-    // 2. Fall back to most-played move in tree
-    const bestMoveSan = openingDrillCurrentPath[0]?.best_move_san;
+    // A move is correct if it exists anywhere in the opening tree for this position.
+    // Multiple openings are viable (e.g. e4, d4, Nf3, c4) — we accept any of them.
     const matchingNode = openingDrillCurrentPath.find((n) => n.san === move.san);
-
-    // Check correctness: engine best move takes priority, then tree match
-    let isCorrect = false;
-    if (bestMoveSan) {
-      isCorrect = move.san === bestMoveSan;
-    } else {
-      // No engine data — accept any move that's in the tree
-      isCorrect = !!matchingNode;
-    }
+    const isCorrect = !!matchingNode;
 
     if (isCorrect) {
       // Correct! Apply the move
@@ -550,8 +540,7 @@ function TrainPageInner() {
       setOpeningDrillExplanation("");
       playCorrect();
 
-      // Find the matching node to traverse into its children
-      const traverseNode = matchingNode || openingDrillCurrentPath.find((n) => n.san === move.san);
+      const traverseNode = matchingNode;
 
       // Now play the opponent's reply (if any)
       if (traverseNode && traverseNode.children.length > 0) {
@@ -578,8 +567,8 @@ function TrainPageInner() {
       setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
       playIncorrect();
 
-      const correctMove = bestMoveSan || openingDrillCurrentPath[0]?.san || "?";
-      setOpeningDrillHint(`Best move was: ${correctMove}`);
+      const viableMoves = openingDrillCurrentPath.slice(0, 4).map((n) => n.san);
+      setOpeningDrillHint(`Viable moves: ${viableMoves.join(", ")}`);
       setOpeningDrillState("wrong");
 
       // Save state for "try again from here"
@@ -589,11 +578,12 @@ function TrainPageInner() {
       // Fetch AI explanation for why the move was wrong
       setOpeningDrillExplanationLoading(true);
       setOpeningDrillExplanation("");
+      const bestMove = openingDrillCurrentPath[0]?.best_move_san || openingDrillCurrentPath[0]?.san || "?";
       explanationsAPI
         .explainMove({
           fen: openingDrillGame.fen(),
           san: move.san,
-          best_move_san: correctMove,
+          best_move_san: bestMove,
           phase: "opening",
           move_quality: "Mistake",
           move_number: Math.floor(openingDrillMoves.length / 2) + 1,
@@ -1909,7 +1899,7 @@ function TrainPageInner() {
                     >
                       <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-red-900/90 max-w-[90%]">
                         <XCircle className="h-10 w-10 text-red-400" />
-                        <p className="text-lg font-bold text-red-300">Not the best move</p>
+                        <p className="text-lg font-bold text-red-300">Not in your repertoire</p>
                         {openingDrillHint && (
                           <p className="text-sm text-red-400/80 font-mono">{openingDrillHint}</p>
                         )}
