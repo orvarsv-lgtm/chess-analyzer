@@ -606,37 +606,24 @@ function TrainPageInner() {
         }
       })
       .catch(() => {
-        // Stockfish unavailable — fall back to tree-based check
+        // Stockfish unavailable — accept any legal move (it already passed chess.js validation)
         const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
-        if (matchingNode) {
-          setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
-          playCorrect();
+        setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+        playCorrect();
 
-          if (matchingNode.children.length > 0) {
-            const reply = pickWeightedRandom(matchingNode.children);
-            setTimeout(() => {
-              openingDrillGame.move(reply.san);
-              setOpeningDrillFen(openingDrillGame.fen());
-              setOpeningDrillMoves((prev) => [...prev, reply.san]);
-              playMove();
-              if (reply.children.length === 0) setOpeningDrillState("done");
-              else { setOpeningDrillCurrentPath(reply.children); setOpeningDrillState("playing"); }
-            }, 500);
-          } else {
-            setOpeningDrillState("done");
-          }
+        if (matchingNode && matchingNode.children.length > 0) {
+          const reply = pickWeightedRandom(matchingNode.children);
+          setTimeout(() => {
+            openingDrillGame.move(reply.san);
+            setOpeningDrillFen(openingDrillGame.fen());
+            setOpeningDrillMoves((prev) => [...prev, reply.san]);
+            playMove();
+            if (reply.children.length === 0) setOpeningDrillState("done");
+            else { setOpeningDrillCurrentPath(reply.children); setOpeningDrillState("playing"); }
+          }, 500);
         } else {
-          // Undo the optimistic move
-          openingDrillGame.undo();
-          setOpeningDrillFen(openingDrillGame.fen());
-          setOpeningDrillMoves(openingDrillMoves);
-
-          setOpeningDrillScore((s) => ({ ...s, total: s.total + 1 }));
-          playIncorrect();
-          setOpeningDrillHint("Move not in your repertoire");
-          setOpeningDrillState("wrong");
-          setOpeningDrillWrongFen(fenBeforeMove);
-          setOpeningDrillWrongMoveIdx(openingDrillMoves.length);
+          // Move accepted but no tree data to continue — line ends
+          setOpeningDrillState("done");
         }
       });
 
@@ -1941,7 +1928,7 @@ function TrainPageInner() {
                     >
                       <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-xl bg-red-900/90 max-w-[90%]">
                         <XCircle className="h-10 w-10 text-red-400" />
-                        <p className="text-lg font-bold text-red-300">Not in your repertoire</p>
+                        <p className="text-lg font-bold text-red-300">Inaccurate Move</p>
                         {openingDrillHint && (
                           <p className="text-sm text-red-400/80 font-mono">{openingDrillHint}</p>
                         )}

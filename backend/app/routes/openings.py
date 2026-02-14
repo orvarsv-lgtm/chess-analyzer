@@ -507,13 +507,13 @@ class ValidateMoveResponse(BaseModel):
     eval_after: int
 
 
-def _score_to_cp(score: chess.engine.Score, turn: chess.Color) -> int:
-    """Convert engine score to centipawns from side-to-move perspective."""
-    pov = score.pov(turn)
-    if pov.is_mate():
-        m = pov.mate() or 0
+def _pov_to_cp(pov_score: chess.engine.PovScore, pov_color: chess.Color) -> int:
+    """Convert PovScore to centipawns from the given color's perspective."""
+    score = pov_score.pov(pov_color)
+    if score.is_mate():
+        m = score.mate() or 0
         return 10_000 if m > 0 else -10_000
-    return pov.score() or 0
+    return score.score() or 0
 
 
 @router.post("/validate-move", response_model=ValidateMoveResponse)
@@ -545,25 +545,24 @@ async def validate_move(
         raise HTTPException(503, "Stockfish engine unavailable")
 
     try:
-        # Evaluate position before the move
+        # Evaluate position before the move (from side-to-move perspective)
         info_before = await engine.analyse(
             board,
             chess.engine.Limit(depth=VALIDATE_DEPTH),
             info=chess.engine.INFO_SCORE | chess.engine.INFO_PV,
         )
-        eval_before = _score_to_cp(info_before["score"].relative, turn)
+        eval_before = _pov_to_cp(info_before["score"], turn)
         best_pv = info_before.get("pv", [])
         best_move_san = board.san(best_pv[0]) if best_pv else body.san
 
-        # Evaluate position after the move
+        # Evaluate position after the move (from original side-to-move perspective)
         board.push(move)
         info_after = await engine.analyse(
             board,
             chess.engine.Limit(depth=VALIDATE_DEPTH),
             info=chess.engine.INFO_SCORE,
         )
-        # eval_after is from opponent's perspective, flip sign
-        eval_after = -_score_to_cp(info_after["score"].relative, board.turn)
+        eval_after = _pov_to_cp(info_after["score"], turn)
     finally:
         await engine.quit()
 
