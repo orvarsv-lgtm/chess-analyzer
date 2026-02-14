@@ -92,6 +92,7 @@ function TrainPageInner() {
   const [intuitionPicked, setIntuitionPicked] = useState<number | null>(null);
   const [intuitionScore, setIntuitionScore] = useState(0);
   const [intuitionPreviewIdx, setIntuitionPreviewIdx] = useState(0);
+  const [intuitionPreviewPhase, setIntuitionPreviewPhase] = useState<0 | 1>(0); // 0=before move, 1=after move
 
   // ─── Opening Drill ──────────────────────────────────
   type OpeningTreeNode = { san: string; uci?: string; games: number; wins: number; draws: number; losses: number; win_rate: number; best_move_san?: string | null; eval_cp?: number | null; average_cpl?: number | null; children: OpeningTreeNode[] };
@@ -436,6 +437,7 @@ function TrainPageInner() {
     setIntuitionPicked(null);
     setIntuitionScore(0);
     setIntuitionPreviewIdx(0);
+    setIntuitionPreviewPhase(0);
     try {
       const data = await puzzlesAPI.intuitionChallenge(5);
       setIntuitionChallenges(data);
@@ -454,16 +456,26 @@ function TrainPageInner() {
     function handleKey(e: KeyboardEvent) {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
+        if (intuitionPreviewPhase === 1) {
+          setIntuitionPreviewPhase(0);
+          return;
+        }
         setIntuitionPreviewIdx((i) => Math.max(0, i - 1));
+        setIntuitionPreviewPhase(1);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
+        if (intuitionPreviewPhase === 0) {
+          setIntuitionPreviewPhase(1);
+          return;
+        }
         setIntuitionPreviewIdx((i) => Math.min(maxIdx, i + 1));
+        setIntuitionPreviewPhase(0);
       }
     }
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [view, intuitionChallenges, intuitionIdx]);
+  }, [view, intuitionChallenges, intuitionIdx, intuitionPreviewPhase]);
 
   // ─── Opening Drill functions ─────────────────────────
 
@@ -1781,7 +1793,7 @@ function TrainPageInner() {
     const previewOption = challenge?.options[previewIdx];
 
     let previewFen = previewOption?.fen_before ?? challenge?.options[0]?.fen_before;
-    if (previewFen && previewOption?.san) {
+    if (intuitionPreviewPhase === 1 && previewFen && previewOption?.san) {
       try {
         const previewChess = new Chess(previewFen);
         previewChess.move(previewOption.san);
@@ -1856,25 +1868,40 @@ function TrainPageInner() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setIntuitionPreviewIdx((i) => Math.max(0, i - 1))}
-                      disabled={previewIdx <= 0}
+                      onClick={() => {
+                        if (intuitionPreviewPhase === 1) {
+                          setIntuitionPreviewPhase(0);
+                        } else {
+                          setIntuitionPreviewIdx((i) => Math.max(0, i - 1));
+                          setIntuitionPreviewPhase(1);
+                        }
+                      }}
+                      disabled={previewIdx <= 0 && intuitionPreviewPhase === 0}
                     >
                       Previous
                     </Button>
                     <p className="text-xs text-gray-400 text-center min-w-[180px]">
                       Preview {previewIdx + 1}/{challenge.options.length}: {previewOption?.san ?? "-"}
+                      {" "}({intuitionPreviewPhase === 0 ? "before" : "after"})
                     </p>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setIntuitionPreviewIdx((i) => Math.min(previewMaxIdx, i + 1))}
-                      disabled={previewIdx >= previewMaxIdx}
+                      onClick={() => {
+                        if (intuitionPreviewPhase === 0) {
+                          setIntuitionPreviewPhase(1);
+                        } else {
+                          setIntuitionPreviewIdx((i) => Math.min(previewMaxIdx, i + 1));
+                          setIntuitionPreviewPhase(0);
+                        }
+                      }}
+                      disabled={previewIdx >= previewMaxIdx && intuitionPreviewPhase === 1}
                     >
                       Next
                     </Button>
                   </div>
                   <p className="text-xs text-gray-500 text-center mt-2">
-                    Use ← → arrow keys or buttons to preview moves
+                    Use ← → arrow keys: one press = one side's move
                   </p>
                 </div>
               </div>
@@ -1899,6 +1926,7 @@ function TrainPageInner() {
                     onClick={() => {
                       if (picked) return;
                       setIntuitionPreviewIdx(i);
+                      setIntuitionPreviewPhase(1);
                       setIntuitionPicked(i);
                       if (isBlunder) setIntuitionScore((s) => s + 1);
                     }}
@@ -1925,10 +1953,12 @@ function TrainPageInner() {
                     if (isLast) {
                       setIntuitionIdx((i) => i + 1); // triggers "complete" screen
                       setIntuitionPreviewIdx(0);
+                      setIntuitionPreviewPhase(0);
                     } else {
                       setIntuitionIdx((i) => i + 1);
                       setIntuitionPicked(null);
                       setIntuitionPreviewIdx(0);
+                      setIntuitionPreviewPhase(0);
                     }
                   }}
                   size="lg"
@@ -2001,39 +2031,39 @@ function TrainPageInner() {
                   customDarkSquareStyle={{ backgroundColor: "#779952" }}
                   customLightSquareStyle={{ backgroundColor: "#edeed1" }}
                 />
-
-                {/* Wrong-move hint: non-blocking, shows below board area */}
-                {openingDrillState === "wrong" && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="absolute bottom-0 left-0 right-0 bg-red-900/95 backdrop-blur-sm rounded-b-lg px-4 py-3 space-y-1"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-red-300 flex items-center gap-2">
-                        <XCircle className="h-4 w-4" /> Find the best move: play {openingDrillBestMove}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setOpeningDrillShowExplanation((v) => !v)}
-                        className="text-xs font-medium text-red-200 hover:text-white transition-colors"
-                      >
-                        {openingDrillShowExplanation ? "Hide AI explanation" : "Show AI explanation"}
-                      </button>
-                    </div>
-                    {openingDrillShowExplanation && openingDrillExplanationLoading && (
-                      <p className="text-xs text-red-400/60 flex items-center gap-1">
-                        <Spinner className="h-3 w-3" /> Loading explanation...
-                      </p>
-                    )}
-                    {openingDrillShowExplanation && openingDrillExplanation && (
-                      <p className="text-xs text-gray-300 leading-relaxed">
-                        {openingDrillExplanation}
-                      </p>
-                    )}
-                  </motion.div>
-                )}
               </div>
+
+              {/* Wrong-move hint below board */}
+              {openingDrillState === "wrong" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-3 bg-red-900/95 backdrop-blur-sm rounded-lg px-4 py-3 space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-red-300 flex items-center gap-2">
+                      <XCircle className="h-4 w-4" /> Find the best move: play {openingDrillBestMove}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setOpeningDrillShowExplanation((v) => !v)}
+                      className="text-xs font-medium text-red-200 hover:text-white transition-colors"
+                    >
+                      {openingDrillShowExplanation ? "Hide AI explanation" : "Show AI explanation"}
+                    </button>
+                  </div>
+                  {openingDrillShowExplanation && openingDrillExplanationLoading && (
+                    <p className="text-xs text-red-400/60 flex items-center gap-1">
+                      <Spinner className="h-3 w-3" /> Loading explanation...
+                    </p>
+                  )}
+                  {openingDrillShowExplanation && openingDrillExplanation && (
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      {openingDrillExplanation}
+                    </p>
+                  )}
+                </motion.div>
+              )}
 
               {/* Move list */}
               <div className="mt-4 flex flex-wrap gap-1 items-center justify-center">
