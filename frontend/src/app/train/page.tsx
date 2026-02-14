@@ -536,16 +536,50 @@ function TrainPageInner() {
         playMove();
 
         if (reply.children.length === 0) {
-          // End of tree line — auto-reset to a new line
-          openingDrillAutoReset();
+          // Tree line ended — check how deep we are
+          const ply = openingDrillGame.history().length;
+          if (ply >= 20) {
+            openingDrillAutoReset();
+          } else {
+            // Still in the opening — keep going with Stockfish-only validation
+            setOpeningDrillCurrentPath([]);
+            setOpeningDrillState("playing");
+          }
         } else {
           setOpeningDrillCurrentPath(reply.children);
           setOpeningDrillState("playing");
         }
       }, 500);
     } else {
-      // No more tree data — auto-reset to a new line
-      openingDrillAutoReset();
+      // No tree data for continuation — ask Stockfish for opponent reply
+      const ply = openingDrillGame.history().length;
+      if (ply >= 20) {
+        openingDrillAutoReset();
+      } else {
+        // Fetch opponent's best move from Stockfish
+        const currentFen = openingDrillGame.fen();
+        setOpeningDrillState("validating");
+        openingsAPI
+          .bestMove(currentFen)
+          .then((result) => {
+            try {
+              openingDrillGame.move(result.best_move_san);
+              setOpeningDrillFen(openingDrillGame.fen());
+              setOpeningDrillMoves((prev) => [...prev, result.best_move_san]);
+              playMove();
+            } catch {
+              // If the move fails somehow, auto-reset
+              openingDrillAutoReset();
+              return;
+            }
+            setOpeningDrillCurrentPath([]);
+            setOpeningDrillState("playing");
+          })
+          .catch(() => {
+            // Stockfish unavailable — auto-reset
+            openingDrillAutoReset();
+          });
+      }
     }
   }
 
@@ -566,13 +600,65 @@ function TrainPageInner() {
     // If in "wrong" state, the user is retrying — only accept the best move
     if (openingDrillState === "wrong") {
       if (openingDrillBestMove && moveSan === openingDrillBestMove) {
-        // They found the right move!
+        // They found the right move — continue without adding to score (already counted as wrong)
         openingDrillGame.move(moveSan);
         setOpeningDrillFen(openingDrillGame.fen());
         setOpeningDrillMoves((prev) => [...prev, moveSan]);
+        setOpeningDrillHint("");
+        setOpeningDrillExplanation("");
+        setOpeningDrillBestMove("");
+        playCorrect();
+
         // Find matching tree node to continue
         const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
-        openingDrillAcceptAndContinue(moveSan, matchingNode);
+        if (matchingNode && matchingNode.children.length > 0) {
+          const reply = pickWeightedRandom(matchingNode.children);
+          setTimeout(() => {
+            openingDrillGame.move(reply.san);
+            setOpeningDrillFen(openingDrillGame.fen());
+            setOpeningDrillMoves((prev) => [...prev, reply.san]);
+            playMove();
+            if (reply.children.length === 0) {
+              const ply = openingDrillGame.history().length;
+              if (ply >= 20) {
+                openingDrillAutoReset();
+              } else {
+                setOpeningDrillCurrentPath([]);
+                setOpeningDrillState("playing");
+              }
+            } else {
+              setOpeningDrillCurrentPath(reply.children);
+              setOpeningDrillState("playing");
+            }
+          }, 500);
+        } else {
+          const ply = openingDrillGame.history().length;
+          if (ply >= 20) {
+            openingDrillAutoReset();
+          } else {
+            // No tree — fetch opponent reply from Stockfish
+            const currentFen = openingDrillGame.fen();
+            setOpeningDrillState("validating");
+            openingsAPI
+              .bestMove(currentFen)
+              .then((result) => {
+                try {
+                  openingDrillGame.move(result.best_move_san);
+                  setOpeningDrillFen(openingDrillGame.fen());
+                  setOpeningDrillMoves((prev) => [...prev, result.best_move_san]);
+                  playMove();
+                } catch {
+                  openingDrillAutoReset();
+                  return;
+                }
+                setOpeningDrillCurrentPath([]);
+                setOpeningDrillState("playing");
+              })
+              .catch(() => {
+                openingDrillAutoReset();
+              });
+          }
+        }
         return true;
       } else {
         // Still wrong — shake or ignore

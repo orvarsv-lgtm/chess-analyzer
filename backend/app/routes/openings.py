@@ -589,3 +589,45 @@ async def validate_move(
         eval_before=eval_before,
         eval_after=eval_after,
     )
+
+
+class BestMoveRequest(BaseModel):
+    fen: str
+
+
+class BestMoveResponse(BaseModel):
+    best_move_san: str
+
+
+@router.post("/best-move", response_model=BestMoveResponse)
+async def best_move(
+    body: BestMoveRequest,
+    user: User = Depends(require_user),
+):
+    """Return the engine's best move for a given FEN (used for opponent replies in drill)."""
+    settings = get_settings()
+
+    try:
+        board = chess.Board(body.fen)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid FEN")
+
+    try:
+        transport, engine = await chess.engine.popen_uci(settings.stockfish_path)
+    except Exception:
+        raise HTTPException(503, "Stockfish engine unavailable")
+
+    try:
+        info = await engine.analyse(
+            board,
+            chess.engine.Limit(depth=VALIDATE_DEPTH),
+            info=chess.engine.INFO_PV,
+        )
+        pv = info.get("pv", [])
+        if not pv:
+            raise HTTPException(500, "Engine returned no move")
+        san = board.san(pv[0])
+    finally:
+        await engine.quit()
+
+    return BestMoveResponse(best_move_san=san)

@@ -1076,6 +1076,13 @@ export const openingsAPI = {
       body: JSON.stringify({ fen, san }),
     });
   },
+
+  bestMove(fen: string): Promise<{ best_move_san: string }> {
+    return fetchAPI(`/openings/best-move`, {
+      method: "POST",
+      body: JSON.stringify({ fen }),
+    });
+  },
 };
 
 // ─── Cross-Game Patterns ────────────────────────────────
