@@ -160,17 +160,6 @@ class ClaimMoveIn(BaseModel):
     accuracy: Optional[float] = None
     time_remaining: Optional[float] = None
     blunder_subtype: Optional[str] = None
-    puzzle_key: str
-    fen: str
-    side_to_move: str
-    best_move_san: str
-    best_move_uci: Optional[str] = None
-    played_move_san: str
-    eval_loss_cp: int
-    phase: str
-    puzzle_type: str
-    move_number: int
-    themes: list[str] = []
 
 
 class ClaimGameIn(BaseModel):
