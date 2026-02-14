@@ -867,9 +867,9 @@ def detect_puzzle_tactics(
         mov_val = PIECE_VALUES_MAP.get(moving_piece.piece_type, 0) if moving_piece else 0
         if cap_val > mov_val:
             tags.append("winning_capture")
-        if _is_sacrifice(board, move):
+        if _is_sacrifice(board, move, "white" if board.turn == chess.WHITE else "black"):
             tags.append("sacrifice")
-    elif _is_sacrifice(board, move):
+    elif _is_sacrifice(board, move, "white" if board.turn == chess.WHITE else "black"):
         tags.append("sacrifice")
 
     # ── Check patterns ──
