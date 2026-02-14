@@ -527,7 +527,43 @@ function TrainPageInner() {
     const fenBeforeMove = openingDrillGame.fen();
     const moveSan = move.san;
 
-    // Lock the board while Stockfish validates
+    // ── 1. Check if the move exists in the opening repertoire tree ──
+    const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
+
+    if (matchingNode) {
+      // Move is in the repertoire — accept it immediately (no Stockfish needed)
+      openingDrillGame.move(moveSan);
+      setOpeningDrillFen(openingDrillGame.fen());
+      setOpeningDrillMoves((prev) => [...prev, moveSan]);
+      setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+      setOpeningDrillHint("");
+      setOpeningDrillExplanation("");
+      playCorrect();
+
+      // Opponent replies from the tree
+      if (matchingNode.children.length > 0) {
+        const reply = pickWeightedRandom(matchingNode.children);
+        setTimeout(() => {
+          openingDrillGame.move(reply.san);
+          setOpeningDrillFen(openingDrillGame.fen());
+          setOpeningDrillMoves((prev) => [...prev, reply.san]);
+          playMove();
+
+          if (reply.children.length === 0) {
+            setOpeningDrillState("done");
+          } else {
+            setOpeningDrillCurrentPath(reply.children);
+            setOpeningDrillState("playing");
+          }
+        }, 500);
+      } else {
+        // End of tree line
+        setOpeningDrillState("done");
+      }
+      return true;
+    }
+
+    // ── 2. Move NOT in tree — fall back to Stockfish validation ──
     setOpeningDrillState("validating");
     // Show the move on the board optimistically
     openingDrillGame.move(moveSan);
@@ -535,39 +571,17 @@ function TrainPageInner() {
     const newMoves = [...openingDrillMoves, moveSan];
     setOpeningDrillMoves(newMoves);
 
-    // Ask Stockfish: is this move ≤50 CPL?
     openingsAPI
       .validateMove(fenBeforeMove, moveSan)
       .then((result) => {
-        const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
-
         if (result.viable) {
-          // Move is good (≤50 cp loss) — accept it
+          // Move is good (≤50 cp loss) — accept it even though it's not in our tree
           setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
           setOpeningDrillHint("");
           setOpeningDrillExplanation("");
           playCorrect();
-
-          // Traverse into matching tree node if it exists, otherwise line ends
-          if (matchingNode && matchingNode.children.length > 0) {
-            const reply = pickWeightedRandom(matchingNode.children);
-            setTimeout(() => {
-              openingDrillGame.move(reply.san);
-              setOpeningDrillFen(openingDrillGame.fen());
-              setOpeningDrillMoves((prev) => [...prev, reply.san]);
-              playMove();
-
-              if (reply.children.length === 0) {
-                setOpeningDrillState("done");
-              } else {
-                setOpeningDrillCurrentPath(reply.children);
-                setOpeningDrillState("playing");
-              }
-            }, 500);
-          } else {
-            // Move was viable but not in our tree — line ends
-            setOpeningDrillState("done");
-          }
+          // Not in the tree so we can't continue — line ends
+          setOpeningDrillState("done");
         } else {
           // Move loses too much (>50 cp) — wrong
           // Undo the optimistic move
@@ -606,25 +620,10 @@ function TrainPageInner() {
         }
       })
       .catch(() => {
-        // Stockfish unavailable — accept any legal move (it already passed chess.js validation)
-        const matchingNode = openingDrillCurrentPath.find((n) => n.san === moveSan);
+        // Stockfish unavailable — accept any legal move
         setOpeningDrillScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
         playCorrect();
-
-        if (matchingNode && matchingNode.children.length > 0) {
-          const reply = pickWeightedRandom(matchingNode.children);
-          setTimeout(() => {
-            openingDrillGame.move(reply.san);
-            setOpeningDrillFen(openingDrillGame.fen());
-            setOpeningDrillMoves((prev) => [...prev, reply.san]);
-            playMove();
-            if (reply.children.length === 0) setOpeningDrillState("done");
-            else { setOpeningDrillCurrentPath(reply.children); setOpeningDrillState("playing"); }
-          }, 500);
-        } else {
-          // Move accepted but no tree data to continue — line ends
-          setOpeningDrillState("done");
-        }
+        setOpeningDrillState("done");
       });
 
     return true;
